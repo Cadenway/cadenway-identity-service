@@ -2,14 +2,14 @@
 
 waypoint-identity-service owns who the user is and how they sign in. NestJS, its own PostgreSQL database (one database and one user in the shared PostgreSQL of the VPS), events over NATS JetStream through `@waypoint/nest-messaging`, internal REST for the API gateway. Local port 3010.
 
-| | |
-| --- | --- |
-| Data | Users, hashed passwords, MFA factors (authenticator app, security keys, recovery codes), linked accounts (Google, GitHub, Microsoft, GitLab), SAML SSO connections per organization, sessions, personal API tokens, one-time codes and links, profile and preferences (theme, language, density, personal status). |
-| API | Sign-in, sign-up, MFA, one-time codes, password reset, sessions (list, revoke), API tokens, profile, preferences. Issues the tokens the gateways verify. |
-| Emits | `user.signed-up`, `user.email-verified`, `user.status-changed`, `session.revoked`, `api-token.created`, `api-token.revoked` |
-| Listens to | `member.removed (closes the user's sessions in that organization)` |
-| External | OAuth providers, customers' SAML identity providers, WebAuthn for security keys. |
-| Phase | First version |
+|            |                                                                                                                                                                                                                                                                                                                    |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Data       | Users, hashed passwords, MFA factors (authenticator app, security keys, recovery codes), linked accounts (Google, GitHub, Microsoft, GitLab), SAML SSO connections per organization, sessions, personal API tokens, one-time codes and links, profile and preferences (theme, language, density, personal status). |
+| API        | Sign-in, sign-up, MFA, one-time codes, password reset, sessions (list, revoke), API tokens, profile, preferences. Issues the tokens the gateways verify.                                                                                                                                                           |
+| Emits      | `user.signed-up`, `user.email-verified`, `user.status-changed`, `session.revoked`, `api-token.created`, `api-token.revoked`                                                                                                                                                                                        |
+| Listens to | `member.removed (closes the user's sessions in that organization)`                                                                                                                                                                                                                                                 |
+| External   | OAuth providers, customers' SAML identity providers, WebAuthn for security keys.                                                                                                                                                                                                                                   |
+| Phase      | First version                                                                                                                                                                                                                                                                                                      |
 
 Open decision: build this service or rely on an existing identity provider (Keycloak, Zitadel, Ory). Until it is settled, keep the identity provider behind one port so the choice stays reversible. At start-up this service also carries the organizations and members module, extracted later into waypoint-organization-service.
 

@@ -22,14 +22,14 @@ The structure and workflows below describe the bootstrap target. Check the check
 
 waypoint-identity-service owns who the user is and how they sign in. NestJS, its own PostgreSQL database (one database and one user in the shared PostgreSQL of the VPS), events over NATS JetStream through `@waypoint/nest-messaging`, internal REST for the API gateway. Local port 3010.
 
-| | |
-| --- | --- |
-| Data | Users, hashed passwords, MFA factors (authenticator app, security keys, recovery codes), linked accounts (Google, GitHub, Microsoft, GitLab), SAML SSO connections per organization, sessions, personal API tokens, one-time codes and links, profile and preferences (theme, language, density, personal status). |
-| API | Sign-in, sign-up, MFA, one-time codes, password reset, sessions (list, revoke), API tokens, profile, preferences. Issues the tokens the gateways verify. |
-| Emits | `user.signed-up`, `user.email-verified`, `user.status-changed`, `session.revoked`, `api-token.created`, `api-token.revoked` |
-| Listens to | `member.removed` (closes the user's sessions in that organization) |
-| External | OAuth providers, customers' SAML identity providers, WebAuthn for security keys. |
-| Phase | First version |
+|            |                                                                                                                                                                                                                                                                                                                    |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Data       | Users, hashed passwords, MFA factors (authenticator app, security keys, recovery codes), linked accounts (Google, GitHub, Microsoft, GitLab), SAML SSO connections per organization, sessions, personal API tokens, one-time codes and links, profile and preferences (theme, language, density, personal status). |
+| API        | Sign-in, sign-up, MFA, one-time codes, password reset, sessions (list, revoke), API tokens, profile, preferences. Issues the tokens the gateways verify.                                                                                                                                                           |
+| Emits      | `user.signed-up`, `user.email-verified`, `user.status-changed`, `session.revoked`, `api-token.created`, `api-token.revoked`                                                                                                                                                                                        |
+| Listens to | `member.removed` (closes the user's sessions in that organization)                                                                                                                                                                                                                                                 |
+| External   | OAuth providers, customers' SAML identity providers, WebAuthn for security keys.                                                                                                                                                                                                                                   |
+| Phase      | First version                                                                                                                                                                                                                                                                                                      |
 
 Open decision: build this service or rely on an existing identity provider (Keycloak, Zitadel, Ory). Until it is settled, keep the identity provider behind one port so the choice stays reversible. At start-up this service also carries the organizations and members module, extracted later into waypoint-organization-service.
 
@@ -71,21 +71,20 @@ repository and nothing is inherited.
 - The parts shared with the other repositories are duplicated on purpose; a change to them is repeated
   in each repository through its own pull request.
 
-
 ## Commands and quality gates
 
 The scripts below are this repository's contract. While the repository is being bootstrapped,
 create them with these exact names; afterwards, use them and never an ad-hoc equivalent. Run the
 narrowest check that covers the change first, then widen:
 
-| Changed | Minimum check |
-| --- | --- |
-| Domain or use case code | `pnpm test -- <module>`, then `pnpm test:coverage` |
-| Persistence, events, migrations | `pnpm test:integration -- <module>` |
-| Routes | `pnpm test -- <module>/api` and the contract tests |
-| Any source | `pnpm format:check`, `pnpm lint`, `pnpm typecheck` |
-| Build or runtime configuration | `pnpm build`, `docker compose -f compose.dev.yaml config -q` |
-| Docs or agent instructions only | Scoped formatting and link review |
+| Changed                         | Minimum check                                                |
+| ------------------------------- | ------------------------------------------------------------ |
+| Domain or use case code         | `pnpm test -- <module>`, then `pnpm test:coverage`           |
+| Persistence, events, migrations | `pnpm test:integration -- <module>`                          |
+| Routes                          | `pnpm test -- <module>/api` and the contract tests           |
+| Any source                      | `pnpm format:check`, `pnpm lint`, `pnpm typecheck`           |
+| Build or runtime configuration  | `pnpm build`, `docker compose -f compose.dev.yaml config -q` |
+| Docs or agent instructions only | Scoped formatting and link review                            |
 
 Report the commands you actually ran and their results; a check you did not run is reported as not
 run.
