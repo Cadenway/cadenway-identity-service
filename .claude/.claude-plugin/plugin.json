@@ -1,0 +1,8 @@
+{
+  "name": "waypoint-identity-service",
+  "version": "0.1.0",
+  "description": "waypoint-identity-service tooling: 16 wp-identity-* agents (module, domain, use case, endpoint, event, persistence, migration, test and deployment builders plus read-only architecture, contract, security, observability and performance reviewers for the identity service, plus a .github maintainer), 17 /wp-* commands, 13 path-scoped rules, 18 skills, and the guard, git-guard and format hooks. The plugin root is this .claude/ folder; the hooks only act inside a waypoint-identity-service checkout.",
+  "author": {
+    "name": "Valentin FORTIN"
+  }
+}

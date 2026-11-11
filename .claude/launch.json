@@ -1,0 +1,13 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "waypoint-identity-service",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "start:dev"
+      ],
+      "port": 3010
+    }
+  ]
+}
