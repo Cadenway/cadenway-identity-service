@@ -1,6 +1,6 @@
 {
   "name": "cadenway-identity-service",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Cadenway identity service: accounts, sign-in, MFA, SSO, sessions and API tokens.",
   "private": true,
   "license": "UNLICENSED",
