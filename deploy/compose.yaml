@@ -1,5 +1,6 @@
-# Definition of identity-service for Docker Compose. CI copies this file into
-# cadenway-ops/services/identity-service.yaml on each release: keep it self-contained.
+# Definition of identity-service for Docker Compose; keep it self-contained.
+# On each release the deploy workflow checks it and copies it into cadenway-ops, as
+# environments/<env>/services/identity-service.yaml for the environment it deploys to.
 #
 # Internal service: no Traefik label, no published port. Secret values (the database URL carries a
 # password) are referenced by name; they live in cadenway-ops.
