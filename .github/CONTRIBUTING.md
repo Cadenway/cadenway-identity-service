@@ -73,7 +73,7 @@ published `@waypoint/*` packages.
 pnpm format:check
 pnpm lint
 pnpm typecheck
-pnpm test -- src/modules/<module>      # targeted
+pnpm test src/modules/<module>      # targeted
 pnpm test:integration                    # PostgreSQL and NATS in Docker
 pnpm test:coverage
 pnpm build

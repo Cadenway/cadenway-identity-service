@@ -45,9 +45,9 @@ narrowest check that covers the change first, then widen:
 
 | Changed                         | Minimum check                                                |
 | ------------------------------- | ------------------------------------------------------------ |
-| Domain or use case code         | `pnpm test -- <module>`, then `pnpm test:coverage`           |
-| Persistence, events, migrations | `pnpm test:integration -- <module>`                          |
-| Routes                          | `pnpm test -- <module>/api` and the contract tests           |
+| Domain or use case code         | `pnpm test <module>`, then `pnpm test:coverage`              |
+| Persistence, events, migrations | `pnpm test:integration <module>`                             |
+| Routes                          | `pnpm test <module>/api` and the contract tests              |
 | Any source                      | `pnpm format:check`, `pnpm lint`, `pnpm typecheck`           |
 | Build or runtime configuration  | `pnpm build`, `docker compose -f compose.dev.yaml config -q` |
 | Docs or agent instructions only | Scoped formatting and link review                            |

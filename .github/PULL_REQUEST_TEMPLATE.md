@@ -20,7 +20,7 @@ Fixes: WAY-
 - [ ] `pnpm format:check`
 - [ ] `pnpm lint`
 - [ ] `pnpm typecheck`
-- [ ] `pnpm test -- src/modules/<module>`
+- [ ] `pnpm test src/modules/<module>`
 - [ ] `pnpm test:integration`
 - [ ] `pnpm test:coverage`
 - [ ] `pnpm build`

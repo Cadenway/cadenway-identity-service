@@ -58,7 +58,7 @@ Load them with the `Skill` tool when their subject comes up (if the tool is unav
 
 ## Checks
 
-- `pnpm test -- src/modules/<module>/api`
+- `pnpm test src/modules/<module>/api`
 - `pnpm test:contract` when it exists
 
 ## Report

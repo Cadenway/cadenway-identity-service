@@ -57,7 +57,7 @@ Load them with the `Skill` tool when their subject comes up (if the tool is unav
 
 ## Checks
 
-- `pnpm test -- src/modules/<module>`
+- `pnpm test src/modules/<module>`
 - `pnpm test:integration` (NATS and PostgreSQL from @waypoint/nest-testing)
 
 ## Report

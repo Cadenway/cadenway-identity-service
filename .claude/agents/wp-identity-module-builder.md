@@ -64,7 +64,7 @@ Load them with the `Skill` tool when their subject comes up (if the tool is unav
 
 - `pnpm lint`
 - `pnpm typecheck`
-- `pnpm test -- src/modules/<module>`
+- `pnpm test src/modules/<module>`
 
 ## Report
 
