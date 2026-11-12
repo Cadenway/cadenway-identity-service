@@ -8,8 +8,9 @@ paths:
 
 # Deployment files
 
-- `deploy/compose.yaml` is this service's definition for Docker Compose; CI copies it into
-  `cadenway-ops/services/identity-service.yaml` on each release. Keep it self-contained.
+- `deploy/compose.yaml` is this service's definition for Docker Compose; on each release the deploy
+  workflow checks it and copies it into cadenway-ops, as
+  `environments/<env>/services/identity-service.yaml`. Keep it self-contained.
 - The service is on the `internal` network only: no Traefik label, no published port.
 - Every variable is listed in `.env.example` with a working local value; secret values never appear
   in this repository.
