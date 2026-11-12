@@ -1,6 +1,6 @@
-# waypoint-identity-service documentation
+# cadenway-identity-service documentation
 
-Planned role: waypoint-identity-service owns who the user is and how they sign in. NestJS, its own PostgreSQL database (one database and one user in the shared PostgreSQL of the VPS), events over NATS JetStream through `@waypoint/nest-messaging`, internal REST for the API gateway. Local port 3010.
+Planned role: cadenway-identity-service owns who the user is and how they sign in. NestJS, its own PostgreSQL database (one database and one user in the shared PostgreSQL of the VPS), events over NATS JetStream through `@cadenway/nest-messaging`, internal REST for the API gateway. Local port 3010.
 
 ## Current status
 

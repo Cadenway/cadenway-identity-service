@@ -1,6 +1,6 @@
-# waypoint-identity-service
+# cadenway-identity-service
 
-waypoint-identity-service owns who the user is and how they sign in. NestJS, its own PostgreSQL database (one database and one user in the shared PostgreSQL of the VPS), events over NATS JetStream through `@waypoint/nest-messaging`, internal REST for the API gateway. Local port 3010.
+cadenway-identity-service owns who the user is and how they sign in. NestJS, its own PostgreSQL database (one database and one user in the shared PostgreSQL of the VPS), events over NATS JetStream through `@cadenway/nest-messaging`, internal REST for the API gateway. Local port 3010.
 
 |            |                                                                                                                                                                                                                                                                                                                    |
 | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -11,18 +11,18 @@ waypoint-identity-service owns who the user is and how they sign in. NestJS, its
 | External   | OAuth providers, customers' SAML identity providers, WebAuthn for security keys.                                                                                                                                                                                                                                   |
 | Phase      | First version                                                                                                                                                                                                                                                                                                      |
 
-Open decision: build this service or rely on an existing identity provider (Keycloak, Zitadel, Ory). Until it is settled, keep the identity provider behind one port so the choice stays reversible. At start-up this service also carries the organizations and members module, extracted later into waypoint-organization-service.
+Open decision: build this service or rely on an existing identity provider (Keycloak, Zitadel, Ory). Until it is settled, keep the identity provider behind one port so the choice stays reversible. At start-up this service also carries the organizations and members module, extracted later into cadenway-organization-service.
 
 ## Getting started
 
 Requirements: Node.js LTS and pnpm (versions in `package.json`), and Docker.
 
-1. Clone this repository next to the other Waypoint repositories, flat, in one folder.
-2. To run it with the rest of Waypoint, start the stack from `waypoint-ops`; it builds the sibling
+1. Clone this repository next to the other Cadenway repositories, flat, in one folder.
+2. To run it with the rest of Cadenway, start the stack from `cadenway-ops`; it builds the sibling
    folders, this one included (`core` profile; `full` adds every other service):
 
    ```bash
-   cd ../waypoint-ops/compose
+   cd ../cadenway-ops/compose
    docker compose -f compose.yaml -f compose.local.yaml --profile core up -d
    ```
 

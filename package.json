@@ -1,7 +1,7 @@
 {
-  "name": "waypoint-identity-service",
+  "name": "cadenway-identity-service",
   "version": "0.0.0",
-  "description": "Waypoint identity service: accounts, sign-in, MFA, SSO, sessions and API tokens.",
+  "description": "Cadenway identity service: accounts, sign-in, MFA, SSO, sessions and API tokens.",
   "private": true,
   "license": "UNLICENSED",
   "type": "module",

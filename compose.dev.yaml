@@ -1,8 +1,8 @@
-# Dependencies of waypoint-identity-service for working on it alone: its own PostgreSQL database and
+# Dependencies of cadenway-identity-service for working on it alone: its own PostgreSQL database and
 # NATS JetStream. The service itself runs on the host with `pnpm start:dev`.
 #
 # The credentials below are local development values, matching .env.example.
-name: waypoint-identity-service-dev
+name: cadenway-identity-service-dev
 
 services:
   postgres:

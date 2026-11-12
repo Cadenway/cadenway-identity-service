@@ -3,7 +3,7 @@
   "packages": {
     ".": {
       "release-type": "node",
-      "package-name": "waypoint-identity-service",
+      "package-name": "cadenway-identity-service",
       "changelog-path": "CHANGELOG.md",
       "include-component-in-tag": false
     }

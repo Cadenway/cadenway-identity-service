@@ -2,7 +2,7 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "waypoint-identity-service",
+      "name": "cadenway-identity-service",
       "runtimeExecutable": "pnpm",
       "runtimeArgs": [
         "start:dev"

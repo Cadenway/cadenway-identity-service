@@ -10,7 +10,7 @@ export interface HealthStatus {
  * Liveness and readiness routes probed by the container healthcheck.
  *
  * Bootstrap placeholder: it answers as soon as the process listens and checks no dependency. The
- * health module of `@waypoint/nest-common` (database and broker reachable) replaces it once that
+ * health module of `@cadenway/nest-common` (database and broker reachable) replaces it once that
  * package is published.
  */
 @Controller('health')

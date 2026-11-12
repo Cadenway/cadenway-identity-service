@@ -36,16 +36,16 @@ export default defineConfig(
         'error',
         {
           paths: [
-            { name: 'nats', message: 'NATS is reached only through @waypoint/nest-messaging.' },
+            { name: 'nats', message: 'NATS is reached only through @cadenway/nest-messaging.' },
           ],
           patterns: [
             {
               group: ['@nats-io/*'],
-              message: 'NATS is reached only through @waypoint/nest-messaging.',
+              message: 'NATS is reached only through @cadenway/nest-messaging.',
             },
             {
-              regex: '\\.\\./waypoint-',
-              message: 'Never import sibling sources: use the published @waypoint/* packages.',
+              regex: '\\.\\./cadenway-',
+              message: 'Never import sibling sources: use the published @cadenway/* packages.',
             },
           ],
         },
