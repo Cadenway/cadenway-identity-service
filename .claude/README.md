@@ -1,6 +1,6 @@
-# waypoint-identity-service: Claude Code tooling
+# cadenway-identity-service: Claude Code tooling
 
-This `.claude/` folder ships the Claude Code tooling of waypoint-identity-service: **16 agents**,
+This `.claude/` folder ships the Claude Code tooling of cadenway-identity-service: **16 agents**,
 17 slash commands, 13 rules, 18 skills, 3 hooks, the project
 settings and launch configuration. The application launch requires the planned package scripts.
 
@@ -27,11 +27,11 @@ Start from [AGENTS.md](../AGENTS.md) (the rules every assistant follows) and [CL
 Start from this checkout and attach the peers you need, for example:
 
 ```powershell
-claude --add-dir ../waypoint-api-contracts ../waypoint-service-kit ../waypoint-ops
+claude --add-dir ../cadenway-api-contracts ../cadenway-service-kit ../cadenway-ops
 ```
 
-Their `.claude/agents/` are discovered too, so their `wp-*` roles become available. Peer checkouts
-are **read-only** from a waypoint-identity-service session (the guard refuses edits there): change them in their
+Their `.claude/agents/` are discovered too, so their `cw-*` roles become available. Peer checkouts
+are **read-only** from a cadenway-identity-service session (the guard refuses edits there): change them in their
 own session and pull request.
 
 ## Agents
@@ -42,44 +42,44 @@ check that writes files. No agent delegates further.
 
 | Agent | Responsibility | Model | Effort | Mode |
 | --- | --- | --- | --- | --- |
-| `wp-identity-module-explorer` | Map a module: files, invariants, flows, events, dependencies. | sonnet | medium | Read-only |
-| `wp-identity-module-builder` | Create a new module skeleton with its MODULE.md. | opus | high | Assigned writes |
-| `wp-identity-domain-builder` | Pure domain: entities, value objects, invariants, domain events. | opus | high | Assigned writes |
-| `wp-identity-usecase-builder` | Application use cases: orchestration, transactions, outbox. | sonnet | high | Assigned writes |
-| `wp-identity-endpoint-builder` | Internal REST routes from the contract. | sonnet | high | Assigned writes |
-| `wp-identity-event-builder` | Publish and consume events: outbox, idempotency, versions. | opus | high | Assigned writes |
-| `wp-identity-persistence-builder` | Repositories, mapping, queries and indexes. | sonnet | high | Assigned writes |
-| `wp-identity-migration-builder` | Expand/contract schema migrations. | sonnet | high | Assigned writes |
-| `wp-identity-test-writer` | Unit, integration and contract tests. | sonnet | high | Assigned writes |
-| `wp-identity-deploy-maintainer` | Dockerfile, deploy/compose.yaml, health checks, env. | sonnet | medium | Assigned writes |
-| `wp-identity-architecture-reviewer` | Layering, ownership, boundaries, contracts. | opus | xhigh | Read-only |
-| `wp-identity-contract-reviewer` | Code against OpenAPI and AsyncAPI. | opus | high | Read-only |
-| `wp-identity-security-auditor` | Tenant isolation, authorization, input, secrets, personal data. | opus | xhigh | Read-only |
-| `wp-identity-observability-reviewer` | Logs, traces, metrics, health. | sonnet | high | Read-only |
-| `wp-identity-performance-reviewer` | Queries, indexes, pagination, N+1. | sonnet | high | Read-only |
-| `wp-identity-github-maintainer` | Workflows, templates and community files in .github/. | sonnet | medium | Assigned writes |
+| `cw-identity-module-explorer` | Map a module: files, invariants, flows, events, dependencies. | sonnet | medium | Read-only |
+| `cw-identity-module-builder` | Create a new module skeleton with its MODULE.md. | opus | high | Assigned writes |
+| `cw-identity-domain-builder` | Pure domain: entities, value objects, invariants, domain events. | opus | high | Assigned writes |
+| `cw-identity-usecase-builder` | Application use cases: orchestration, transactions, outbox. | sonnet | high | Assigned writes |
+| `cw-identity-endpoint-builder` | Internal REST routes from the contract. | sonnet | high | Assigned writes |
+| `cw-identity-event-builder` | Publish and consume events: outbox, idempotency, versions. | opus | high | Assigned writes |
+| `cw-identity-persistence-builder` | Repositories, mapping, queries and indexes. | sonnet | high | Assigned writes |
+| `cw-identity-migration-builder` | Expand/contract schema migrations. | sonnet | high | Assigned writes |
+| `cw-identity-test-writer` | Unit, integration and contract tests. | sonnet | high | Assigned writes |
+| `cw-identity-deploy-maintainer` | Dockerfile, deploy/compose.yaml, health checks, env. | sonnet | medium | Assigned writes |
+| `cw-identity-architecture-reviewer` | Layering, ownership, boundaries, contracts. | opus | xhigh | Read-only |
+| `cw-identity-contract-reviewer` | Code against OpenAPI and AsyncAPI. | opus | high | Read-only |
+| `cw-identity-security-auditor` | Tenant isolation, authorization, input, secrets, personal data. | opus | xhigh | Read-only |
+| `cw-identity-observability-reviewer` | Logs, traces, metrics, health. | sonnet | high | Read-only |
+| `cw-identity-performance-reviewer` | Queries, indexes, pagination, N+1. | sonnet | high | Read-only |
+| `cw-identity-github-maintainer` | Workflows, templates and community files in .github/. | sonnet | medium | Assigned writes |
 
 ## Commands
 
 | Command | What it does | Runs |
 | --- | --- | --- |
-| `/wp-explore` | Map an existing module before changing it. | `wp-identity-module-explorer` |
-| `/wp-module` | Create a new module skeleton with its MODULE.md. | `wp-identity-module-builder` |
-| `/wp-domain` | Add or change a domain rule (pure TypeScript). | `wp-identity-domain-builder` |
-| `/wp-usecase` | Add a use case (command or query). | `wp-identity-usecase-builder` |
-| `/wp-endpoint` | Implement an internal route exactly as the contract defines it. | `wp-identity-endpoint-builder` |
-| `/wp-event` | Publish or consume an event through the outbox. | `wp-identity-event-builder` |
-| `/wp-persistence` | Implement a repository or a query. | `wp-identity-persistence-builder` |
-| `/wp-migrate` | Write an expand/contract migration. | `wp-identity-migration-builder` |
-| `/wp-tests` | Write unit, integration or contract tests. | `wp-identity-test-writer` |
-| `/wp-deploy` | Change the Dockerfile, deploy/compose.yaml or environment variables. | `wp-identity-deploy-maintainer` |
-| `/wp-arch-review` | Review layering, ownership and boundaries of the current change. | `wp-identity-architecture-reviewer` |
-| `/wp-contract-review` | Compare routes and events with waypoint-api-contracts. | `wp-identity-contract-reviewer` |
-| `/wp-security-review` | Audit tenant isolation, authorization and secrets. | `wp-identity-security-auditor` |
-| `/wp-observability-review` | Review logs, traces, metrics and health checks. | `wp-identity-observability-reviewer` |
-| `/wp-perf-review` | Review queries, indexes and pagination. | `wp-identity-performance-reviewer` |
-| `/wp-github` | Change workflows, templates or community files in .github/. | `wp-identity-github-maintainer` |
-| `/wp-quality` | Run the local quality gate, stopping at the first failure. | runs the commands itself |
+| `/cw-explore` | Map an existing module before changing it. | `cw-identity-module-explorer` |
+| `/cw-module` | Create a new module skeleton with its MODULE.md. | `cw-identity-module-builder` |
+| `/cw-domain` | Add or change a domain rule (pure TypeScript). | `cw-identity-domain-builder` |
+| `/cw-usecase` | Add a use case (command or query). | `cw-identity-usecase-builder` |
+| `/cw-endpoint` | Implement an internal route exactly as the contract defines it. | `cw-identity-endpoint-builder` |
+| `/cw-event` | Publish or consume an event through the outbox. | `cw-identity-event-builder` |
+| `/cw-persistence` | Implement a repository or a query. | `cw-identity-persistence-builder` |
+| `/cw-migrate` | Write an expand/contract migration. | `cw-identity-migration-builder` |
+| `/cw-tests` | Write unit, integration or contract tests. | `cw-identity-test-writer` |
+| `/cw-deploy` | Change the Dockerfile, deploy/compose.yaml or environment variables. | `cw-identity-deploy-maintainer` |
+| `/cw-arch-review` | Review layering, ownership and boundaries of the current change. | `cw-identity-architecture-reviewer` |
+| `/cw-contract-review` | Compare routes and events with cadenway-api-contracts. | `cw-identity-contract-reviewer` |
+| `/cw-security-review` | Audit tenant isolation, authorization and secrets. | `cw-identity-security-auditor` |
+| `/cw-observability-review` | Review logs, traces, metrics and health checks. | `cw-identity-observability-reviewer` |
+| `/cw-perf-review` | Review queries, indexes and pagination. | `cw-identity-performance-reviewer` |
+| `/cw-github` | Change workflows, templates or community files in .github/. | `cw-identity-github-maintainer` |
+| `/cw-quality` | Run the local quality gate, stopping at the first failure. | runs the commands itself |
 
 ## Rules
 
@@ -105,14 +105,14 @@ See [skills/](skills/) for the complete inventory, including the technology guid
 
 | Skill | Use |
 | --- | --- |
-| `wp-context` | What Waypoint is, where the mockup, the integration guide and the repository map live, the product vocabulary (spaces, lists, sprints, tasks, statuses, milestones) and the multi-repository ownership rules. |
-| `wp-identity-domain` | The data, rules, events and screens waypoint-identity-service owns, taken from the mockup, the integration guide and the repositories document. |
-| `wp-hexagonal-module-layout` | Where each kind of code goes in a module (domain, application, infrastructure, api), the naming of files and classes, and the dependency direction. |
-| `wp-outbox-and-events` | How to publish and consume events reliably with @waypoint/nest-messaging: outbox in the use case transaction, idempotent handlers, retries, dead letters, versioned names. |
-| `wp-contract-first` | The order in which a route or an event change travels: waypoint-api-contracts, then the producing service, then gateways and consumers, then the web app; and how to check the installed contract version. |
-| `wp-expand-contract-migrations` | How to change a database schema without breaking the running version: expand, dual-write, backfill, contract in a later release, and how to roll back. |
-| `wp-nest-testing` | How to write unit, integration and contract tests in a Waypoint NestJS service: Vitest, disposable PostgreSQL and NATS, mockup-based fixtures. |
-| `wp-module-md` | The canonical sections of a module MODULE.md and the changes that make updating it mandatory in the same change. |
+| `cw-context` | What Cadenway is, where the mockup, the integration guide and the repository map live, the product vocabulary (spaces, lists, sprints, tasks, statuses, milestones) and the multi-repository ownership rules. |
+| `cw-identity-domain` | The data, rules, events and screens cadenway-identity-service owns, taken from the mockup, the integration guide and the repositories document. |
+| `cw-hexagonal-module-layout` | Where each kind of code goes in a module (domain, application, infrastructure, api), the naming of files and classes, and the dependency direction. |
+| `cw-outbox-and-events` | How to publish and consume events reliably with @cadenway/nest-messaging: outbox in the use case transaction, idempotent handlers, retries, dead letters, versioned names. |
+| `cw-contract-first` | The order in which a route or an event change travels: cadenway-api-contracts, then the producing service, then gateways and consumers, then the web app; and how to check the installed contract version. |
+| `cw-expand-contract-migrations` | How to change a database schema without breaking the running version: expand, dual-write, backfill, contract in a later release, and how to roll back. |
+| `cw-nest-testing` | How to write unit, integration and contract tests in a Cadenway NestJS service: Vitest, disposable PostgreSQL and NATS, mockup-based fixtures. |
+| `cw-module-md` | The canonical sections of a module MODULE.md and the changes that make updating it mandatory in the same change. |
 
 ## Hooks
 

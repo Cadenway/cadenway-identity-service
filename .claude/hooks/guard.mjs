@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 /**
- * PreToolUse hook (waypoint-identity-service): refuse writes that are never right in this repository.
+ * PreToolUse hook (cadenway-identity-service): refuse writes that are never right in this repository.
  * Deny = exit 2 with the reason on stderr; everything else = exit 0.
  *
  * Reads `tool_input.file_path` and the written text (`content`, `new_string`, or the
  * `edits[].new_string` of a MultiEdit) and denies, in this order:
  *
- *  1. Sibling checkouts (`../waypoint-*`): read-only from a waypoint-identity-service session.
+ *  1. Sibling checkouts (`../cadenway-*`): read-only from a cadenway-identity-service session.
  *  2. Generated trees and build outputs. Edit the source and rebuild.
  *  3. Lockfiles edited by hand (`pnpm-lock.yaml`, `package-lock.json`). Use the package manager.
  *  4. Git internals (`.git/`).
@@ -15,14 +15,14 @@
  *  6. Repository-specific rules (see REPO_RULES).
  *
  * Deliberately conservative: ordinary sources, specs, docs and configuration stay writable. The hook
- * only acts inside a waypoint-identity-service checkout (marker: `.claude/.claude-plugin/plugin.json` named
- * waypoint-identity-service), so it is inert elsewhere.
+ * only acts inside a cadenway-identity-service checkout (marker: `.claude/.claude-plugin/plugin.json` named
+ * cadenway-identity-service), so it is inert elsewhere.
  */
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const REPO_NAME = 'waypoint-identity-service';
+const REPO_NAME = 'cadenway-identity-service';
 
 const GENERATED = [
   [/^(?:.*\/)?node_modules\//, 'an installed dependency'],
@@ -45,9 +45,9 @@ const TOKEN_PATTERNS = [
 
 /** Repository-specific rules: [test(rel, body) => boolean, message]. */
 const REPO_RULES = [
-  [(rel, body) => rel.startsWith('src/') && /from\s+['"]nats['"]/.test(body), 'talk to NATS only through @waypoint/nest-messaging (AGENTS.md, Boundaries).'],
+  [(rel, body) => rel.startsWith('src/') && /from\s+['"]nats['"]/.test(body), 'talk to NATS only through @cadenway/nest-messaging (AGENTS.md, Boundaries).'],
   [(rel, body) => /(^|\/)index\.ts$/.test(rel) && /^\s*export\s+\*\s+from\s/m.test(body), 'a barrel uses explicit named exports, never "export * from".'],
-  [(rel, body) => /from\s+['"](?:\.\.\/)+waypoint-/.test(body), 'never import a sibling repository\'s sources; use its published @waypoint package.'],
+  [(rel, body) => /from\s+['"](?:\.\.\/)+cadenway-/.test(body), 'never import a sibling repository\'s sources; use its published @cadenway package.'],
   [(rel, body) => /^\.github\/workflows\/.+\.ya?ml$/.test(rel) && /uses:\s*(?!\.\/|docker:\/\/)[^@\s]+@(?![0-9a-f]{40}\b)/.test(body), 'pin third-party actions to a full commit SHA, with the version in a comment.'],
   [(rel, body) => /^\.github\/workflows\/.+\.ya?ml$/.test(rel) && /pull_request_target/.test(body), 'pull_request_target runs with secrets on untrusted code; use pull_request, or ask the user.'],
 ];
@@ -64,7 +64,7 @@ function isRepoRoot(dir) {
   }
 }
 
-/** Walks upward from a path and returns the nearest waypoint-identity-service checkout root, or null. */
+/** Walks upward from a path and returns the nearest cadenway-identity-service checkout root, or null. */
 export function findRepoRoot(start) {
   let dir = path.resolve(start);
   for (;;) {
@@ -82,16 +82,16 @@ export function writtenText(input) {
   return String(input.content ?? input.new_string ?? '');
 }
 
-/** Refuses writes into a sibling Waypoint checkout. */
+/** Refuses writes into a sibling Cadenway checkout. */
 export function evaluateSibling(root, absolute) {
   const relative = path.relative(path.dirname(root), path.resolve(absolute));
   if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) return null;
   const [folder] = relative.split(/[\\/]/);
   if (folder === path.basename(root)) return null;
-  if (!/^waypoint-[a-z0-9-]+$/i.test(folder)) return null;
+  if (!/^cadenway-[a-z0-9-]+$/i.test(folder)) return null;
   return deny(
     `${relative.replace(/\\/g, '/')} belongs to the sibling checkout ${folder}, which is read-only from a ` +
-      'waypoint-identity-service session. Write the need down for its owner (its wp-* agents) and change it in its own session and pull request.',
+      'cadenway-identity-service session. Write the need down for its owner (its cw-* agents) and change it in its own session and pull request.',
   );
 }
 
