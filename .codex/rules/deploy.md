@@ -16,3 +16,4 @@ paths:
   in this repository.
 - Healthcheck on `/health/ready`; explicit memory limit; non-root user; pinned base image.
 - Local port: 3010.
+- The private `@cadenway/*` packages reach the image build through the `npmrc` build secret, mounted by the install steps only: never an `ARG`, an `ENV` or a copied file.

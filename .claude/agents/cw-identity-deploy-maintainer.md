@@ -59,7 +59,7 @@ Load them with the `Skill` tool when their subject comes up (if the tool is unav
 ## Checks
 
 - `docker compose -f compose.dev.yaml config -q`
-- `docker build .` when Docker is available
+- `docker build --secret id=npmrc,env=NPMRC .` when Docker is available
 
 ## Report
 
