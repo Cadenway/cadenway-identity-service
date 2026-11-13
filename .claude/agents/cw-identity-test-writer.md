@@ -47,6 +47,7 @@ Load them with the `Skill` tool when their subject comes up (if the tool is unav
 | --- | --- |
 | `cw-nest-testing` | always |
 | `cw-identity-domain` | to name cases after the rules |
+| `cw-jobs` | when testing a job or a scheduled send |
 
 ## Procedure
 

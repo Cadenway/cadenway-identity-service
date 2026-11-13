@@ -1,7 +1,7 @@
 # cadenway-identity-service: Claude Code tooling
 
 This `.claude/` folder ships the Claude Code tooling of cadenway-identity-service: **16 agents**,
-17 slash commands, 13 rules, 18 skills, 3 hooks, the project
+17 slash commands, 13 rules, 22 skills, 3 hooks, the project
 settings and launch configuration. The application launch requires the planned package scripts.
 
 Start from [AGENTS.md](../AGENTS.md) (the rules every assistant follows) and [CLAUDE.md](../CLAUDE.md)
@@ -113,6 +113,10 @@ See [skills/](skills/) for the complete inventory, including the technology guid
 | `cw-expand-contract-migrations` | How to change a database schema without breaking the running version: expand, dual-write, backfill, contract in a later release, and how to roll back. |
 | `cw-nest-testing` | How to write unit, integration and contract tests in a Cadenway NestJS service: Vitest, disposable PostgreSQL and NATS, mockup-based fixtures. |
 | `cw-module-md` | The canonical sections of a module MODULE.md and the changes that make updating it mandatory in the same change. |
+| `cw-database-conventions` | The PostgreSQL conventions every Cadenway service follows: table and column naming, the common columns, row-level security, enumerations, pool size and timeouts. |
+| `cw-logging-and-tracing` | How a Cadenway backend logs, traces and measures itself: the log fields, what is masked, trace propagation over HTTP and NATS, the ESM start-up flags and the metrics. |
+| `cw-jobs` | How to run durable background work with @cadenway/nest-jobs (pg-boss in the service database): the job enqueued in the use case transaction, one key per occurrence, bounded retries, the dead-letter queue. |
+| `cw-identity-security` | The security parameters cadenway-identity-service applies: sessions and tokens, argon2id and the password policy, TOTP, WebAuthn, the hardened SAML profile, lockout and code lifetimes. |
 
 ## Hooks
 

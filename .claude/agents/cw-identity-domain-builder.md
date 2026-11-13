@@ -51,6 +51,7 @@ Load them with the `Skill` tool when their subject comes up (if the tool is unav
 | --- | --- |
 | `cw-identity-domain` | always: it lists the rules this service guards |
 | `cw-hexagonal-module-layout` | when placing a new type |
+| `cw-identity-security` | when a rule concerns passwords, codes, factors, sessions or tokens |
 
 ## Procedure
 
