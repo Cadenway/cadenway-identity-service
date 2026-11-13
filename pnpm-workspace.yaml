@@ -4,3 +4,8 @@
 # esbuild ships its binary as an optional dependency, so its postinstall is not needed.
 allowBuilds:
   esbuild: false
+
+# Supply chain: a version must be at least 2 days old (2880 minutes) before pnpm resolves it, and a
+# package whose trust evidence (provenance, trusted publisher) regresses between versions is refused.
+minimumReleaseAge: 2880
+trustPolicy: no-downgrade
