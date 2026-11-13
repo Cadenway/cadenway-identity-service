@@ -1,7 +1,7 @@
 {
   "name": "cadenway-identity-service",
   "version": "0.1.0",
-  "description": "cadenway-identity-service tooling: 16 cw-identity-* agents (module, domain, use case, endpoint, event, persistence, migration, test and deployment builders plus read-only architecture, contract, security, observability and performance reviewers for the identity service, plus a .github maintainer), 17 /cw-* commands, 13 path-scoped rules, 18 skills, and the guard, git-guard and format hooks. The plugin root is this .claude/ folder; the hooks only act inside a cadenway-identity-service checkout.",
+  "description": "cadenway-identity-service tooling: 16 cw-identity-* agents (module, domain, use case, endpoint, event, persistence, migration, test and deployment builders plus read-only architecture, contract, security, observability and performance reviewers for the identity service, plus a .github maintainer), 17 /cw-* commands, 13 path-scoped rules, 22 skills, and the guard, git-guard and format hooks. The plugin root is this .claude/ folder; the hooks only act inside a cadenway-identity-service checkout.",
   "author": {
     "name": "Valentin FORTIN"
   }

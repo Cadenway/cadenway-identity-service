@@ -46,6 +46,7 @@ Load them with the `Skill` tool when their subject comes up (if the tool is unav
 | Skill | Load it when |
 | --- | --- |
 | `cw-expand-contract-migrations` | always |
+| `cw-database-conventions` | always: naming, common columns, enumerations, row-level security |
 
 ## Procedure
 

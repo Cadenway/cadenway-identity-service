@@ -24,7 +24,7 @@ Who the user is and how they sign in.
 
 ## Rules this service guards
 
-- Passwords: 12 characters minimum, mixed case, a digit and a symbol; strength scored 0 to 4.
+- Passwords: 12 characters minimum, no composition rule, refused when found in the embedded list of compromised passwords; strength scored 0 to 4. This decision overrides the mockup, whose password screens still list composition rules.
 - Lockout after repeated failures (the mockup shows 15 minutes and "3 tentatives restantes").
 - One-time codes expire (10 minutes for sign-in codes, 15 for an email change); resend is throttled (30 s and 45 s in the mockup).
 - Recovery codes are shown once and stored hashed; API tokens are shown once.
@@ -32,10 +32,21 @@ Who the user is and how they sign in.
 
 ## Notes
 
-Open decision: build this service or rely on an existing identity provider (Keycloak, Zitadel, Ory). Until it is settled, keep the identity provider behind one port so the choice stays reversible. At start-up this service also carries the organizations and members module, extracted later into cadenway-organization-service.
+Decided: this service is built in NestJS, without an existing identity provider (Keycloak, Zitadel, Ory). Its security parameters are fixed in the `cw-identity-security` skill. At start-up this service also carries the organizations and members module, extracted later into cadenway-organization-service.
 
 Everything above comes from the [repositories document](https://claude.ai/artifact/BPinmYxoF3mbK8w9BMB43N) and the
 [integration guide](https://claude.ai/artifact/CpJHVCiFfF9j3KbHQ2S1Et). If the mockup disagrees with this guide, update the guide and its source skill for both assistants.
+
+## Engineering standards
+
+These skills fix the engineering standards this service follows. They are target conventions, not proof of an implementation in this snapshot.
+
+| Skill                                                                                                                                                | What it fixes                                                                                                                                                                                                                           |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cw-database-conventions` ([Claude](../.claude/skills/cw-database-conventions/SKILL.md), [Codex](../.codex/skills/cw-database-conventions/SKILL.md)) | Plural snake_case tables, `id` from `uuidv7()`, `organization_id` first in tenant indexes, `version`, `timestamptz` dates, `text` with `CHECK` for enumerations, forced row-level security, a pool of 5 connections, timeouts per role. |
+| `cw-logging-and-tracing` ([Claude](../.claude/skills/cw-logging-and-tracing/SKILL.md), [Codex](../.codex/skills/cw-logging-and-tracing/SKILL.md))    | JSON logs with fixed fields and masking, W3C `traceparent` over HTTP and NATS, the ESM start-up flags, metrics per route and lag alerts, health and shutdown semantics.                                                                 |
+| `cw-jobs` ([Claude](../.claude/skills/cw-jobs/SKILL.md), [Codex](../.codex/skills/cw-jobs/SKILL.md))                                                 | Durable jobs on pg-boss through `@cadenway/nest-jobs`: enqueued in the use case transaction, one key per occurrence, bounded retries, a dead-letter queue.                                                                              |
+| `cw-identity-security` ([Claude](../.claude/skills/cw-identity-security/SKILL.md), [Codex](../.codex/skills/cw-identity-security/SKILL.md))          | Opaque sessions, API and internal token formats, argon2id parameters and the password policy, TOTP, WebAuthn, the hardened SAML profile, lockout and code lifetimes.                                                                    |
 
 ## Contract and delivery sequence
 

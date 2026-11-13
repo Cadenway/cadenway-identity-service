@@ -24,3 +24,25 @@ description: "How to publish and consume events reliably with @cadenway/nest-mes
 
 - Additive field: minor change in cadenway-api-contracts; consumers ignore unknown fields.
 - Any other change: a new name `.v2`, emitted alongside `.v1` until every consumer moved.
+
+## Version and order
+
+- Every event carries `version`, the version of the aggregate after the change, and `actor`
+  (`{ type: 'user' | 'automation' | 'git' | 'system', id }`).
+- Delivery is at least once and order is not guaranteed across redeliveries: a handler ignores an
+  event whose `version` it has already applied to that aggregate.
+- Never derive order from arrival time.
+
+## What the kit owns
+
+Subjects (`evt.<name>`), the `EVENTS` stream, durable pull consumers (`<service>__<handler>`),
+`Nats-Msg-Id` deduplication, the retry schedule, the copy of exhausted messages to `EVENTS_DLQ` and
+`traceparent` propagation belong to `@cadenway/nest-messaging`. They are specified in
+cadenway-service-kit (`cw-outbox-design` skill, `rules/messaging.md`); never declare a stream, a
+consumer or a subject here.
+
+## Rebuilding a consumer
+
+Outbox rows are kept 7 days. A consumer that fell further behind is rebuilt: the owning service
+re-emits the current state of its entities on `rebuild.<consumer>.<entity>`. A service that emits
+events documents that use case in MODULE.md.

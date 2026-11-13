@@ -47,6 +47,7 @@ Load them with the `Skill` tool when their subject comes up (if the tool is unav
 | --- | --- |
 | `cw-outbox-and-events` | always |
 | `cw-contract-first` | when the event is new or changes shape |
+| `cw-logging-and-tracing` | when a handler logs or continues a trace |
 
 ## Procedure
 

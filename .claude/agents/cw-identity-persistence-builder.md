@@ -47,6 +47,9 @@ Load them with the `Skill` tool when their subject comes up (if the tool is unav
 | --- | --- |
 | `cw-hexagonal-module-layout` | always |
 | `cw-expand-contract-migrations` | when a query needs a new column or index |
+| `cw-database-conventions` | always: naming, common columns, row-level security |
+| `cw-jobs` | when a query claims due rows for a job |
+| `cw-identity-security` | when storing a hash, a secret or a token |
 
 ## Procedure
 

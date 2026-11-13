@@ -23,7 +23,7 @@ Who the user is and how they sign in.
 
 ## Rules this service guards
 
-- Passwords: 12 characters minimum, mixed case, a digit and a symbol; strength scored 0 to 4.
+- Passwords: 12 characters minimum, no composition rule, refused when found in the embedded list of compromised passwords; strength scored 0 to 4. This decision overrides the mockup, whose password screens still list composition rules.
 - Lockout after repeated failures (the mockup shows 15 minutes and "3 tentatives restantes").
 - One-time codes expire (10 minutes for sign-in codes, 15 for an email change); resend is throttled (30 s and 45 s in the mockup).
 - Recovery codes are shown once and stored hashed; API tokens are shown once.
@@ -31,7 +31,7 @@ Who the user is and how they sign in.
 
 ## Notes
 
-Open decision: build this service or rely on an existing identity provider (Keycloak, Zitadel, Ory). Until it is settled, keep the identity provider behind one port so the choice stays reversible. At start-up this service also carries the organizations and members module, extracted later into cadenway-organization-service.
+Decided: this service is built in NestJS, without an existing identity provider (Keycloak, Zitadel, Ory). Its security parameters are fixed in the `cw-identity-security` skill. At start-up this service also carries the organizations and members module, extracted later into cadenway-organization-service.
 
 Everything above comes from the [repositories document](https://claude.ai/artifact/BPinmYxoF3mbK8w9BMB43N) and the
 [integration guide](https://claude.ai/artifact/CpJHVCiFfF9j3KbHQ2S1Et). When the mockup and this skill disagree, the mockup wins and
