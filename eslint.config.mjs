@@ -37,8 +37,56 @@ export default defineConfig(
         {
           paths: [
             { name: 'nats', message: 'NATS is reached only through @cadenway/nest-messaging.' },
+            // Dependencies rejected for every Cadenway backend; the message names the replacement.
+            { name: 'axios', message: 'Rejected dependency: use the native fetch.' },
+            {
+              name: '@nestjs/schedule',
+              message: 'Rejected dependency: it has no durability. Use @cadenway/nest-jobs.',
+            },
+            {
+              name: '@nestjs/throttler',
+              message: 'Rejected dependency: rate limiting belongs to the API gateway.',
+            },
+            {
+              name: 'bullmq',
+              message: 'Rejected dependency: jobs run on pg-boss through @cadenway/nest-jobs.',
+            },
+            {
+              name: 'date-fns',
+              message: 'Rejected dependency: use Temporal (temporal-polyfill).',
+            },
+            {
+              name: 'ua-parser-js',
+              message: 'Rejected dependency: bowser reads the User-Agent.',
+            },
+            {
+              name: 'octokit',
+              message: 'Rejected dependency: use the scoped @octokit/* packages.',
+            },
+            {
+              name: '@gitbeaker/rest',
+              message: 'Rejected dependency: GitLab is called with a typed fetch client.',
+            },
+            {
+              name: 'samlify',
+              message: 'Rejected dependency: SAML goes through @node-saml/node-saml.',
+            },
           ],
           patterns: [
+            {
+              group: [
+                'axios/*',
+                '@nestjs/schedule/*',
+                '@nestjs/throttler/*',
+                'bullmq/*',
+                'date-fns/*',
+                'ua-parser-js/*',
+                'octokit/*',
+                '@gitbeaker/rest/*',
+                'samlify/*',
+              ],
+              message: 'Rejected dependency: see the entry of the same package above.',
+            },
             {
               group: ['@nats-io/*'],
               message: 'NATS is reached only through @cadenway/nest-messaging.',
