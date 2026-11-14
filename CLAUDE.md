@@ -38,6 +38,7 @@ checks during bootstrap.
 pnpm format:check
 pnpm lint
 pnpm typecheck
+pnpm test:architecture
 pnpm test:coverage
 pnpm test:integration                    # PostgreSQL and NATS in Docker
 pnpm build
