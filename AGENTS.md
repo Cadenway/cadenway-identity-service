@@ -31,7 +31,7 @@ cadenway-identity-service owns who the user is and how they sign in. NestJS, its
 | External   | OAuth providers, customers' SAML identity providers, WebAuthn for security keys.                                                                                                                                                                                                                                   |
 | Phase      | First version                                                                                                                                                                                                                                                                                                      |
 
-Decided: this service is built in NestJS, without an existing identity provider (Keycloak, Zitadel, Ory). Its security parameters are fixed in the `cw-identity-security` skill. At start-up this service also carries the organizations and members module, extracted later into cadenway-organization-service.
+Decided: this service is built in NestJS, without an existing identity provider (Keycloak, Zitadel, Ory). Its security parameters are fixed in the `cw-identity-security` skill. Organizations and members belong to cadenway-organization-service from the start.
 
 ## Language
 
@@ -56,7 +56,7 @@ See the [Cadenway NestJS architecture reference](https://github.com/Cadenway/cad
 - No access to another service's database or internal code; cross-service needs use `@cadenway/contracts` routes or events.
 - NATS only through `@cadenway/nest-messaging`; config, logs, errors, health and auth guards through `@cadenway/nest-common`.
 - Routes and event payloads come from the installed `@cadenway/contracts`; never redefine them locally.
-- The service is internal: no Traefik label, no public route; the API gateway is its only HTTP caller.
+- The service is internal: no Traefik label, no public route. Its HTTP callers are the API gateway and the realtime gateway (ticket redemption).
 - No sibling sources imported, no `file:` or `link:` dependency on a sibling.
 
 ## GitHub files (`.github/`)
