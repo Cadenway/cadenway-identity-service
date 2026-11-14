@@ -32,7 +32,9 @@ Who the user is and how they sign in.
 
 ## Notes
 
-Decided: this service is built in NestJS, without an existing identity provider (Keycloak, Zitadel, Ory). Its security parameters are fixed in the `cw-identity-security` skill. At start-up this service also carries the organizations and members module, extracted later into cadenway-organization-service.
+Decided: this service is built in NestJS, without an existing identity provider (Keycloak, Zitadel, Ory). Its security parameters are fixed in the `cw-identity-security` skill. Organizations and members belong to cadenway-organization-service from the start.
+
+Decided: this service keeps a projection of memberships, fed by the `member.*` events, so that introspection returns the user, the organization and the member role. The authentication policies of an organization (required MFA, session lifetime, allowed sign-in methods) and its SAML connection are stored here, where they are enforced. The realtime gateway redeems its single-use connection ticket here. Two events are to be added in cadenway-api-contracts before they are coded: `user.profile-updated` and `user.deleted`. The events that trigger the security emails other than the verification code are not decided yet.
 
 Everything above comes from the [repositories document](https://claude.ai/artifact/BPinmYxoF3mbK8w9BMB43N) and the
 [integration guide](https://claude.ai/artifact/CpJHVCiFfF9j3KbHQ2S1Et). If the mockup disagrees with this guide, update the guide and its source skill for both assistants.

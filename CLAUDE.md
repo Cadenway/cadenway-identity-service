@@ -25,7 +25,7 @@
 - No access to another service's database or internal code; cross-service needs use `@cadenway/contracts` routes or events.
 - NATS only through `@cadenway/nest-messaging`; config, logs, errors, health and auth guards through `@cadenway/nest-common`.
 - Routes and event payloads come from the installed `@cadenway/contracts`; never redefine them locally.
-- The service is internal: no Traefik label, no public route; the API gateway is its only HTTP caller.
+- The service is internal: no Traefik label, no public route. Its HTTP callers are the API gateway and the realtime gateway (ticket redemption).
 - No sibling sources imported, no `file:` or `link:` dependency on a sibling.
 
 ## Target quality gate

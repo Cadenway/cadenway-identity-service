@@ -7,10 +7,17 @@ description: "Where each kind of code goes in a module (domain, application, inf
 
 ```text
 src/modules/<module>/
-├─ domain/            ← entities, value objects, domain errors, domain events (pure)
-├─ application/       ← use cases (commands, queries) and the ports they need
-├─ infrastructure/    ← repositories, ORM mapping, external clients, outbox wiring
-├─ api/               ← controllers, DTO mapping, event handlers
+├─ domain/                 ← entities, value objects, domain errors, domain events (pure)
+├─ application/
+│  ├─ commands/            ← write use cases, named by action and subject
+│  ├─ queries/             ← read use cases
+│  └─ ports/               ← outbound interfaces, `<name>.port.ts`
+├─ api/
+│  ├─ http/                ← controllers, `<name>.controller.ts`
+│  └─ messaging/           ← incoming event and job handlers, `<name>.handler.ts`
+├─ infrastructure/
+│  ├─ persistence/         ← `<name>.schema.ts` and `<name>.repository.ts`
+│  └─ messaging/           ← wire event mapping and outbox adapter
 ├─ <module>.module.ts
 └─ MODULE.md
 ```
@@ -23,10 +30,15 @@ Nothing in `domain/` imports another layer.
 | Entity | `domain/task.ts` | `Task` |
 | Value object | `domain/task-status.ts` | `TaskStatus` |
 | Domain error | `domain/errors.ts` | `MilestoneEstimateError` |
-| Use case | `application/change-task-status.ts` | `ChangeTaskStatus` |
-| Port | `application/ports/task-repository.ts` | `TaskRepository` (interface) |
-| Repository | `infrastructure/persistence/pg-task-repository.ts` | `PgTaskRepository` |
-| Controller | `api/tasks.controller.ts` | `TasksController` |
-| Event handler | `api/member-removed.handler.ts` | `MemberRemovedHandler` |
+| Use case | `application/commands/change-task-status.ts` | `ChangeTaskStatus` |
+| Port | `application/ports/task-unit-of-work.port.ts` | `TaskUnitOfWork` (interface) |
+| Schema | `infrastructure/persistence/task.schema.ts` | none |
+| Repository | `infrastructure/persistence/drizzle-task.repository.ts` | `DrizzleTaskRepository` |
+| Controller | `api/http/tasks.controller.ts` | `TasksController` |
+| Event handler | `api/messaging/member-removed.handler.ts` | `MemberRemovedHandler` |
 
 Classes carry no `Service` or `Component` suffix unless NestJS requires a provider token name.
+
+`pnpm test:architecture` enforces these folders and suffixes. The
+[architecture reference](https://github.com/Cadenway/cadenway-service-kit/blob/main/docs/hexagonal-architecture.md)
+of the service kit is authoritative when this skill and the check disagree.
