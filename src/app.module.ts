@@ -3,6 +3,9 @@ import { Module } from '@nestjs/common';
 import { HealthController } from './health/health.controller.js';
 
 /**
+ * Class AppModule
+ *
+ * @description
  * Root module of the service.
  *
  * Business modules under `src/modules/` are registered here as they are created. The health
