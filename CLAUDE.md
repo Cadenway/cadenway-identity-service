@@ -13,7 +13,7 @@
 
 1. Read before writing: the touched module's `MODULE.md`, the matching contract in `@cadenway/contracts`, the `cw-identity-domain` skill.
 2. Contract first: a route or an event that is not in the installed `@cadenway/contracts` is not written; the change starts in cadenway-api-contracts.
-3. Layering: pure domain, one transaction per use case, controllers and handlers only map. Dependencies point inward.
+3. Layering: pure domain, write use cases own their transaction, controllers and handlers only map. Dependencies point inward.
 4. Own data only: this service reads and writes its own database; everything else goes through contracts and events.
 5. Every query is scoped by organization; the organization comes from the request context.
 6. Events go through the outbox of `@cadenway/nest-messaging`; handlers are idempotent; shape changes get a new version.
@@ -38,6 +38,7 @@ checks during bootstrap.
 pnpm format:check
 pnpm lint
 pnpm typecheck
+pnpm test:architecture
 pnpm test:coverage
 pnpm test:integration                    # PostgreSQL and NATS in Docker
 pnpm build
