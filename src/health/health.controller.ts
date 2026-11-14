@@ -1,12 +1,30 @@
 import { Controller, Get } from '@nestjs/common';
 
-/** Body returned by the health routes. */
+/**
+ * Interface HealthStatus
+ *
+ * @description
+ * Body returned by the health routes.
+ */
 export interface HealthStatus {
-  /** Always `ok`: an unhealthy process does not answer. */
+  // #region Properties
+  /**
+   * Property status
+   *
+   * @description
+   * Always `ok`: an unhealthy process does not answer.
+   *
+   * @type {'ok'}
+   * @readonly
+   */
   readonly status: 'ok';
+  // #endregion
 }
 
 /**
+ * Class HealthController
+ *
+ * @description
  * Liveness and readiness routes probed by the container healthcheck.
  *
  * Bootstrap placeholder: it answers as soon as the process listens and checks no dependency. The
@@ -15,15 +33,31 @@ export interface HealthStatus {
  */
 @Controller('health')
 export class HealthController {
-  /** Tells the orchestrator that the process is running. */
+  // #region Methods
+  /**
+   * Method live
+   *
+   * @description
+   * Tells the orchestrator that the process is running.
+   *
+   * @returns {HealthStatus} The liveness status.
+   */
   @Get('live')
-  live(): HealthStatus {
+  public live(): HealthStatus {
     return { status: 'ok' };
   }
 
-  /** Tells the orchestrator that the service accepts requests. */
+  /**
+   * Method ready
+   *
+   * @description
+   * Tells the orchestrator that the service accepts requests.
+   *
+   * @returns {HealthStatus} The readiness status.
+   */
   @Get('ready')
-  ready(): HealthStatus {
+  public ready(): HealthStatus {
     return { status: 'ok' };
   }
+  // #endregion
 }

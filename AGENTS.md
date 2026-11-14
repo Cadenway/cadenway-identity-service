@@ -44,6 +44,8 @@ Decided: this service is built in NestJS, without an existing identity provider 
 
 ## Architectural ownership
 
+See the [Cadenway NestJS architecture reference](https://github.com/Cadenway/cadenway-service-kit/blob/main/docs/hexagonal-architecture.md) for dependency and test rules.
+
 - Business code lives in modules under `src/modules/<module>/`, each with `domain/`, `application/`, `infrastructure/`, `api/` and a `MODULE.md`.
 - Cross-cutting plumbing (config, logging, tracing, errors, auth guards, messaging) comes from the cadenway-service-kit packages (`@cadenway/nest-common`, `@cadenway/nest-messaging`, `@cadenway/nest-testing`), never re-implemented here.
 - The domain is pure; use cases own transactions; controllers and handlers translate.
