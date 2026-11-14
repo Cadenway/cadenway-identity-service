@@ -12,10 +12,7 @@ allowBuilds:
   protobufjs: false
   ssh2: false
 
-# Supply chain: a version must be at least 2 days old (2880 minutes) before pnpm resolves it, and a
-# package whose trust evidence (provenance, trusted publisher) regresses between versions is refused.
-minimumReleaseAge: 2880
-# Cadenway packages are exempt: they are taken as soon as they are published, as Renovate does.
-minimumReleaseAgeExclude:
-  - '@cadenway/*'
+# Disable pnpm's default release-age delay.
+minimumReleaseAge: 0
+# Refuse a package version with weaker trust evidence than an earlier release.
 trustPolicy: no-downgrade
