@@ -36,12 +36,16 @@ PostgreSQL and NATS. `cw-tech-opentelemetry` is the technology guide.
 The instrumentation must be loaded before the application imports Express, `pg` or the NATS client:
 
 ```bash
-node --experimental-loader=@opentelemetry/instrumentation/hook.mjs --import ./telemetry.js dist/main.js
+node --experimental-loader=@cadenway/nest-common/hook.mjs --import ./dist/telemetry.js dist/main.js
 ```
 
+`src/telemetry.ts` calls `startTelemetry` of `@cadenway/nest-common/telemetry` and imports nothing
+else. The hook is named through the kit: `@opentelemetry/instrumentation` is a dependency of the kit,
+not of the service, and pnpm's strict `node_modules` does not resolve it from here.
+
 It is the only documented path for an ESM application. Node 24 marks `--experimental-loader` as
-discouraged: keep the flags in one place (the image command and the start script) and change them
-together.
+discouraged and prints an `ExperimentalWarning` on stderr at start: keep the flags in one place (the
+`CMD` of the `Dockerfile` and the `start:dev` script) and change them together.
 
 ## Metrics
 
@@ -55,9 +59,13 @@ together.
   SIGTERM is received.
 - On SIGTERM, HTTP connections and NATS consumers are drained within the `stop_grace_period` of 30
   seconds.
+- Wired today: `HealthModule` of the kit with the PostgreSQL indicator (`src/app.module.ts`). The
+  NATS indicator arrives with `@cadenway/nest-messaging`; the kit does not yet check migrations nor
+  turn readiness to 503 on SIGTERM.
 
 ## Configuration
 
-`LOG_LEVEL` and `OTEL_EXPORTER_OTLP_ENDPOINT` are validated at start-up and described in
-`.env.example`, like `PORT`, `DATABASE_URL` and `NATS_URL`. They are added with the kit version
-that reads them.
+`NODE_ENV`, `LOG_LEVEL` and `LOG_PRETTY` are validated at start-up by `src/config/app-config.ts`
+(`baseConfigShape` of the kit) and `OTEL_EXPORTER_OTLP_ENDPOINT` by `startTelemetry`; all are
+described in `.env.example`, like `PORT`, `DATABASE_URL` and `NATS_URL`. `LOG_PRETTY=true` is a
+local convenience, refused with `NODE_ENV=production`.

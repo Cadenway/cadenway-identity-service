@@ -1,6 +1,6 @@
 # cadenway-identity-service
 
-cadenway-identity-service owns who the user is and how they sign in. NestJS, its own PostgreSQL database (one database and one user in the shared PostgreSQL of the VPS), events over NATS JetStream through `@cadenway/nest-messaging`, internal REST for the API gateway. Local port 3010.
+cadenway-identity-service owns who the user is and how they sign in. NestJS, its own PostgreSQL database (one database with a migrator role and an application role in the shared PostgreSQL of the VPS), events over NATS JetStream through `@cadenway/nest-messaging`, internal REST for the API gateway. Local port 3010.
 
 |            |                                                                                                                                                                                                                                                                                                                    |
 | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -19,19 +19,26 @@ Requirements: Node.js LTS and pnpm (versions in `package.json`), and Docker.
 
 1. Clone this repository next to the other Cadenway repositories, flat, in one folder.
 2. To run it with the rest of Cadenway, start the stack from `cadenway-ops`; it builds the sibling
-   folders, this one included (`core` profile; `full` adds every other service):
+   folders, this one included (see its `docs/development.md`):
 
    ```bash
    cd ../cadenway-ops/compose
-   docker compose -f compose.yaml -f compose.local.yaml --profile core up -d
+   cp .env.example .env                        # once
+   docker compose run --rm internal-token-keys # once: the key pairs of the internal token
+   docker compose up -d
    ```
 
-3. To work on this repository alone:
+3. To work on this repository alone, against its own PostgreSQL and NATS:
 
    ```bash
    pnpm install
-   pnpm start:dev              # http://localhost:3010
+   cp .env.example .env                        # once
+   docker compose -f compose.dev.yaml up -d
+   pnpm start:dev                              # http://localhost:3010/health/ready
    ```
+
+The configuration is validated at start-up; [development](../docs/development.md) lists the
+variables and explains how to call the service locally with an internal token.
 
 ## Checks
 
