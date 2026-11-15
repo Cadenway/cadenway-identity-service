@@ -33,7 +33,8 @@ same in the ten services. `cw-expand-contract-migrations` covers how a schema ch
 - The transaction runner of the service kit issues `SET LOCAL app.organization_id` when a use case
   transaction starts. Never set it by hand; never open a connection around the runner.
 - Two roles per service: `<svc>_migrator` runs the migrations, `<svc>_app` runs the service and is
-  subject to the policies.
+  subject to the policies. The service connects with `DATABASE_URL` (`identity_app`); `src/migrate.ts`
+  and drizzle-kit with `MIGRATION_DATABASE_URL` (`identity_migrator`).
 - Row-level security is the second barrier, not the first: a query still filters on
   `organization_id` explicitly (`rules/infrastructure.md`).
 
@@ -46,6 +47,7 @@ same in the ten services. `cw-expand-contract-migrations` covers how a schema ch
 
 ## Not there yet
 
-No table exists yet. The two roles are created by cadenway-ops with the first table of a service;
-the test proving that one organization cannot read another's rows, and the linting of migrations,
-arrive with the first module. Until then these conventions are applied by review.
+No table exists yet. The two roles exist in cadenway-ops (`docs/database.md` there) and in
+`compose.dev.yaml`; the test proving that one organization cannot read another's rows, and the
+linting of migrations, arrive with the first module. Until then these conventions are applied by
+review.

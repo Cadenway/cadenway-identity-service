@@ -8,6 +8,14 @@ test('authored code follows the Cadenway architecture', () => {
     rootDir: fileURLToPath(new URL('../..', import.meta.url)),
     tsconfig: 'tsconfig.json',
     profile: 'service',
+    exceptions: [
+      {
+        file: 'src/telemetry.ts',
+        rule: 'service-layout',
+        reason:
+          'Process entry point preloaded before main.js (`node --import ./dist/telemetry.js`), as @cadenway/nest-common documents; the service profile lists main.ts and migrate.ts only.',
+      },
+    ],
   });
   assert.equal(
     findings.length,

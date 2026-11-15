@@ -4,11 +4,22 @@
 
 ## Status
 
-The checkout contains NestJS startup, health and configuration code. Business modules will follow the structure below as their capabilities are implemented.
+The checkout contains the wiring of the service onto `@cadenway/nest-common`, and no business module yet:
+
+| File                       | Role                                                                                       |
+| -------------------------- | ------------------------------------------------------------------------------------------ |
+| `src/telemetry.ts`         | Preloaded before the application: starts OpenTelemetry                                     |
+| `src/main.ts`              | `createApplication` with the internal token verifier, then `listen`                        |
+| `src/app.module.ts`        | The database pool and transaction runners, the health routes with the PostgreSQL indicator |
+| `src/config/app-config.ts` | The zod schemas of the service and of the migrator                                         |
+| `src/config/config.ts`     | The configuration of the running service, validated once                                   |
+| `src/migrate.ts`           | The one-off migrator, run as the migrator role                                             |
+
+Business modules will follow the structure below as their capabilities are implemented, each registered in `src/app.module.ts`.
 
 ## Purpose and target structure
 
-cadenway-identity-service owns who the user is and how they sign in. NestJS, its own PostgreSQL database (one database and one user in the shared PostgreSQL of the VPS), events over NATS JetStream through `@cadenway/nest-messaging`, internal REST for the API gateway. Local port 3010.
+cadenway-identity-service owns who the user is and how they sign in. NestJS, its own PostgreSQL database (one database with a migrator role and an application role in the shared PostgreSQL of the VPS), events over NATS JetStream through `@cadenway/nest-messaging`, internal REST for the API gateway. Local port 3010.
 
 |            |                                                                                                                                                                                                                                                                                                                    |
 | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
