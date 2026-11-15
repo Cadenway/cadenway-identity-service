@@ -250,6 +250,7 @@ export class InMemoryAccounts implements AccountsUnitOfWork {
       language: 'fr',
       emailVerifiedAt: verified ? new Date('2026-11-08T12:00:00Z') : null,
       version: verified ? 2 : 1,
+      signUpCount: 1,
     });
     this.state.users.set(user.id, user);
     this.state.credentials.set(user.id, passwordHash);

@@ -166,13 +166,14 @@ const CLOCK: unique symbol = Symbol('AccountsClock');
     },
     {
       provide: VerifySignUp,
-      inject: [UNIT_OF_WORK, CODE_SECRETS, SESSION_OPENER, CLOCK],
+      inject: [UNIT_OF_WORK, CODE_SECRETS, PASSWORD_HASHER, SESSION_OPENER, CLOCK],
       useFactory: (
         unitOfWork: AccountsUnitOfWork,
         secrets: OneTimeCodeSecrets,
+        hasher: PasswordHasher,
         sessions: SessionOpener,
         clock: Clock,
-      ): VerifySignUp => new VerifySignUp(unitOfWork, secrets, sessions, clock),
+      ): VerifySignUp => new VerifySignUp(unitOfWork, secrets, hasher, sessions, clock),
     },
     {
       provide: SignInWithPassword,

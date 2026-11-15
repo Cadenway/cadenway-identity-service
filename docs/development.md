@@ -127,7 +127,9 @@ and one kind of actor: `anonymous` (above) for the authentication flows, `system
 `POST /internal/v1/tokens/introspect`, and `user` (`{ type: "user", id: "<user id>" }`) for
 `DELETE /internal/v1/sessions/{sessionId}` and `GET /internal/v1/users/{userId}`. No route needs an
 organization. The codes of a sign-up go to notification-service through `EVENTS_RESTRICTED`; alone,
-read them from the outbox row of `one-time-code.issued.v1` on a workstation database only. Use a workstation key only: the keys of staging and
+on a workstation only, read the latest from the stream with the `admin` user:
+`docker compose -f compose.dev.yaml exec nats-streams nats stream get EVENTS_RESTRICTED --last-for restricted.one-time-code.issued.v1`.
+The outbox row no longer holds it once the relay published it. Use a workstation key only: the keys of staging and
 production stay in the secrets of cadenway-ops.
 
 ### Migrations

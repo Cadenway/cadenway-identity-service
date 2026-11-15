@@ -61,7 +61,9 @@ class ResendSignUpCodeBody extends zodDto(ResendSignUpCodeInternalBody) {}
  * Class VerifySignUpBody
  *
  * @description
- * Body of `POST /internal/v1/auth/sign-up/verification`, validated with the schema of the contract.
+ * Body of `POST /internal/v1/auth/sign-up/verification` (`SignUpVerification`), validated with the
+ * schema of the contract, which keeps the optional `password` the gateway forwards; it is never
+ * logged.
  */
 class VerifySignUpBody extends zodDto(VerifySignUpInternalBody) {}
 
@@ -306,7 +308,8 @@ export class AuthController {
    * Method resendCode
    *
    * @description
-   * `POST /internal/v1/auth/sign-up/code`: `202` for any address; `429` within 30 seconds.
+   * `POST /internal/v1/auth/sign-up/code`: `202` for any address; `429` less than 30 seconds after
+   * the last accepted code request of the address, or once 5 were accepted in the hour.
    *
    * @param {ResendSignUpCodeBody} body - The address.
    * @param {Response} response - The response, for `Retry-After`.
@@ -326,9 +329,10 @@ export class AuthController {
    *
    * @description
    * `POST /internal/v1/auth/sign-up/verification`: `200` with the session; `422` for a refused
-   * code.
+   * code, or `auth.sign-up-replaced` when the right code does not prove the latest sign-up.
    *
-   * @param {VerifySignUpBody} body - The code and the browser.
+   * @param {VerifySignUpBody} body - The code, the password of the sign-up when sent, and the
+   * browser.
    * @param {Response} response - The response of the refusals.
    * @returns {Promise<SessionIssued>} The session, its token and the account.
    */
@@ -366,7 +370,8 @@ export class AuthController {
    * Method requestCode
    *
    * @description
-   * `POST /internal/v1/auth/sign-in/code`: `202` for any address; `429` within 30 seconds.
+   * `POST /internal/v1/auth/sign-in/code`: `202` for any address; `429` less than 30 seconds after
+   * the last accepted code request of the address, or once 5 were accepted in the hour.
    *
    * @param {SignInCodeBody} body - The address.
    * @param {Response} response - The response, for `Retry-After`.

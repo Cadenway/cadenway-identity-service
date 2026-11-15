@@ -34,6 +34,7 @@ function toUser(row: UserRow): User {
     language: row.language,
     emailVerifiedAt: row.emailVerifiedAt,
     version: row.version,
+    signUpCount: row.signUpCount,
   });
 }
 
@@ -130,6 +131,7 @@ export class DrizzleUserRepository implements UserRepository {
         name: registration.name,
         language: registration.language,
         version: registration.version,
+        signUpCount: registration.signUpCount,
       })
       .returning();
     const row: UserRow | undefined = rows[0];
@@ -143,8 +145,8 @@ export class DrizzleUserRepository implements UserRepository {
    * Method update
    *
    * @description
-   * Writes the name, the verification and the version of an account whose stored version is the
-   * previous one.
+   * Writes the name, the verification, the version and the sign-up count of an account whose stored
+   * version is the previous one.
    *
    * @param {User} user - The account after the change.
    * @returns {Promise<void>} Resolves once written.
@@ -157,6 +159,7 @@ export class DrizzleUserRepository implements UserRepository {
         name: user.name,
         emailVerifiedAt: user.emailVerifiedAt,
         version: user.version,
+        signUpCount: user.signUpCount,
         updatedAt: sql`now()`,
       })
       .where(and(eq(users.id, user.id), eq(users.version, user.version - 1)))

@@ -110,9 +110,10 @@ describe('SignUp', () => {
       refusal: { reason: 'code-throttled', resendAvailableAt: new Date('2026-11-08T13:07:30Z') },
     });
     expect(accounts.state.events).toHaveLength(2);
+    expect(accounts.userByEmail(SIGN_UP.email)?.signUpCount).toBe(1);
   });
 
-  it('signs an unverified address up again: same account, new name and password, next version, new code', async () => {
+  it('signs an unverified address up again: same account, new name and password, next version, one more sign-up, new code', async () => {
     await signUp.execute(SIGN_UP);
     const first: User | undefined = accounts.userByEmail(SIGN_UP.email);
     clock.advance(30_000);
@@ -120,9 +121,11 @@ describe('SignUp', () => {
     await signUp.execute({ ...SIGN_UP, name: 'Camille M.', password: 'atelier-nord-sprint-15' });
 
     const again: User | undefined = accounts.userByEmail(SIGN_UP.email);
+    expect(first?.signUpCount).toBe(1);
     expect(again?.id).toBe(first?.id);
     expect(again?.name).toBe('Camille M.');
     expect(again?.version).toBe(2);
+    expect(again?.signUpCount).toBe(2);
     expect(accounts.state.credentials.get(again?.id ?? '')).toBe('hashed:atelier-nord-sprint-15');
     expect(accounts.state.codes.map((code) => code.replacedAt !== null)).toEqual([true, false]);
     expect(

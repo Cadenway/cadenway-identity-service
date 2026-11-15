@@ -28,7 +28,9 @@ import { OpenSession } from '../src/modules/sessions/application/commands/open-s
 // disposable PostgreSQL and NATS started from compose.dev.yaml (see service-wiring.int-spec.ts for
 // why Compose rather than containers of @cadenway/nest-testing). Time-dependent rules (the 30 s
 // throttle, the expiry of a code, the inactivity of a session) are reached by moving the stored
-// instants back as the migrator role, never by waiting.
+// instants back as the migrator role, never by waiting. A code is read from its message in
+// EVENTS_RESTRICTED, as notification-service receives it: once the relay publishes it, the outbox row
+// keeps a redacted envelope only (@cadenway/nest-messaging 0.1.2).
 
 /** Compose file of the development dependencies. */
 const composeFile: string = fileURLToPath(new URL('../compose.dev.yaml', import.meta.url));
@@ -42,6 +44,9 @@ const pepper = 'integration-test-password-pepper-auth-flows-0000';
 /** The password of the mockup's examples, 22 characters. */
 const password = 'atelier-nord-sprint-14';
 
+/** The password of a later sign-up of the same address by someone else than its owner. */
+const otherPassword = 'not-camille-sprint-15';
+
 /** Camille Martin (CM), of Atelier Nord, the person the mockup signs up and in. */
 const camille = { name: 'Camille Martin', email: 'camille.martin@ateliernord.fr' } as const;
 
@@ -52,7 +57,7 @@ const client = {
 } as const;
 
 /** Every secret the run handled: passwords, codes and tokens, none of which may reach a log line. */
-const secrets: string[] = [password, pepper];
+const secrets: string[] = [password, otherPassword, pepper];
 
 /** Every log line the application wrote. */
 const logLines: string[] = [];
@@ -127,6 +132,44 @@ function streamSubjects(stream: string): Record<string, number> {
     '--json',
   );
   return output.trim() === '' ? {} : (JSON.parse(output) as Record<string, number>);
+}
+
+/** The payload of a `one-time-code.issued.v1` message, as notification-service receives it. */
+interface IssuedCodeMessage {
+  readonly codeId: string;
+  readonly purpose: string;
+  readonly code: string;
+  readonly [member: string]: unknown;
+}
+
+/**
+ * Reads the payloads of every message on `restricted.one-time-code.issued.v1` in
+ * `EVENTS_RESTRICTED`, oldest first, with the `admin` user of the `nats-streams` container and an
+ * ephemeral consumer that stops at the end of the stream, or after 2 seconds when it is empty.
+ *
+ * @returns The payloads.
+ */
+function issuedCodeMessages(): IssuedCodeMessage[] {
+  const output = compose(
+    'exec',
+    '-T',
+    'nats-streams',
+    'nats',
+    'subscribe',
+    'restricted.one-time-code.issued.v1',
+    '--stream',
+    'EVENTS_RESTRICTED',
+    '--all',
+    '--terminate-at-end',
+    '--wait',
+    '2s',
+    '--raw',
+  );
+  return output
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith('{'))
+    .map((line) => JSON.parse(line) as IssuedCodeMessage);
 }
 
 /**
@@ -240,27 +283,62 @@ describe('identity-service authentication flows', () => {
   }
 
   /**
-   * Reads the latest code emailed to an address for a purpose, from the outbox row of its
-   * restricted event, as notification-service would receive it.
+   * Wakes the relay until every `one-time-code.issued.v1` of the outbox is published.
+   */
+  async function publishCodes(): Promise<void> {
+    await vi.waitFor(
+      async () => {
+        app.get(OutboxRelay).wake();
+        const pending = await systemQuery<{ count: number }>(
+          `select count(*)::int as count from outbox_events
+            where event_name = 'one-time-code.issued.v1' and status <> 'sent'`,
+        );
+        expect(pending).toEqual([{ count: 0 }]);
+      },
+      { timeout: 15_000, interval: 100 },
+    );
+  }
+
+  /**
+   * Reads the message of the latest code issued to an address for a purpose, as
+   * notification-service receives it: the latest row of `one_time_codes` names the code, and its
+   * message is read from `EVENTS_RESTRICTED` once the relay published it. The outbox row cannot
+   * serve: the relay replaces its payload with a redacted envelope in the statement that marks it
+   * sent.
+   *
+   * @param email - Recipient address.
+   * @param purpose - Purpose of the code.
+   * @returns The payload of the message.
+   */
+  async function issuedCode(email: string, purpose: string): Promise<IssuedCodeMessage> {
+    const rows = await migrator.query<{ id: string }>(
+      `select one_time_codes.id from one_time_codes join users on users.id = one_time_codes.user_id
+        where users.email = $1 and one_time_codes.purpose = $2
+        order by one_time_codes.created_at desc, one_time_codes.id desc limit 1`,
+      [email, purpose],
+    );
+    const codeId = rows.rows[0]?.id;
+    if (codeId === undefined) {
+      throw new Error(`No code was issued to ${email} for ${purpose}.`);
+    }
+    await publishCodes();
+    const message = issuedCodeMessages().find((payload) => payload.codeId === codeId);
+    if (message === undefined) {
+      throw new Error(`The code issued to ${email} for ${purpose} is not in EVENTS_RESTRICTED.`);
+    }
+    secrets.push(message.code);
+    return message;
+  }
+
+  /**
+   * Reads the latest code emailed to an address for a purpose (see `issuedCode`).
    *
    * @param email - Recipient address.
    * @param purpose - Purpose of the code.
    * @returns The 6 digits.
    */
   async function latestCode(email: string, purpose: string): Promise<string> {
-    const rows = await systemQuery<{ code: string }>(
-      `select payload->>'code' as code from outbox_events
-        where event_name = 'one-time-code.issued.v1'
-          and payload->'recipient'->>'email' = $1 and payload->>'purpose' = $2
-        order by created_at desc, id desc limit 1`,
-      [email, purpose],
-    );
-    const code = rows[0]?.code;
-    if (code === undefined) {
-      throw new Error(`No code was issued to ${email} for ${purpose}.`);
-    }
-    secrets.push(code);
-    return code;
+    return (await issuedCode(email, purpose)).code;
   }
 
   /**
@@ -566,30 +644,50 @@ describe('identity-service authentication flows', () => {
           language: 'fr',
         }),
       ]);
+      const message = await issuedCode(camille.email, 'email-verification');
+      expect(message).toEqual(
+        containing({
+          organizationId: null,
+          actor: { type: 'system', id: 'identity-service' },
+          version: 1,
+          userId: camilleId,
+          purpose: 'email-verification',
+          code: matching(/^\d{6}$/u),
+          expiresAt: body.expiresAt,
+          recipient: { email: camille.email, name: 'Camille Martin' },
+          language: 'fr',
+        }),
+      );
+    });
+
+    it('keeps no code in the outbox row of a sent one-time-code.issued.v1', async () => {
+      const { code } = await issuedCode(camille.email, 'email-verification');
       const codes = await systemQuery<{
         payload: Record<string, unknown>;
         subject: string;
         stream: string;
+        status: string;
       }>(
-        `select payload, subject, stream from outbox_events where event_name = 'one-time-code.issued.v1'`,
+        `select payload, subject, stream, status from outbox_events
+          where event_name = 'one-time-code.issued.v1'`,
       );
+
       expect(codes).toEqual([
         {
           subject: 'restricted.one-time-code.issued.v1',
           stream: 'EVENTS_RESTRICTED',
-          payload: containing({
+          status: 'sent',
+          payload: {
+            id: anyString,
+            occurredAt: anyString,
             organizationId: null,
             actor: { type: 'system', id: 'identity-service' },
             version: 1,
-            userId: camilleId,
-            purpose: 'email-verification',
-            code: matching(/^\d{6}$/u),
-            expiresAt: body.expiresAt,
-            recipient: { email: camille.email, name: 'Camille Martin' },
-            language: 'fr',
-          }),
+            $redacted: true,
+          },
         },
       ]);
+      expect(JSON.stringify(codes)).not.toContain(code);
     });
 
     it('stores neither the password nor the code in clear', async () => {
@@ -741,7 +839,7 @@ describe('identity-service authentication flows', () => {
       expect(response.body).toMatchObject({ code: 'auth.code-invalid' });
     });
 
-    it('verifies the address and opens a session that ends with the browser', async () => {
+    it('verifies the address with the password of its latest sign-up and opens a session that ends with the browser', async () => {
       const code = await latestCode(camille.email, 'email-verification');
       const before = Date.now();
 
@@ -749,6 +847,7 @@ describe('identity-service authentication flows', () => {
         await post('/internal/v1/auth/sign-up/verification', {
           email: camille.email,
           code,
+          password,
           client,
         }),
       );
@@ -864,6 +963,161 @@ describe('identity-service authentication flows', () => {
 
       expect(response.status).toBe(409);
       expect(response.body).toMatchObject({ code: 'auth.email-taken' });
+    });
+  });
+
+  describe('the verification bound to the password of the latest sign-up', () => {
+    /**
+     * Signs an address up with the terms accepted.
+     *
+     * @param email - The address.
+     * @param signUpPassword - The password of the sign-up.
+     * @param name - The full name of the sign-up.
+     * @returns The status of the answer.
+     */
+    async function signUp(
+      email: string,
+      signUpPassword: string,
+      name: string = camille.name,
+    ): Promise<number> {
+      const response = await post('/internal/v1/auth/sign-up', {
+        name,
+        email,
+        password: signUpPassword,
+        acceptTerms: true,
+      });
+      return response.status;
+    }
+
+    /**
+     * Verifies a sign-up, with the password of the sign-up form when one is given.
+     *
+     * @param email - The address.
+     * @param code - The code typed.
+     * @param signUpPassword - The password sent, or none.
+     * @returns The response.
+     */
+    async function verification(
+      email: string,
+      code: string,
+      signUpPassword?: string,
+    ): Promise<Response> {
+      return post('/internal/v1/auth/sign-up/verification', {
+        email,
+        code,
+        ...(signUpPassword === undefined ? {} : { password: signUpPassword }),
+        client,
+      });
+    }
+
+    /**
+     * Reads the stored sign-up count and verified flag of an address.
+     *
+     * @param email - The address.
+     * @returns Its row.
+     */
+    async function account(email: string): Promise<unknown[]> {
+      const rows = await migrator.query<{ sign_up_count: number; verified: boolean }>(
+        `select sign_up_count, email_verified_at is not null as verified from users where email = $1`,
+        [email],
+      );
+      return rows.rows;
+    }
+
+    it('refuses the latest code with the password of an earlier sign-up, stops the code, and lets the owner sign up again', async () => {
+      const email = 'camille.martin+takeover@ateliernord.fr';
+      expect(await signUp(email, password)).toBe(202);
+      await passThrottle(email);
+      expect(await signUp(email, otherPassword, 'C. Martin')).toBe(202);
+      const code = await latestCode(email, 'email-verification');
+
+      const replaced = await verification(email, code, password);
+      expect(replaced.status).toBe(422);
+      expect(replaced.headers['content-type']).toMatch(/^application\/problem\+json/u);
+      expect(replaced.body).toEqual({
+        type: 'about:blank',
+        title: 'Unprocessable Content',
+        status: 422,
+        code: 'auth.sign-up-replaced',
+      });
+      const retried = await verification(email, code, otherPassword);
+      expect(retried.status).toBe(422);
+      expect(retried.body).toMatchObject({ code: 'auth.code-expired' });
+      expect(await account(email)).toEqual([{ sign_up_count: 2, verified: false }]);
+
+      await passThrottle(email);
+      expect(await signUp(email, password)).toBe(202);
+      const verified = issued(
+        await verification(email, await latestCode(email, 'email-verification'), password),
+      );
+      expect(verified.status).toBe(200);
+      expect(verified.body).toMatchObject({
+        user: { email, name: camille.name, version: 4 },
+      });
+      expect(await account(email)).toEqual([{ sign_up_count: 3, verified: true }]);
+
+      const intruder = await post('/internal/v1/auth/sign-in', {
+        email,
+        password: otherPassword,
+        client,
+      });
+      expect(intruder.status).toBe(422);
+      expect(intruder.body).toMatchObject({ code: 'auth.invalid-credentials' });
+      const owner = issued(await post('/internal/v1/auth/sign-in', { email, password, client }));
+      expect(owner.status).toBe(200);
+    });
+
+    it('refuses a verification without a password once the address was signed up again, and stops the code', async () => {
+      const email = 'camille.martin+again@ateliernord.fr';
+      expect(await signUp(email, password)).toBe(202);
+      await passThrottle(email);
+      expect(await signUp(email, password)).toBe(202);
+      const code = await latestCode(email, 'email-verification');
+
+      const refused = await verification(email, code);
+      expect(refused.status).toBe(422);
+      expect(refused.body).toMatchObject({ code: 'auth.sign-up-replaced' });
+      const retried = await verification(email, code, password);
+      expect(retried.status).toBe(422);
+      expect(retried.body).toMatchObject({ code: 'auth.code-expired' });
+      expect(await account(email)).toEqual([{ sign_up_count: 2, verified: false }]);
+    });
+
+    it('verifies an address signed up once by its code alone', async () => {
+      const email = 'camille.martin+once@ateliernord.fr';
+      expect(await signUp(email, password)).toBe(202);
+
+      const response = issued(
+        await verification(email, await latestCode(email, 'email-verification')),
+      );
+
+      expect(response.status).toBe(200);
+      expect(response.body).toMatchObject({ user: { email, version: 2 } });
+      expect(await account(email)).toEqual([{ sign_up_count: 1, verified: true }]);
+    });
+
+    it('answers a wrong code with auth.code-invalid whatever the password, and keeps the code', async () => {
+      const email = 'camille.martin+wrong-code@ateliernord.fr';
+      expect(await signUp(email, password)).toBe(202);
+      await passThrottle(email);
+      expect(await signUp(email, otherPassword)).toBe(202);
+      const code = await latestCode(email, 'email-verification');
+
+      for (const sent of [password, otherPassword, undefined]) {
+        const response = await verification(email, wrong(code), sent);
+        expect(response.status).toBe(422);
+        expect(response.body).toMatchObject({ code: 'auth.code-invalid' });
+      }
+
+      const right = issued(await verification(email, code, otherPassword));
+      expect(right.status).toBe(200);
+    });
+
+    it('never logs the password sent with a verification', () => {
+      expect(logLines.length).toBeGreaterThan(0);
+      expect(
+        logLines.filter((line) => line.includes(password) || line.includes(otherPassword)),
+      ).toEqual([]);
     });
   });
 

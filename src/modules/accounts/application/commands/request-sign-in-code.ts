@@ -23,8 +23,9 @@ export type RequestSignInCodeInput = CodeRequestInput;
  * @description
  * Issues a `sign-in` code when a verified account uses the address, the previous one stopping to
  * work (`POST /internal/v1/auth/sign-in/code`). It answers the same way when no such account
- * exists, and refuses `auth.code-throttled` within 30 seconds of the last request for the address,
- * account or not, or after 5 in the hour.
+ * exists. The request is throttled per address, account or not, together with the sign-up codes
+ * (`CodeThrottled` of the contract): `auth.code-throttled` less than 30 seconds after the last
+ * accepted request, or once 5 were accepted in the hour.
  */
 export class RequestSignInCode {
   // #region Properties
@@ -90,7 +91,8 @@ export class RequestSignInCode {
    *
    * @param {RequestSignInCodeInput} input - The request.
    * @returns {Promise<CodeSentView>} The same answer whether or not a code was issued.
-   * @throws {AccountRefusal} `auth.code-throttled` within 30 seconds of the last request.
+   * @throws {AccountRefusal} `auth.code-throttled` less than 30 seconds after the last accepted
+   * request of the address, whatever its purpose, or once 5 were accepted in the hour.
    */
   public async execute(input: RequestSignInCodeInput): Promise<CodeSentView> {
     const email: EmailAddress = EmailAddress.of(input.email);

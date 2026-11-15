@@ -70,11 +70,20 @@ contract states the rule.
 Decisions of this service, taken while building it:
 
 - A code stops working after five wrong attempts ("a few" in the contract).
-- One code request every 30 seconds per address whatever the purpose, as the contract states, and
-  at most 5 in an hour per address (security review: without a cap, successive codes allow about
-  14 400 guesses a day at a 6-digit code). The cap answers `auth.code-throttled` too.
+- One code request every 30 seconds per address whatever the purpose, and at most 5 in an hour per
+  address (security review: without a cap, successive codes allow about 14 400 guesses a day at a
+  6-digit code). The cap answers `auth.code-throttled` too. `CodeThrottled` of the contracts states
+  both since `@cadenway/contracts` 0.4.0.
 - A password attempt is counted as a failure before its hash is checked, so the hash runs outside
   any transaction while concurrent attempts are all counted; a right password clears the count.
+- The verification of a sign-up is bound to the password of the latest sign-up of the address
+  (security review of the walking skeleton, then `@cadenway/contracts` 0.4.0): a repeated sign-up of
+  an unverified address replaces its name and password, so without the binding someone could sign
+  up a pending address again with a password of their own and let its owner verify it. The code is
+  checked first; with the right code, a different `password`, or none once the address was signed
+  up more than once, answers `auth.sign-up-replaced` and uses the code up; an address signed up once
+  is still verified by its code alone. The count of accepted sign-ups is stored on the account
+  (`users.sign_up_count`).
 - The activity of a session is recorded at most once a minute.
 - The flows run in the system transaction runner, since they and their events have no organization
   (see the `MODULE.md` of the accounts module).
