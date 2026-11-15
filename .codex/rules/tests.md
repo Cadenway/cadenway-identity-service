@@ -11,4 +11,5 @@ paths:
 - Domain tests are pure; integration tests use real PostgreSQL and NATS from `@cadenway/nest-testing`.
 - Name tests after the behavior and the rule (`refuses a milestone with an estimate`).
 - Fixtures come from the mockup data: Atelier Nord, Camille Martin (CM), Sprint 14, CAD-482.
-- Never mock the database in an integration test; never assert on log text.
+- Never mock the database in an integration test; never assert on log text. The one exception:
+  asserting that no log line holds a password, a code, a token or the pepper.

@@ -54,7 +54,7 @@ Load them with the `Skill` tool when their subject comes up (if the tool is unav
 ## Procedure
 
 1. Use the ORM already in package.json. If none is installed yet, stop and ask: the choice is an open decision.
-2. Every query filters on `organization_id`; there is no unscoped read.
+2. Every query of a tenant table filters on `organization_id`; a table without an organization is read by its key or the verified actor; there is no unscoped read.
 3. Paginate every list; never load an unbounded collection.
 4. Add the index a new query needs, through a migration (`migration-builder`).
 

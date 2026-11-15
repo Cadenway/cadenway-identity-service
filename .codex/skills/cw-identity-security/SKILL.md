@@ -15,7 +15,11 @@ verified. A value below is changed here first, then in code.
   carries it in the cookie `__Host-cw_session; HttpOnly; Secure; SameSite=Lax`.
 - **Verification**: the gateway calls `POST /internal/v1/tokens/introspect` at every request; there
   is no cache, so a revoked session stops at the next request.
-- **Inactivity**: 12 hours by default, adjustable per organization.
+- **Inactivity**: 12 hours by default, adjustable per organization, for persistent sessions too
+  (`openapi/public/auth.yaml`); an active introspection is activity, recorded at most once a minute.
+- **Lifetime**: 30 days after the sign-in at the latest. With "Rester connecté pendant 30 jours" the
+  cookie has `Max-Age` up to then; without it the cookie ends with the browser and the session keeps
+  the same 30-day bound.
 - **API token**: `cw_pat_`, then 30 base62 characters, then 6 characters of CRC32 check. Stored as a
   SHA-256 hash, with an expiry, shown once.
 - **Internal token**: a JWT signed with `alg: Ed25519`, valid 60 seconds, with `aud` set to the
@@ -29,7 +33,14 @@ verified. A value below is changed here first, then in code.
 - 12 characters minimum and **no composition rule**; a password found in the embedded list of
   compromised passwords is refused. The provenance of that list is still to be chosen.
 - Hashing: argon2id with m = 19 456 KiB, t = 2, p = 1, through `crypto.argon2` of Node; no
-  third-party binary. The pepper is kept outside the database.
+  third-party binary. The pepper (`PASSWORD_PEPPER`, 32 characters at least) is kept outside the
+  database; the secret key of argon2id is derived from it by HKDF-SHA-256 under its own label, apart
+  from the key of the code hashes. The stored PHC string holds the parameters and the salt, never
+  the pepper. The password is normalized to NFC before hashing. Without an account, a sign-in still
+  checks a decoy hash, so its time does not tell.
+- The hash is checked outside any transaction: the attempt is first counted as a failure in a
+  transaction that locks the lockout row, and a right password clears the count afterwards, so a
+  flood of sign-ins never holds the connections of the pool.
 - This policy was decided after the mockup was drawn: the password screens of the mockup still list
   composition rules and are to be corrected.
 
@@ -56,9 +67,19 @@ verified. A value below is changed here first, then in code.
 
 ## Lockout and one-time codes
 
-- Lockout after repeated failures: the mockup shows 15 minutes and "3 tentatives restantes".
-- Sign-in codes expire after 10 minutes, email-change codes after 15; resend is throttled (30 s and
-  45 s in the mockup).
+- Lockout: five consecutive failed password sign-ins of an address, account or not, lock its
+  password sign-in for 15 minutes; `remainingAttempts` counts down from 4 to 1 (the mockup's "Il vous
+  reste 3 tentatives" after two failures); a success, or the end of the lockout, resets the count. A
+  sign-in by email code is not locked.
+- One-time codes: 6 digits from `crypto.randomInt`; sign-up and sign-in codes expire after 10
+  minutes, email-change codes after 15; single use; a newer code of the same account and purpose
+  replaces the previous one; the fifth wrong attempt stops a code. Stored as HMAC-SHA-256 under a
+  key derived from the pepper by HKDF, bound to the account and the purpose; the digits leave the
+  service only in the restricted `one-time-code.issued.v1`.
+- Resend: one code request every 30 seconds per address whatever the purpose, sign-ups included,
+  account or not (45 s for an email change in the mockup, when it exists), and 5 at most per address
+  in an hour, so successive codes cannot be guessed at length (5 codes of 5 attempts, 25 guesses an
+  hour at most).
 
 ## Primitives
 
@@ -69,4 +90,8 @@ verified. A value below is changed here first, then in code.
 
 - The public routes for OIDC callbacks, the SAML assertion consumer service and the SAML metadata
   are not in the contracts yet: they start in cadenway-api-contracts.
-- `crypto.argon2` is documented as stable since Node 24.7.0 and has not been run here yet.
+- `crypto.argon2` is documented as stable since Node 24.7.0; the specs of
+  `Argon2PasswordHasher` run it on Node 24.18.
+- The provenance of the full list of compromised passwords: a short repository-authored list stands
+  in for it behind the `CompromisedPasswords` port.
+- The pepper has no rotation: changing it makes every stored password and pending code unusable.

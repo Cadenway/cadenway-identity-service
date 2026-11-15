@@ -35,13 +35,14 @@ The application role `identity_app` reads and writes their rows and holds no DDL
 ## API
 
 None. The `Idempotency-Key` interceptor of `DatabaseModule` (`idempotency: true`) stores the key and
-the response of a route marked `@Idempotent()` in `idempotency_keys`; no route exists yet.
+the response of a route marked `@Idempotent()` in `idempotency_keys`; no route is marked yet.
 
 ## Events emitted
 
-None. The outbox relay of `OutboxModule` publishes the rows the use cases of the business modules
-append with `OutboxWriter.append`; `@cadenway/contracts` defines no event of this service yet, so
-nothing is appended.
+None of its own. The outbox relay of `OutboxModule` publishes the rows the use cases of the
+accounts and sessions modules append with `OutboxWriter.append`, on the subject and stream each row
+stores: `evt.<name>` in `EVENTS`, or `restricted.<name>` in `EVENTS_RESTRICTED` for the events of
+`restrictedEvents`.
 
 ## Events consumed
 

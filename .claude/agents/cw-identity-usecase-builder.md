@@ -57,7 +57,7 @@ Load them with the `Skill` tool when their subject comes up (if the tool is unav
 2. Load aggregates through repository ports, never through the ORM directly.
 3. Call domain methods; never re-implement a rule here.
 4. Persist and record outgoing events in the same transaction (outbox).
-5. Check tenant scope: every load filters on the caller's organization.
+5. Check tenant scope: every load of tenant data filters on the caller's organization; data without one is loaded by the verified actor or an explicit key.
 
 ## Checks
 

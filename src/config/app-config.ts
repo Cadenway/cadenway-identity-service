@@ -24,12 +24,55 @@ import { z } from 'zod';
  *   them.
  * - `INTERNAL_TOKEN_AUDIENCE` and `INTERNAL_TOKEN_TRUSTED_ISSUERS`: the `aud` this service accepts
  *   and the public keys of the backends allowed to call it.
+ * - `PASSWORD_PEPPER`: `passwordPepperConfigShape`, the secret mixed into every password hash and
+ *   one-time code hash.
  *
  * `OTEL_EXPORTER_OTLP_ENDPOINT` is read by `telemetry.ts`, before the application exists.
  *
- * @type {BaseConfig & DatabaseConfig & MessagingConfig & InternalTokenVerifierConfig}
+ * @type {BaseConfig & DatabaseConfig & MessagingConfig & InternalTokenVerifierConfig & PasswordPepperConfig}
  */
-export type AppConfig = BaseConfig & DatabaseConfig & MessagingConfig & InternalTokenVerifierConfig;
+export type AppConfig = BaseConfig &
+  DatabaseConfig &
+  MessagingConfig &
+  InternalTokenVerifierConfig &
+  PasswordPepperConfig;
+
+/**
+ * Interface PasswordPepperConfig
+ *
+ * @description
+ * The secret of this service that never sits in its database (`cw-identity-security`).
+ */
+export interface PasswordPepperConfig {
+  // #region Properties
+  /**
+   * Property PASSWORD_PEPPER
+   *
+   * @description
+   * Secret of at least 32 characters, passed to argon2id as its secret key for every password hash
+   * and used to derive the key of the one-time code hashes. cadenway-ops maps it from
+   * `IDENTITY_PASSWORD_PEPPER`. Changing it makes every stored password and pending code unusable:
+   * there is no rotation yet.
+   *
+   * @type {string}
+   * @readonly
+   */
+  readonly PASSWORD_PEPPER: string;
+  // #endregion
+}
+
+/**
+ * Constant passwordPepperConfigShape
+ *
+ * @description
+ * Zod shape of `PasswordPepperConfig`. A pepper shorter than 32 characters is refused at start-up,
+ * named without its value.
+ *
+ * @type {{ readonly PASSWORD_PEPPER: z.ZodString }}
+ */
+export const passwordPepperConfigShape: { readonly PASSWORD_PEPPER: z.ZodString } = {
+  PASSWORD_PEPPER: z.string().min(32, { error: 'Expected a secret of at least 32 characters.' }),
+};
 
 /**
  * Constant appConfigSchema
@@ -47,6 +90,7 @@ export const appConfigSchema: z.ZodType<AppConfig> = z.object({
   ...databaseConfigShape,
   ...messagingConfigShape,
   ...internalTokenVerifierConfigShape,
+  ...passwordPepperConfigShape,
 });
 
 /**

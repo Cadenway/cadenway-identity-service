@@ -2,10 +2,11 @@
 # On each release the deploy workflow checks it and copies it into cadenway-ops, as
 # environments/<env>/services/identity-service.yaml for the environment it deploys to.
 #
-# Internal service: no Traefik label, no published port. Secret values (the database URLs and the
-# NATS password) are referenced by name; they live in cadenway-ops, which documents every variable
-# below in docs/service-environment.md. A variable added here must exist on the host before the
-# release that reads it: the GitOps agent refuses a commit that leaves one unset.
+# Internal service: no Traefik label, no published port. Secret values (the database URLs, the
+# NATS password and the password pepper) are referenced by name; they live in cadenway-ops, which
+# documents every variable below in docs/service-environment.md. A variable added here must exist
+# on the host before the release that reads it: the GitOps agent refuses a commit that leaves one
+# unset (IDENTITY_PASSWORD_PEPPER is there since cadenway-ops #19).
 #
 # INTERNAL_TOKEN_TRUSTED_ISSUERS lists who may call this service: the API gateway and the realtime
 # gateway (ticket redemption). The folded scalar gives the service one line of JSON.
@@ -24,6 +25,7 @@ services:
       INTERNAL_TOKEN_TRUSTED_ISSUERS: >-
         {"api-gateway": [${API_GATEWAY_INTERNAL_TOKEN_PUBLIC_JWKS}],
         "realtime-gateway": [${REALTIME_GATEWAY_INTERNAL_TOKEN_PUBLIC_JWKS}]}
+      PASSWORD_PEPPER: ${IDENTITY_PASSWORD_PEPPER}
     networks:
       - internal
     healthcheck:

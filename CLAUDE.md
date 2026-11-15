@@ -15,7 +15,7 @@
 2. Contract first: a route or an event that is not in the installed `@cadenway/contracts` is not written; the change starts in cadenway-api-contracts.
 3. Layering: pure domain, write use cases own their transaction, controllers and handlers only map. Dependencies point inward.
 4. Own data only: this service reads and writes its own database; everything else goes through contracts and events.
-5. Every query is scoped by organization; the organization comes from the request context.
+5. A query of tenant data is scoped by organization, from the request context only; accounts, codes and sessions have no organization and are named by the verified actor or an explicit key.
 6. Events go through the outbox of `@cadenway/nest-messaging`; handlers are idempotent; shape changes get a new version.
 7. Migrations are expand/contract: the running version keeps working.
 8. Strict TypeScript: explicit types, `readonly`, no `any`, no non-null assertion.

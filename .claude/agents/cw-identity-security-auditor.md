@@ -26,7 +26,7 @@ Security findings with a concrete exploit path.
 
 ## What to check
 
-1. Every route requires the internal token and enforces the organization from the token, never from the body.
+1. Every route requires the internal token, restricts its issuers and actors as its contract states, and takes the actor and the organization from the token, never from the body.
 2. Authorization checks the member's role on the target resource, not only authentication.
 3. Inputs are validated by schema before reaching a use case; no raw SQL built from input.
 4. No secret, token or personal data (email, IP) in logs at info level.
