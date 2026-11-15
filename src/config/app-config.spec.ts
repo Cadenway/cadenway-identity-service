@@ -17,6 +17,7 @@ describe('appConfigSchema', () => {
     NATS_PASSWORD: 'identity',
     INTERNAL_TOKEN_AUDIENCE: 'identity-service',
     INTERNAL_TOKEN_TRUSTED_ISSUERS: trustedIssuers,
+    PASSWORD_PEPPER: 'local-development-password-pepper-0000000000',
   };
 
   it('reads the variables of the service with the defaults of the kit', () => {
@@ -40,6 +41,7 @@ describe('appConfigSchema', () => {
           },
         ],
       },
+      PASSWORD_PEPPER: 'local-development-password-pepper-0000000000',
     });
   });
 
@@ -52,7 +54,7 @@ describe('appConfigSchema', () => {
     expect(() => loadConfig(migrationConfigSchema, example)).not.toThrow();
   });
 
-  it('refuses to start without the database, the broker, the audience or the trusted issuers', () => {
+  it('refuses to start without the database, the broker, the audience, the issuers or the pepper', () => {
     expect(() => loadConfig(appConfigSchema, { PORT: '3010' })).toThrow(ConfigError);
     try {
       loadConfig(appConfigSchema, { PORT: '3010' });
@@ -64,6 +66,7 @@ describe('appConfigSchema', () => {
           'NATS_URL',
           'INTERNAL_TOKEN_AUDIENCE',
           'INTERNAL_TOKEN_TRUSTED_ISSUERS',
+          'PASSWORD_PEPPER',
         ]),
       );
     }
@@ -97,6 +100,17 @@ describe('appConfigSchema', () => {
     expect(() =>
       loadConfig(appConfigSchema, { ...complete, INTERNAL_TOKEN_TRUSTED_ISSUERS: withPrivateKey }),
     ).toThrow(/INTERNAL_TOKEN_TRUSTED_ISSUERS/u);
+  });
+
+  it('refuses a pepper shorter than 32 characters, without printing it', () => {
+    const secret: string = 'short-pepper-s3cret';
+
+    expect(() => loadConfig(appConfigSchema, { ...complete, PASSWORD_PEPPER: secret })).toThrow(
+      /PASSWORD_PEPPER: Expected a secret of at least 32 characters/u,
+    );
+    expect(() => loadConfig(appConfigSchema, { ...complete, PASSWORD_PEPPER: secret })).not.toThrow(
+      /s3cret/u,
+    );
   });
 
   it('does not read the migrator URL: the running service never needs it', () => {

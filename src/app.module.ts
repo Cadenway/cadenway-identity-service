@@ -1,4 +1,5 @@
-import { CONFIG, ConfigModule, HealthModule, postgresIndicator } from '@cadenway/nest-common';
+import { RESTRICTED_EVENT_NAMES } from '@cadenway/contracts/events/identity-service';
+import { CONFIG, HealthModule, postgresIndicator } from '@cadenway/nest-common';
 import type { PostgresProbe } from '@cadenway/nest-common';
 import { DATABASE_POOL, DatabaseModule } from '@cadenway/nest-common/database';
 import {
@@ -9,9 +10,10 @@ import {
 import { OutboxModule } from '@cadenway/nest-messaging/outbox';
 import { Module } from '@nestjs/common';
 
-import { appConfigSchema } from './config/app-config.js';
 import type { AppConfig } from './config/app-config.js';
+import { AccountsModule } from './modules/accounts/accounts.module.js';
 import { PlatformModule } from './modules/platform/platform.module.js';
+import { SessionsModule } from './modules/sessions/sessions.module.js';
 
 /**
  * Class AppModule
@@ -22,18 +24,20 @@ import { PlatformModule } from './modules/platform/platform.module.js';
  * the other shared formats; this module declares what the service itself depends on. Importing it
  * reads no configuration: every module below is built when the application is created.
  *
- * - `ConfigModule` (`eager: false`): the environment is validated against `appConfigSchema` when
- *   the application is created and provided as `CONFIG`; an invalid one makes `createApplication`
- *   reject with the `ConfigError`, which `runApplication` writes as one line.
+ * - `CONFIG`: the configuration `main.ts` validated once with `loadConfig`, provided globally by
+ *   `createApplication` (`provideConfig: true`); this module imports no `ConfigModule`, so the
+ *   environment is never validated twice. A test hands its own with `provideConfig` too.
  * - `DatabaseModule`: the pool of this service's own database, opened as the application role of
  *   `DATABASE_URL`, the tenant and system transaction runners, and the `Idempotency-Key`
  *   interceptor for the routes marked `@Idempotent()`. The pool closes on shutdown.
  * - `MessagingModule`: the NATS connection of the `identity` user, with the inbox prefix
  *   `_INBOX.identity` the broker requires. The creation waits for the first connection, then checks
- *   that the `EVENTS` stream exists: cadenway-ops creates the streams (`manageStreams: false`), and
- *   only notification-service runs the dead-letter worker. The service publishes and consumes
- *   nothing yet, since `@cadenway/contracts` defines no event of its own; `restrictedEvents` lists
- *   its events that carry a single-use code or link once the first one is released.
+ *   that the `EVENTS` stream exists, and `EVENTS_RESTRICTED` since the service lists restricted
+ *   events: cadenway-ops creates the streams (`manageStreams: false`), and only
+ *   notification-service runs the dead-letter worker. `restrictedEvents` is the
+ *   `RESTRICTED_EVENT_NAMES` of `@cadenway/contracts/events/identity-service`
+ *   (`one-time-code.issued.v1`, which carries a single-use code): the outbox writes it on
+ *   `restricted.<name>`, into `EVENTS_RESTRICTED`, which notification-service alone reads.
  * - `OutboxModule`: the outbox writer, the PostgreSQL deduplicator and the relay, which polls
  *   `outbox_events` every second in a system transaction and publishes the pending rows. It runs in
  *   every replica; `for update skip locked` keeps two of them from publishing the same row.
@@ -47,12 +51,12 @@ import { PlatformModule } from './modules/platform/platform.module.js';
  *   lengthen every stop, under the 10 second default grace period of Docker, without moving any
  *   request away; set it above the probe interval of a proxy if one ever routes on readiness.
  * - `PlatformModule`: the owner of the kit tables in the migrations of the service.
- *
- * Business modules under `src/modules/` are registered here as they are created.
+ * - `AccountsModule`: users, password credentials, one-time codes and the password lockout, with
+ *   the authentication flows and the reading of a user.
+ * - `SessionsModule`: sessions, their introspection and their revocation.
  */
 @Module({
   imports: [
-    ConfigModule.forRoot({ schema: appConfigSchema, eager: false }),
     DatabaseModule.forRootAsync({
       inject: [CONFIG],
       useFactory: (config: AppConfig) => ({
@@ -70,6 +74,7 @@ import { PlatformModule } from './modules/platform/platform.module.js';
         password: config.NATS_PASSWORD,
         manageStreams: false,
         deadLetterWorker: false,
+        restrictedEvents: RESTRICTED_EVENT_NAMES,
       }),
     }),
     OutboxModule.forRoot(),
@@ -81,6 +86,8 @@ import { PlatformModule } from './modules/platform/platform.module.js';
       }),
     }),
     PlatformModule,
+    SessionsModule,
+    AccountsModule,
   ],
 })
 export class AppModule {}

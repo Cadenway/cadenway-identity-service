@@ -64,6 +64,25 @@ const platformTables = [
 ] as const;
 
 /**
+ * The tables of the business modules: accounts (users, credentials, codes, throttle, lockout) and
+ * sessions. None carries an organization, so none has a policy.
+ */
+const businessTables = [
+  'code_requests',
+  'one_time_codes',
+  'password_credentials',
+  'sessions',
+  'sign_in_attempts',
+  'users',
+] as const;
+
+/** Every table of `public`, in name order, as the migrations create them. */
+const allTables = [...platformTables, ...businessTables].sort();
+
+/** Migrations of `migrations/meta/_journal.json`. */
+const migrationCount = 2;
+
+/**
  * Runs `docker compose` on the throwaway project.
  *
  * @param args - Compose command and its arguments.
@@ -267,6 +286,7 @@ describe('identity-service wiring', () => {
       'INTERNAL_TOKEN_TRUSTED_ISSUERS',
       JSON.stringify({ 'api-gateway': [gateway.publicJwk] }),
     );
+    vi.stubEnv('PASSWORD_PEPPER', 'integration-test-password-pepper-000000000000');
     // Every pass of the relay, from the first one, which starts with the application.
     relayPasses = vi.spyOn(OutboxRelay.prototype, 'publishPending');
 
@@ -282,6 +302,7 @@ describe('identity-service wiring', () => {
     app = await createApplication(ProbedApplicationModule, {
       service: 'identity-service',
       config,
+      provideConfig: true,
       internalToken: {
         verifier: {
           audience: config.INTERNAL_TOKEN_AUDIENCE,
@@ -309,7 +330,7 @@ describe('identity-service wiring', () => {
     }
   });
 
-  it('applies its migration as the migrator role, which owns the platform tables', async () => {
+  it('applies its migrations as the migrator role, which owns every table', async () => {
     const tables = await migrator.query<{ tablename: string; tableowner: string }>(
       `select tablename, tableowner from pg_tables where schemaname = 'public' order by tablename`,
     );
@@ -318,9 +339,9 @@ describe('identity-service wiring', () => {
     );
 
     expect(tables.rows).toEqual(
-      platformTables.map((tablename) => ({ tablename, tableowner: 'identity_migrator' })),
+      allTables.map((tablename) => ({ tablename, tableowner: 'identity_migrator' })),
     );
-    expect(journal.rows).toEqual([{ applied: 1 }]);
+    expect(journal.rows).toEqual([{ applied: migrationCount }]);
   });
 
   it('applies nothing when the migrator runs again', async () => {
@@ -329,10 +350,10 @@ describe('identity-service wiring', () => {
     const journal = await migrator.query<{ applied: number }>(
       'select count(*)::int as applied from drizzle.__drizzle_migrations',
     );
-    expect(journal.rows).toEqual([{ applied: 1 }]);
+    expect(journal.rows).toEqual([{ applied: migrationCount }]);
   });
 
-  it('forces row-level security on the tables that carry an organization', async () => {
+  it('forces row-level security on the tables that carry an organization, and only on them', async () => {
     const tables = await migrator.query<{
       relname: string;
       relrowsecurity: boolean;
@@ -346,13 +367,23 @@ describe('identity-service wiring', () => {
     const policies = await migrator.query<{ tablename: string; policyname: string }>(
       `select tablename, policyname from pg_policies where schemaname = 'public' order by tablename`,
     );
+    // Read from the catalog, not from a list kept by hand: a new table with an organization and
+    // no forced policy fails here, whoever adds it.
+    const withOrganization = await migrator.query<{ table_name: string }>(
+      `select table_name from information_schema.columns
+        where table_schema = 'public' and column_name = 'organization_id'
+        order by table_name`,
+    );
 
-    expect(tables.rows).toEqual([
-      { relname: 'event_versions', relrowsecurity: true, relforcerowsecurity: true },
-      { relname: 'idempotency_keys', relrowsecurity: true, relforcerowsecurity: true },
-      { relname: 'outbox_events', relrowsecurity: true, relforcerowsecurity: true },
-      { relname: 'processed_events', relrowsecurity: false, relforcerowsecurity: false },
-    ]);
+    const withPolicy: readonly string[] = withOrganization.rows.map(({ table_name }) => table_name);
+    expect(withPolicy).toEqual(['event_versions', 'idempotency_keys', 'outbox_events']);
+    expect(tables.rows).toEqual(
+      allTables.map((relname) => ({
+        relname,
+        relrowsecurity: withPolicy.includes(relname),
+        relforcerowsecurity: withPolicy.includes(relname),
+      })),
+    );
     expect(policies.rows).toEqual([
       { tablename: 'event_versions', policyname: 'event_versions_organization_isolation' },
       { tablename: 'idempotency_keys', policyname: 'idempotency_keys_organization_isolation' },
@@ -527,7 +558,7 @@ describe('identity-service wiring', () => {
     const journal = await migrator.query<{ applied: number }>(
       'select count(*)::int as applied from drizzle.__drizzle_migrations',
     );
-    expect(journal.rows).toEqual([{ applied: 1 }]);
+    expect(journal.rows).toEqual([{ applied: migrationCount }]);
   });
 
   it('runs the outbox relay from the start, and it stays healthy against an empty outbox', async () => {

@@ -10,15 +10,18 @@ import type { AppConfig } from './config/app-config.js';
 // --import ./dist/telemetry.js dist/main.js` (the Dockerfile CMD and `pnpm start:dev`).
 //
 // `runApplication` turns a failed start-up (an invalid environment, NATS without the EVENTS stream,
-// a port in use) into one JSON line on the standard error and exit code 1. Every route but the
-// health probes requires an internal token whose `aud` is INTERNAL_TOKEN_AUDIENCE and whose
-// signature verifies with a key of INTERNAL_TOKEN_TRUSTED_ISSUERS; the organization of a request
-// comes from that token only.
+// a port in use) into one JSON line on the standard error and exit code 1. The environment is
+// validated once, here: `provideConfig` hands the result to the application as `CONFIG`. Every
+// route but the health probes requires an internal token whose `aud` is INTERNAL_TOKEN_AUDIENCE and
+// whose signature verifies with a key of INTERNAL_TOKEN_TRUSTED_ISSUERS; each route says which
+// issuer and actor it accepts, and the actor and organization of a request come from that token
+// only. No route of this service requires an organization yet.
 await runApplication({ service: 'identity-service' }, async (): Promise<void> => {
   const config: Readonly<AppConfig> = loadConfig(appConfigSchema);
   const app: NestExpressApplication = await createApplication(AppModule, {
     service: 'identity-service',
     config,
+    provideConfig: true,
     internalToken: {
       verifier: {
         audience: config.INTERNAL_TOKEN_AUDIENCE,
