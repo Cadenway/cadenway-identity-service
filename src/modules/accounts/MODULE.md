@@ -122,8 +122,10 @@ Each flow runs in system transactions of `SystemAccountsUnitOfWork` (see Decisio
   with its counted attempt, then refused. A sign-up verification with `password` runs in two
   transactions around the password check, as the password sign-in does: the first commits the use
   of the right code and reads the hash; the hash is checked outside any transaction; for the right
-  password the second locks the account again and verifies it unless its version moved meanwhile
-  (`auth.sign-up-replaced`).
+  password the second locks the account again and verifies it unless a sign-up replaced it
+  meanwhile (`auth.sign-up-replaced`) or another code verified it (`auth.code-invalid`). The right
+  code is used up by the first transaction, so a failure after it leaves the person to ask for a
+  new code.
 - Password sign-in: a first transaction locks the lockout row of the address, counts the attempt as
   a failure in advance and commits; the hash is checked outside any transaction; for the right
   password a second transaction resets the count and opens the session. Concurrent attempts of an
@@ -149,9 +151,13 @@ Each flow runs in system transactions of `SystemAccountsUnitOfWork` (see Decisio
   `one_time_codes` has no `version`, since the contract fixes the version of a code at 1.
 - Code hashes are HMAC-SHA-256 under a key derived from `PASSWORD_PEPPER` with HKDF, bound to the
   account and the purpose; the argon2 secret is derived from the same pepper under another label.
-- `users.sign_up_count` records the replacements of a pending account rather than deriving them
-  from `version`, which any later change of an unverified account would move. Replacements made by
-  the previous version between migration 0002 and the start of this one are not counted.
+- `users.sign_up_count` counts the accepted sign-ups of an account (its replacements plus one)
+  rather than deriving them from `version`, which any later change of an unverified account would
+  move. Migration 0002 backfills it from `version` in one statement: no released version holds an
+  account yet (0.2.0 has no accounts module), so 0001 and 0002 ship together and no running version
+  can replace a pending account without counting it. Were a version with 0001 but without 0002
+  ever deployed, a later migration would recount the unverified accounts whose `version` exceeds
+  their count once it stopped.
 - The rows of `code_requests` and `sign_in_attempts` for addresses without an account, and expired
   codes, are not purged yet: a purge job arrives with the first durable job of the service.
 - `test/auth-flows.int-spec.ts` proves each route, the events and their routes, the binding of the

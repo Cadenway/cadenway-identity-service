@@ -331,6 +331,23 @@ describe('VerifySignUp', () => {
     expect(sessions.opened).toEqual([]);
   });
 
+  it('answers like a verified address when another code verified the account while the password was checked', async () => {
+    hasher.beforeAnswer = async (): Promise<void> => {
+      hasher.beforeAnswer = (): Promise<void> => Promise.resolve();
+      clock.advance(30_000);
+      await resend.execute({ email: VERIFICATION.email });
+      await verify.execute({ ...VERIFICATION, code: '771204' });
+    };
+
+    await expect(
+      verify.execute({ ...VERIFICATION, password: SIGN_UP.password }),
+    ).rejects.toMatchObject({ refusal: { reason: 'code-invalid' } });
+
+    expect(accounts.userByEmail(VERIFICATION.email)?.isVerified).toBe(true);
+    expect(verifiedEvents()).toHaveLength(1);
+    expect(sessions.opened).toHaveLength(1);
+  });
+
   it('refuses a wrong code, and keeps the attempt counted', async () => {
     await expect(verify.execute({ ...VERIFICATION, code: '000000' })).rejects.toMatchObject({
       refusal: { reason: 'code-invalid' },

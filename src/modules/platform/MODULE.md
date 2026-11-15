@@ -64,7 +64,9 @@ transaction of the use case that changes the data (tenant runner, or system runn
 without organization), a processed id and a version in the transaction of the handler, an
 idempotency key in the transaction the interceptor opens for its route. The relay locks, publishes
 and marks pending rows in system transactions, and purges sent rows after 7 days and processed ids
-after 14.
+after 14. The statement that marks a restricted row sent (`EVENTS_RESTRICTED`, `restricted.`
+subjects) also replaces its payload with a redacted envelope (`@cadenway/nest-messaging` 0.1.2), so
+a single-use code does not stay readable in `outbox_events`, and such a row is never requeued.
 
 ## Decisions
 

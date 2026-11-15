@@ -113,7 +113,9 @@ function signUpRefusal(user: User, password: SignUpPasswordCheck): Refusal | nul
  *    sign-up; the password is checked outside any transaction, as the password sign-in does, so the
  *    hash computation never holds a connection or a lock. A different password answers
  *    `auth.sign-up-replaced`. For the right one, a second transaction locks the account again and
- *    verifies it, unless a sign-up changed it meanwhile (`auth.sign-up-replaced` too).
+ *    verifies it, unless a sign-up replaced it meanwhile (`auth.sign-up-replaced` too) or another
+ *    code verified it (`auth.code-invalid`, as for any verified address). Since the code is used
+ *    up first, a failure after the first transaction leaves the person to ask for a new code.
  */
 export class VerifySignUp {
   // #region Properties
@@ -296,8 +298,12 @@ export class VerifySignUp {
     return this.unitOfWork.run(
       async (store: AccountsStore): Promise<SessionIssuedView | Refusal> => {
         const current: User | null = await store.users.findByEmail(email, true);
+        // Another code verified the account meanwhile: a verified address awaits no code.
+        if (current === null || current.isVerified) {
+          return { reason: 'code-invalid' };
+        }
         // A sign-up between the two transactions replaced the password the check proved.
-        if (current?.version !== checked.pending.version) {
+        if (current.version !== checked.pending.version) {
           return { reason: 'sign-up-replaced' };
         }
         return this.verify(store, current, 'matches', input, now);
