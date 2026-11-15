@@ -38,6 +38,9 @@ EXPOSE 3010
 HEALTHCHECK --interval=10s --timeout=3s --start-period=20s --retries=3 \
   CMD wget -qO- "http://127.0.0.1:${PORT}/health/ready" || exit 1
 # The OpenTelemetry instrumentations are registered before the application loads Express or pg:
-# the loader hook of @cadenway/nest-common, then dist/telemetry.js, then dist/main.js. The same
-# flags are in the start:dev script of package.json; change them together.
-CMD ["node", "--experimental-loader=@cadenway/nest-common/hook.mjs", "--import", "./dist/telemetry.js", "dist/main.js"]
+# the module hooks of @cadenway/nest-common/register, then dist/telemetry.js, then dist/main.js.
+# --max-old-space-size=160 caps the old generation of the heap at about 60 % of the 256M limit of
+# deploy/compose.yaml, so the garbage collector reclaims it before the container reaches its limit
+# (README of @cadenway/nest-common, "Memory"). The same flags are in the start:dev script of
+# package.json; change them together.
+CMD ["node", "--max-old-space-size=160", "--import", "@cadenway/nest-common/register", "--import", "./dist/telemetry.js", "dist/main.js"]
