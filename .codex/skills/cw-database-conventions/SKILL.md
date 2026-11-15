@@ -33,8 +33,10 @@ same in the ten services. `cw-expand-contract-migrations` covers how a schema ch
 - The transaction runner of the service kit issues `SET LOCAL app.organization_id` when a use case
   transaction starts. Never set it by hand; never open a connection around the runner.
 - Two roles per service: `<svc>_migrator` runs the migrations, `<svc>_app` runs the service and is
-  subject to the policies. The service connects with `DATABASE_URL` (`identity_app`); `src/migrate.ts`
-  and drizzle-kit with `MIGRATION_DATABASE_URL` (`identity_migrator`).
+  subject to the policies. The service connects with `DATABASE_URL` (`identity_app`);
+  `src/migrate.ts` and drizzle-kit with `MIGRATION_DATABASE_URL` (`identity_migrator`). The application role reads and
+  writes the tables and sequences of `public` only: the default privileges of the migrator are
+  scoped to that schema, so it never reaches the `drizzle` schema of the migration journal.
 - Row-level security is the second barrier, not the first: a query still filters on
   `organization_id` explicitly (`rules/infrastructure.md`).
 
@@ -45,9 +47,21 @@ same in the ten services. `cw-expand-contract-migrations` covers how a schema ch
 - `statement_timeout`, `lock_timeout` and `idle_in_transaction_session_timeout` are set per role,
   not per query.
 
+## Tables of the service kit
+
+The outbox, processed-ids and versions tables of `@cadenway/nest-messaging/outbox` and the
+`idempotency_keys` table of `@cadenway/nest-common/database` live in this database too. They enter
+the migrations by being re-exported from `src/modules/platform/infrastructure/persistence/` (the
+platform module owns them and holds no business rule); their definition stays the kit's, so they
+are exempt from the naming and common-column rules above. drizzle-kit enables row-level security
+on a table that declares a policy but never forces it: every migration that creates a tenant table,
+of a business module or of the kit, adds `ALTER TABLE "<table>" FORCE ROW LEVEL SECURITY;` by hand,
+as `migrations/0000_platform_tables.sql` does.
+
 ## Not there yet
 
-No table exists yet. The two roles exist in cadenway-ops (`docs/database.md` there) and in
-`compose.dev.yaml`; the test proving that one organization cannot read another's rows, and the
-linting of migrations, arrive with the first module. Until then these conventions are applied by
-review.
+No business table exists yet. The two roles exist in cadenway-ops (`docs/database.md` there) and in
+`compose.dev.yaml`; `test/service-wiring.int-spec.ts` proves on the kit tables that the policies are
+forced, that one organization cannot read or write another's rows, and that the application role
+runs no DDL and cannot touch the migration journal. The same test for each business table, and the linting of migrations, arrive with the
+first business module. Until then these conventions are applied by review.

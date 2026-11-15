@@ -2,41 +2,50 @@ import { baseConfigShape, internalTokenVerifierConfigShape } from '@cadenway/nes
 import type { BaseConfig, InternalTokenVerifierConfig } from '@cadenway/nest-common';
 import { databaseConfigShape } from '@cadenway/nest-common/database';
 import type { DatabaseConfig } from '@cadenway/nest-common/database';
+import { messagingConfigShape } from '@cadenway/nest-messaging';
+import type { MessagingConfig } from '@cadenway/nest-messaging';
 import { z } from 'zod';
 
 /**
  * Type AppConfig
  *
  * @description
- * Variables the running service reads, validated once at start-up by `loadConfig`.
+ * Variables the running service reads, validated when the application is created: by `loadConfig`
+ * in `main.ts` for the options of `createApplication`, and by `ConfigModule` for the providers that
+ * inject `CONFIG`.
  *
  * - `NODE_ENV`, `PORT`, `LOG_LEVEL`, `LOG_PRETTY`: `baseConfigShape` of `@cadenway/nest-common`;
  *   `PORT` is required, the others default to `production`, `info` and `false`.
  * - `DATABASE_URL`: the application role of this service's own database (`identity_app`), subject to
  *   row-level security and holding no DDL right.
+ * - `NATS_URL`, `NATS_USER`, `NATS_PASSWORD`: `messagingConfigShape` of `@cadenway/nest-messaging`.
+ *   `NATS_URL` is required; the user (`identity`) and its password are optional for the kit, which
+ *   accepts an anonymous local broker, but every broker of Cadenway refuses a connection without
+ *   them.
  * - `INTERNAL_TOKEN_AUDIENCE` and `INTERNAL_TOKEN_TRUSTED_ISSUERS`: the `aud` this service accepts
  *   and the public keys of the backends allowed to call it.
  *
- * `NATS_URL`, `NATS_USER` and `NATS_PASSWORD` are set by the definitions but read by nothing until
- * `@cadenway/nest-messaging` is wired; `OTEL_EXPORTER_OTLP_ENDPOINT` is read by `telemetry.ts`.
+ * `OTEL_EXPORTER_OTLP_ENDPOINT` is read by `telemetry.ts`, before the application exists.
  *
- * @type {BaseConfig & DatabaseConfig & InternalTokenVerifierConfig}
+ * @type {BaseConfig & DatabaseConfig & MessagingConfig & InternalTokenVerifierConfig}
  */
-export type AppConfig = BaseConfig & DatabaseConfig & InternalTokenVerifierConfig;
+export type AppConfig = BaseConfig & DatabaseConfig & MessagingConfig & InternalTokenVerifierConfig;
 
 /**
  * Constant appConfigSchema
  *
  * @description
- * Zod schema of `AppConfig`, composed from the shapes of `@cadenway/nest-common` so the names,
- * defaults and validation stay those of the kit. A missing or invalid variable makes `loadConfig`
- * throw a `ConfigError` that names it without printing its value.
+ * Zod schema of `AppConfig`, composed from the shapes of `@cadenway/nest-common` and
+ * `@cadenway/nest-messaging` so the names, defaults and validation stay those of the kit. A missing
+ * or invalid variable makes `loadConfig` throw a `ConfigError` that names it without printing its
+ * value.
  *
  * @type {z.ZodType<AppConfig>}
  */
 export const appConfigSchema: z.ZodType<AppConfig> = z.object({
   ...baseConfigShape,
   ...databaseConfigShape,
+  ...messagingConfigShape,
   ...internalTokenVerifierConfigShape,
 });
 

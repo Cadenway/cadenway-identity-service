@@ -1,11 +1,29 @@
 # Dependencies of cadenway-identity-service for working on it alone: its own PostgreSQL database and
-# NATS JetStream. The service itself runs on the host with `pnpm start:dev`.
+# NATS JetStream with the streams of cadenway-ops. The service itself runs on the host with
+# `pnpm start:dev`; test/service-wiring.int-spec.ts starts this file as a throwaway project.
 #
 # The credentials below are local development values, matching .env.example. PostgreSQL has the two
-# roles of cadenway-ops (docs/database.md there): identity_migrator owns the database and runs the DDL;
-# identity_app runs the service, owns nothing and is subject to row-level security. The roles are created
-# when the data volume is empty: after pulling this change, recreate an older volume once with
+# roles of cadenway-ops (docs/database.md and compose/postgres/init/10-service-databases.sh there):
+# identity_migrator owns the database and runs the DDL; identity_app runs the service, owns nothing,
+# is subject to row-level security and reaches the tables and sequences of `public` only, never the
+# `drizzle` schema of the migration journal. The roles are created when the data volume is empty:
+# after pulling this change, recreate an older volume once with
 # `docker compose -f compose.dev.yaml down --volumes`.
+#
+# NATS runs with the authorization of the broker of cadenway-ops (docs/messaging.md and
+# compose/nats/nats-server.conf there): a connection without a user is refused, and the `identity`
+# user has the same permissions as there. It publishes the subjects of the entities this service
+# owns and the restricted subjects of EVENTS_RESTRICTED, uses the JetStream API of a consumer of
+# EVENTS, and subscribes to its own inbox prefix `_INBOX.identity.>` and to `rebuild.identity.>`
+# only. When cadenway-ops changes those permissions, change them here too. `admin` stands for the
+# user of the `nats-streams` container of cadenway-ops.
+#
+# The streams: `nats-streams` runs compose/nats/ensure-streams.sh of cadenway-ops, copied below, as
+# `admin`, the way the `nats-streams` container of cadenway-ops does. It creates EVENTS,
+# EVENTS_RESTRICTED and EVENTS_DLQ (or aligns them) once NATS is healthy, then checks every minute
+# that they exist, and is healthy while they do, so `up --wait` returns once the streams are in
+# place. A one-shot container would make `up --wait` fail when it exits. The service never creates
+# a stream itself (`manageStreams: false`): it refuses to start without EVENTS.
 name: cadenway-identity-service-dev
 
 services:
@@ -32,19 +50,10 @@ services:
 
   nats:
     image: nats:2.15.2-alpine@sha256:afae2fdbe2e326c65e1246cb83b9d05d319188734f3bd577ac8072daae78a10f
-    # The user of this service, as on the servers: a connection without it is refused.
-    command:
-      [
-        '--jetstream',
-        '--store_dir',
-        '/data',
-        '--http_port',
-        '8222',
-        '--user',
-        'identity',
-        '--pass',
-        'identity',
-      ]
+    command: ['--config', '/etc/nats/nats-server.conf']
+    configs:
+      - source: nats-server
+        target: /etc/nats/nats-server.conf
     ports:
       - '127.0.0.1:${DEV_NATS_PORT:-4222}:4222'
     volumes:
@@ -54,6 +63,25 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+
+  nats-streams:
+    image: natsio/nats-box:0.20.2-nonroot@sha256:d00bffed51ea1a29e58852698bde37020d306af55585882f88dbcf09dd86f5fe
+    entrypoint: ['/bin/sh', '/etc/nats/ensure-streams.sh']
+    environment:
+      NATS_URL: nats://nats:4222
+      NATS_USER: admin
+      NATS_PASSWORD: admin
+    configs:
+      - source: ensure-streams
+        target: /etc/nats/ensure-streams.sh
+    depends_on:
+      nats:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD', 'test', '-e', '/tmp/streams-ready']
+      interval: 2s
+      timeout: 3s
+      retries: 15
 
 configs:
   service-roles:
@@ -73,10 +101,116 @@ configs:
       GRANT CONNECT ON DATABASE identity TO identity_app;
       REVOKE CREATE ON SCHEMA public FROM PUBLIC;
       GRANT USAGE ON SCHEMA public TO identity_app;
-      ALTER DEFAULT PRIVILEGES FOR ROLE identity_migrator GRANT USAGE ON SCHEMAS TO identity_app;
-      ALTER DEFAULT PRIVILEGES FOR ROLE identity_migrator
+      -- Rows, never structure, and only in `public`: the journal of drizzle-kit lives in the
+      -- `drizzle` schema, which the application role must never rewrite.
+      ALTER DEFAULT PRIVILEGES FOR ROLE identity_migrator IN SCHEMA public
         GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO identity_app;
-      ALTER DEFAULT PRIVILEGES FOR ROLE identity_migrator GRANT USAGE, SELECT ON SEQUENCES TO identity_app;
+      ALTER DEFAULT PRIVILEGES FOR ROLE identity_migrator IN SCHEMA public
+        GRANT USAGE, SELECT ON SEQUENCES TO identity_app;
+
+  # `$$` is a literal `$` for Compose; the server reads the quoted `$JS...` subjects as they are.
+  nats-server:
+    content: |
+      port: 4222
+      http_port: 8222
+
+      jetstream {
+        store_dir: /data
+      }
+
+      authorization {
+        users = [
+          { user: admin, password: admin, permissions: { publish: ">", subscribe: ">" } }
+
+          {
+            user: identity
+            password: identity
+            permissions: {
+              publish: {
+                allow: [
+                  "evt.user.>", "evt.session.>", "evt.api-token.>",
+                  "rebuild.*.user", "rebuild.*.session", "rebuild.*.api-token",
+                  "restricted.>",
+                  "$$JS.API.INFO", "$$JS.API.STREAM.NAMES",
+                  "$$JS.API.STREAM.INFO.EVENTS", "$$JS.API.STREAM.INFO.EVENTS_RESTRICTED",
+                  "$$JS.API.CONSUMER.CREATE.EVENTS.>", "$$JS.API.CONSUMER.DURABLE.CREATE.EVENTS.*",
+                  "$$JS.API.CONSUMER.INFO.EVENTS.*", "$$JS.API.CONSUMER.MSG.NEXT.EVENTS.*",
+                  "$$JS.ACK.EVENTS.>"
+                ]
+              }
+              subscribe: { allow: ["_INBOX.identity.>", "rebuild.identity.>"] }
+            }
+          }
+        ]
+      }
+
+  # compose/nats/ensure-streams.sh of cadenway-ops, with `$$` for each `$`; keep the two aligned.
+  ensure-streams:
+    content: |
+      set -eu
+
+      readonly READY=/tmp/streams-ready
+      readonly CHECK_INTERVAL=60
+      readonly RETRY_INTERVAL=5
+
+      # Creates a stream, or updates it when it exists.
+      # Arguments: name, subjects, maximum age, maximum size in bytes, description.
+      ensure_stream() {
+        name=$$1
+        subjects=$$2
+        max_age=$$3
+        max_bytes=$$4
+        description=$$5
+
+        if nats stream info "$$name" >/dev/null 2>&1; then
+          nats stream edit "$$name" --force \
+            --subjects "$$subjects" --description "$$description" \
+            --max-age "$$max_age" --max-bytes "$$max_bytes" --dupe-window 2m >/dev/null
+        else
+          nats stream add "$$name" --defaults \
+            --subjects "$$subjects" --description "$$description" \
+            --storage file --retention limits --discard old --replicas 1 \
+            --max-age "$$max_age" --max-bytes "$$max_bytes" --dupe-window 2m \
+            --max-msgs=-1 --max-msgs-per-subject=-1 --max-msg-size=-1 >/dev/null
+        fi
+      }
+
+      ensure_streams() {
+        ensure_stream EVENTS 'evt.>' 7d 1GiB \
+          'Every Cadenway event.' &&
+          ensure_stream EVENTS_RESTRICTED 'restricted.>' 7d 64MiB \
+            'Identity events carrying a single-use code or link; read by notification-service only.' &&
+          ensure_stream EVENTS_DLQ 'dlq.>' 30d 256MiB \
+            'Messages a consumer gave up on, copied by the dead-letter worker.'
+      }
+
+      streams_exist() {
+        nats stream info EVENTS >/dev/null 2>&1 &&
+          nats stream info EVENTS_RESTRICTED >/dev/null 2>&1 &&
+          nats stream info EVENTS_DLQ >/dev/null 2>&1
+      }
+
+      # `sleep` runs in the background so the shell, as process 1, answers the stop signal at once.
+      trap 'exit 0' TERM INT
+      pause() {
+        sleep "$$1" &
+        wait $$!
+      }
+
+      rm -f "$$READY"
+      while :; do
+        if [ -e "$$READY" ] && streams_exist; then
+          pause "$$CHECK_INTERVAL"
+        elif ensure_streams; then
+          echo 'nats-streams: EVENTS, EVENTS_RESTRICTED and EVENTS_DLQ are in place.'
+          : >"$$READY"
+          pause "$$CHECK_INTERVAL"
+        else
+          rm -f "$$READY"
+          echo 'nats-streams: the streams are not in place yet; trying again.' >&2
+          pause "$$RETRY_INTERVAL"
+        fi
+      done
 
 volumes:
   postgres-data:

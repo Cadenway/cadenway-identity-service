@@ -12,6 +12,9 @@ describe('appConfigSchema', () => {
   const complete: Readonly<Record<string, string>> = {
     PORT: '3010',
     DATABASE_URL: 'postgres://identity_app:identity_app@localhost:5432/identity',
+    NATS_URL: 'nats://localhost:4222',
+    NATS_USER: 'identity',
+    NATS_PASSWORD: 'identity',
     INTERNAL_TOKEN_AUDIENCE: 'identity-service',
     INTERNAL_TOKEN_TRUSTED_ISSUERS: trustedIssuers,
   };
@@ -23,6 +26,9 @@ describe('appConfigSchema', () => {
       LOG_LEVEL: 'info',
       LOG_PRETTY: false,
       DATABASE_URL: 'postgres://identity_app:identity_app@localhost:5432/identity',
+      NATS_URL: 'nats://localhost:4222',
+      NATS_USER: 'identity',
+      NATS_PASSWORD: 'identity',
       INTERNAL_TOKEN_AUDIENCE: 'identity-service',
       INTERNAL_TOKEN_TRUSTED_ISSUERS: {
         'api-gateway': [
@@ -46,7 +52,7 @@ describe('appConfigSchema', () => {
     expect(() => loadConfig(migrationConfigSchema, example)).not.toThrow();
   });
 
-  it('refuses to start without the database, the audience or the trusted issuers', () => {
+  it('refuses to start without the database, the broker, the audience or the trusted issuers', () => {
     expect(() => loadConfig(appConfigSchema, { PORT: '3010' })).toThrow(ConfigError);
     try {
       loadConfig(appConfigSchema, { PORT: '3010' });
@@ -55,6 +61,7 @@ describe('appConfigSchema', () => {
       expect(issues.map((issue) => issue.split(':')[0])).toEqual(
         expect.arrayContaining([
           'DATABASE_URL',
+          'NATS_URL',
           'INTERNAL_TOKEN_AUDIENCE',
           'INTERNAL_TOKEN_TRUSTED_ISSUERS',
         ]),
@@ -69,6 +76,17 @@ describe('appConfigSchema', () => {
       /DATABASE_URL/u,
     );
     expect(() => loadConfig(appConfigSchema, { ...complete, DATABASE_URL: secret })).not.toThrow(
+      /s3cret/u,
+    );
+  });
+
+  it('refuses a broker URL that is not NATS, without printing it', () => {
+    const secret: string = 'http://identity:s3cret@localhost:4222';
+
+    expect(() => loadConfig(appConfigSchema, { ...complete, NATS_URL: secret })).toThrow(
+      /NATS_URL/u,
+    );
+    expect(() => loadConfig(appConfigSchema, { ...complete, NATS_URL: secret })).not.toThrow(
       /s3cret/u,
     );
   });
@@ -104,6 +122,17 @@ describe('migrationConfigSchema', () => {
       loadConfig(migrationConfigSchema, {
         DATABASE_URL: 'postgres://identity_app:identity_app@localhost:5432/identity',
       }),
-    ).toThrow(/MIGRATION_DATABASE_URL: Expected the postgres:\/\/ URL of the migrator role/u);
+    ).toThrow(/MIGRATION_DATABASE_URL: required, not set/u);
+  });
+
+  it('names MIGRATION_DATABASE_URL when it is not a PostgreSQL URL, without printing it', () => {
+    const secret: string = 'mysql://identity_migrator:s3cret@localhost/identity';
+
+    expect(() => loadConfig(migrationConfigSchema, { MIGRATION_DATABASE_URL: secret })).toThrow(
+      /MIGRATION_DATABASE_URL: Expected the postgres:\/\/ URL of the migrator role/u,
+    );
+    expect(() => loadConfig(migrationConfigSchema, { MIGRATION_DATABASE_URL: secret })).not.toThrow(
+      /s3cret/u,
+    );
   });
 });

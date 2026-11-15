@@ -33,7 +33,8 @@ Requirements: Node.js LTS and pnpm (versions in `package.json`), and Docker.
    ```bash
    pnpm install
    cp .env.example .env                        # once
-   docker compose -f compose.dev.yaml up -d
+   docker compose -f compose.dev.yaml up -d --wait
+   pnpm migration:run                          # as identity_migrator; again after a pull that adds one
    pnpm start:dev                              # http://localhost:3010/health/ready
    ```
 
