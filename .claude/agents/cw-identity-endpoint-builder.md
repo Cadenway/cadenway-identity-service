@@ -54,7 +54,7 @@ Load them with the `Skill` tool when their subject comes up (if the tool is unav
 2. Validate input with the contract's validators; map to the use case input.
 3. Map the use case output to the contract response; never leak internal fields.
 4. Return errors in the common format of `@cadenway/nest-common` with a stable `code`.
-5. Require the internal token and the organization context on every route.
+5. Require the internal token on every route, with the `@InternalAccess` issuers, actors and organization requirement its contract states.
 
 ## Checks
 

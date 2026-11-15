@@ -5,14 +5,15 @@
 ## Bootstrap status
 
 The application under `src/` runs on `@cadenway/nest-common` and `@cadenway/nest-messaging`: its
-configuration is validated when the application is created, a failed start-up is one JSON line on
-the standard error, it writes JSON log lines, starts OpenTelemetry before the application, requires
-the internal token on every route but the health probes, connects to NATS as the `identity` user,
-runs the outbox relay, and its readiness checks PostgreSQL and NATS. The one migration creates the
-tables of the service kit, owned by the platform module (`src/modules/platform/MODULE.md`). No
-business code, route or event exists yet: `@cadenway/contracts` defines no event of this service,
-so nothing is published or consumed. The target architecture in this guide is what they must
-follow.
+configuration is validated once, in `main.ts`, and handed to the application; a failed start-up is
+one JSON line on the standard error; it writes JSON log lines, starts OpenTelemetry before the
+application, requires the internal token on every route but the health probes, connects to NATS as
+the `identity` user, runs the outbox relay, and its readiness checks PostgreSQL and NATS. The first
+migration creates the tables of the service kit, owned by the platform module
+(`src/modules/platform/MODULE.md`); the second, the tables of the accounts and sessions modules,
+which serve every route of `openapi/internal/identity-service.yaml` and emit the four events of
+`asyncapi/identity-service.yaml` (their `MODULE.md` files). Nothing is consumed yet. The target
+architecture in this guide is what the next modules must follow.
 
 The commands below are the documented workflow. Inspect the repository's actual manifests and files before running them, and report unavailable checks rather than inventing replacements. Run Git, pnpm, build, and test commands with this repository as the working directory, never from the parent workspace.
 
@@ -80,17 +81,18 @@ value. `.env.example` holds a working local value for each;
 [cadenway-ops](https://github.com/Cadenway/cadenway-ops) (`docs/service-environment.md`) says where
 each value comes from on a server.
 
-| Variable                              | Read by               | Value                                                                |
-| ------------------------------------- | --------------------- | -------------------------------------------------------------------- |
-| `PORT`                                | The service           | `3010`                                                               |
-| `NODE_ENV`, `LOG_LEVEL`, `LOG_PRETTY` | The service           | `production`, `info` and `false` when unset                          |
-| `DATABASE_URL`                        | The service           | Application role `identity_app`                                      |
-| `MIGRATION_DATABASE_URL`              | `src/migrate.ts` only | Migrator role `identity_migrator`; required once a migration exists  |
-| `INTERNAL_TOKEN_AUDIENCE`             | The service           | `identity-service`                                                   |
-| `INTERNAL_TOKEN_TRUSTED_ISSUERS`      | The service           | One line of JSON: the public keys of each backend allowed to call it |
-| `OTEL_EXPORTER_OTLP_ENDPOINT`         | `src/telemetry.ts`    | OTLP over HTTP; unset, nothing leaves the process                    |
-| `NATS_URL`                            | The service           | `nats://` URL of the broker                                          |
-| `NATS_USER`, `NATS_PASSWORD`          | The service           | User `identity` and its password; inbox prefix `_INBOX.identity`     |
+| Variable                              | Read by               | Value                                                                 |
+| ------------------------------------- | --------------------- | --------------------------------------------------------------------- |
+| `PORT`                                | The service           | `3010`                                                                |
+| `NODE_ENV`, `LOG_LEVEL`, `LOG_PRETTY` | The service           | `production`, `info` and `false` when unset                           |
+| `DATABASE_URL`                        | The service           | Application role `identity_app`                                       |
+| `MIGRATION_DATABASE_URL`              | `src/migrate.ts` only | Migrator role `identity_migrator`; required once a migration exists   |
+| `INTERNAL_TOKEN_AUDIENCE`             | The service           | `identity-service`                                                    |
+| `INTERNAL_TOKEN_TRUSTED_ISSUERS`      | The service           | One line of JSON: the public keys of each backend allowed to call it  |
+| `OTEL_EXPORTER_OTLP_ENDPOINT`         | `src/telemetry.ts`    | OTLP over HTTP; unset, nothing leaves the process                     |
+| `NATS_URL`                            | The service           | `nats://` URL of the broker                                           |
+| `NATS_USER`, `NATS_PASSWORD`          | The service           | User `identity` and its password; inbox prefix `_INBOX.identity`      |
+| `PASSWORD_PEPPER`                     | The service           | Secret of 32 characters at least, mixed into password and code hashes |
 
 ### Calling the service locally
 
@@ -115,12 +117,17 @@ const signer = await InternalTokenSigner.create({
   privateJwk: JSON.parse(process.env.PRIVATE_JWK),
 });
 console.log(await signer.sign("identity-service", {
-  actor: { type: "user", id: "01938f6e-8a42-7d5b-b2c9-5e1f3a6d9c24" },
-  organizationId: "01938f6e-6d1a-7c3e-9a51-2f0c4b8d7e10",
+  actor: { type: "anonymous", id: null },
+  organizationId: null,
 }));'
 ```
 
-and send it as `Authorization: Bearer <token>`. Use a workstation key only: the keys of staging and
+and send it as `Authorization: Bearer <token>`. Each route accepts the issuer `api-gateway` only,
+and one kind of actor: `anonymous` (above) for the authentication flows, `system` for
+`POST /internal/v1/tokens/introspect`, and `user` (`{ type: "user", id: "<user id>" }`) for
+`DELETE /internal/v1/sessions/{sessionId}` and `GET /internal/v1/users/{userId}`. No route needs an
+organization. The codes of a sign-up go to notification-service through `EVENTS_RESTRICTED`; alone,
+read them from the outbox row of `one-time-code.issued.v1` on a workstation database only. Use a workstation key only: the keys of staging and
 production stay in the secrets of cadenway-ops.
 
 ### Migrations
@@ -151,8 +158,12 @@ application role reads and writes the rows of its organization only, runs no DDL
 the migration journal of the `drizzle` schema, that the relay runs against an empty outbox, that
 the broker enforces the permissions of cadenway-ops, the health routes (readiness 503 while NATS or
 PostgreSQL is down and from the start of a shutdown, back to 200 once NATS returns) and the
-internal token. It moves to the fixtures of `@cadenway/nest-testing` once that package exports
-them.
+internal token. `test/auth-flows.int-spec.ts` starts its own throwaway project and calls every
+route of `openapi/internal/identity-service.yaml` as the API gateway would, for each success and
+error code of the contract; it checks that the outbox publishes the four events, the code on
+`restricted.` only, that a revoked or idle session introspects as inactive, and that no log line
+holds a password, a code, a token or the pepper. Both move to the fixtures of
+`@cadenway/nest-testing` once that package exports them.
 
 ## Minimum checks by change
 

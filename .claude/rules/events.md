@@ -14,4 +14,4 @@ paths:
   direct NATS client.
 - Handlers deduplicate on the event id and call a use case; they never write another service's data.
 - A shape change is a new version; the old one keeps being emitted until every consumer moved.
-- Events emitted by this service: `user.signed-up`, `user.email-verified`, `user.status-changed`, `session.revoked`, `api-token.created`, `api-token.revoked`.
+- Events emitted by this service, from `asyncapi/identity-service.yaml`: `user.signed-up.v1`, `user.email-verified.v1`, `session.revoked.v1`, and `one-time-code.issued.v1`, restricted (listed in `RESTRICTED_EVENT_NAMES`, published on `restricted.` for notification-service only). Any other event starts in cadenway-api-contracts.

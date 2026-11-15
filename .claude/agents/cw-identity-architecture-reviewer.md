@@ -30,7 +30,7 @@ Structure and boundaries, not style.
 2. Controllers call use cases only; use cases call ports only.
 3. No access to another service's database or internal module; cross-service needs go through contracts or events.
 4. Every route and event exists in the installed `@cadenway/contracts`.
-5. Every query is scoped by organization.
+5. Every query of tenant data is scoped by organization; data without one (accounts, codes, sessions) is named by the verified actor or an explicit key.
 6. NATS is reached only through `@cadenway/nest-messaging`; config, logs and errors through `@cadenway/nest-common`.
 7. MODULE.md is updated when a public API, an event or an invariant changes.
 

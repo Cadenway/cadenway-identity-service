@@ -14,9 +14,9 @@ Who the user is and how they sign in.
 
 **API**: Sign-in, sign-up, MFA, one-time codes, password reset, sessions (list, revoke), API tokens, profile, preferences. Issues the tokens the gateways verify.
 
-**Events emitted**: `user.signed-up`, `user.email-verified`, `user.status-changed`, `session.revoked`, `api-token.created`, `api-token.revoked`.
+**Events emitted**: `user.signed-up.v1`, `user.email-verified.v1`, `session.revoked.v1` and the restricted `one-time-code.issued.v1`, from `asyncapi/identity-service.yaml`. Planned, not in the contracts yet: `user.status-changed`, `api-token.created`, `api-token.revoked`.
 
-**Events consumed**: `member.removed` (closes the user's sessions in that organization).
+**Events consumed**: Nothing yet. Planned, not in the contracts yet: `member.removed` (closes the user's sessions in that organization).
 
 **External systems**: OAuth providers, customers' SAML identity providers, WebAuthn for security keys.
 
@@ -38,6 +38,46 @@ Decided: this service keeps a projection of memberships, fed by the `member.*` e
 
 Everything above comes from the [repositories document](https://claude.ai/artifact/BPinmYxoF3mbK8w9BMB43N) and the
 [integration guide](https://claude.ai/artifact/CpJHVCiFfF9j3KbHQ2S1Et). If the mockup disagrees with this guide, update the guide and its source skill for both assistants.
+
+## Decisions of the walking skeleton
+
+The first slice of authentication (sign-up, verification by code, sign-in by password or by email
+code, introspection, sign-out, current user) was built on these decisions. The code and the
+`MODULE.md` files cite them by number; the user may revise them, through the contracts first when a
+contract states the rule.
+
+1. The address of a sign-up is confirmed with the 6-digit code of the Otp screen, valid 10 minutes,
+   not with the link of the email artboard of the mockup.
+2. Five consecutive failed password sign-ins of an address lock its password sign-in for 15
+   minutes; `details.remainingAttempts` counts down to 1 (the "Il vous reste 3 tentatives" of the
+   mockup after two failures); a success resets the count.
+3. Without "Rester connecté pendant 30 jours" the cookie has no `Max-Age` and the session ends after
+   12 hours of inactivity; with it, `Max-Age` and an absolute lifetime of 30 days. The contract
+   (`openapi/public/auth.yaml`) applies the 12 hours to persistent sessions too and requires a bound
+   for both: this service gives both the same 30 days.
+4. Passwords: 12 characters minimum, no composition rule, argon2id (m = 19 456 KiB, t = 2, p = 1)
+   through `crypto.argon2` with the pepper of `PASSWORD_PEPPER`; a short repository-authored list of
+   obviously weak passwords stands in for the list of compromised passwords, whose provenance is
+   open.
+5. Unverified accounts are not purged.
+6. Login CSRF belongs to the gateway: an exact allowed `Origin` and `Content-Type: application/json`
+   on every unsafe public auth route.
+7. The gateway maps each error `code` to the French `title` of the public problem; this service
+   answers the English reason phrases.
+8. Codes are never logged, never stored in clear (a keyed hash is), and leave this service only in
+   the restricted `one-time-code.issued.v1`.
+
+Decisions of this service, taken while building it:
+
+- A code stops working after five wrong attempts ("a few" in the contract).
+- One code request every 30 seconds per address whatever the purpose, as the contract states, and
+  at most 5 in an hour per address (security review: without a cap, successive codes allow about
+  14 400 guesses a day at a 6-digit code). The cap answers `auth.code-throttled` too.
+- A password attempt is counted as a failure before its hash is checked, so the hash runs outside
+  any transaction while concurrent attempts are all counted; a right password clears the count.
+- The activity of a session is recorded at most once a minute.
+- The flows run in the system transaction runner, since they and their events have no organization
+  (see the `MODULE.md` of the accounts module).
 
 ## Engineering standards
 

@@ -8,9 +8,12 @@ description: "How to publish and consume events reliably with @cadenway/nest-mes
 The wiring is in place (`src/app.module.ts`): `MessagingModule` connects as the NATS user
 `identity`, `OutboxModule` provides the writer, the relay and the deduplicator, and the platform
 module (`src/modules/platform`) brings their tables into the migrations. The README of
-`@cadenway/nest-messaging` is the reference for every call below. No event of this service exists
-in `@cadenway/contracts` yet: an event is published or consumed only once its AsyncAPI spec is
-released (`cw-contract-first`).
+`@cadenway/nest-messaging` is the reference for every call below. The events of this service are
+those of `asyncapi/identity-service.yaml` (`eventSchemas` of
+`@cadenway/contracts/events/identity-service`): `user.signed-up.v1`, `user.email-verified.v1`,
+`session.revoked.v1` and the restricted `one-time-code.issued.v1`, all with `organizationId: null`,
+appended by the outbox adapters of the accounts and sessions modules. Another event is published or
+consumed only once its AsyncAPI spec is released (`cw-contract-first`).
 
 ## Publishing
 
@@ -21,7 +24,7 @@ released (`cw-contract-first`).
 
    ```ts
    await this.outbox.append(tx, eventSchemas, 'session.revoked.v1', {
-     organizationId,
+     organizationId: null,
      actor: { type: 'user', id: userId },
      version,
      sessionId,
@@ -89,9 +92,11 @@ never declare a stream, a consumer or a subject here. An event of a new entity n
 
 An identity event that carries a single-use code or link for a security e-mail is a restricted
 event: listed in `restrictedEvents` of `MessagingModule`, it is published on `restricted.<name>`
-into `EVENTS_RESTRICTED`, which notification-service alone reads. `restrictedEvents` stays unset
-until the first such event is released in `@cadenway/contracts`; listing an event later does not
-move the outbox rows already written.
+into `EVENTS_RESTRICTED`, which notification-service alone reads. `src/app.module.ts` passes
+`RESTRICTED_EVENT_NAMES` of `@cadenway/contracts/events/identity-service` (`one-time-code.issued.v1`
+today), never a list of its own; listing an event later does not move the outbox rows already
+written. The outbox row of a restricted event keeps its payload, the code included, until the purge
+of the sent rows (7 days): the code expires long before, but the row is a secret meanwhile.
 
 ## Rebuilding a consumer
 

@@ -4,7 +4,7 @@ Planned role: cadenway-identity-service owns who the user is and how they sign i
 
 ## Current status
 
-The NestJS application under `src/` runs on `@cadenway/nest-common` and `@cadenway/nest-messaging`: configuration validated at start-up, JSON logs, OpenTelemetry preloaded, the internal token required on every route but the health probes, the NATS connection of the `identity` user with the outbox relay, and a readiness route that checks PostgreSQL and NATS. The only migration creates the tables of the service kit (outbox, processed ids, versions, `Idempotency-Key`), owned by the platform module. No business code, route or event exists yet; the target architecture in this guide is what they must follow.
+The NestJS application under `src/` runs on `@cadenway/nest-common` and `@cadenway/nest-messaging`: configuration validated once at start-up, JSON logs, OpenTelemetry preloaded, the internal token required on every route but the health probes, the NATS connection of the `identity` user with the outbox relay, and a readiness route that checks PostgreSQL and NATS. Two business modules implement the walking skeleton of the installed `@cadenway/contracts`: `accounts` (users, password credentials, one-time codes, the code throttle and the password lockout, with the seven authentication flows and the reading of a user) and `sessions` (opening, introspection and revocation of sessions). They emit `user.signed-up.v1`, `user.email-verified.v1`, `session.revoked.v1` and the restricted `one-time-code.issued.v1` through the outbox. No route requires an organization. MFA, single sign-on, password reset, API tokens, profile and preferences are not built yet; the target architecture in this guide is what they must follow.
 
 ## Read the guides
 

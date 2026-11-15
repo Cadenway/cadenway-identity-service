@@ -13,9 +13,9 @@ Who the user is and how they sign in.
 
 **API**: Sign-in, sign-up, MFA, one-time codes, password reset, sessions (list, revoke), API tokens, profile, preferences. Issues the tokens the gateways verify.
 
-**Events emitted**: `user.signed-up`, `user.email-verified`, `user.status-changed`, `session.revoked`, `api-token.created`, `api-token.revoked`.
+**Events emitted**: `user.signed-up.v1`, `user.email-verified.v1`, `session.revoked.v1` and the restricted `one-time-code.issued.v1`, from `asyncapi/identity-service.yaml`. Planned, not in the contracts yet: `user.status-changed`, `api-token.created`, `api-token.revoked`.
 
-**Events consumed**: `member.removed` (closes the user's sessions in that organization).
+**Events consumed**: Nothing yet. Planned, not in the contracts yet: `member.removed` (closes the user's sessions in that organization).
 
 **External systems**: OAuth providers, customers' SAML identity providers, WebAuthn for security keys.
 

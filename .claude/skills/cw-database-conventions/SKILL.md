@@ -59,11 +59,24 @@ on a table that declares a policy but never forces it: every migration that crea
 of a business module or of the kit, adds `ALTER TABLE "<table>" FORCE ROW LEVEL SECURITY;` by hand,
 as `migrations/0000_platform_tables.sql` does.
 
+## Tables without an organization
+
+The business tables of today (`users`, `password_credentials`, `one_time_codes`, `code_requests`,
+`sign_in_attempts` of the accounts module, `sessions` of the sessions module) carry no
+`organization_id`: the contracts give an account, its codes, its lockout and its sessions no
+organization. They therefore have no policy and nothing to force; their MODULE.md says so, and every
+query names its row by key or by the verified actor. Their use cases run in the system runner: the
+kit README reserves it for "events or routes without an organization" but also says "never use it
+to serve the request of a user", so this is a reviewed exception, recorded in the Decisions of both
+MODULE.md files and bounded to these tables and to outbox rows without organization. A tenant table
+is always read and written through the tenant runner. A table that gains an organization gets its
+column, its policy and its `FORCE` statement in a new migration.
+
 ## Not there yet
 
-No business table exists yet. The two roles exist in cadenway-ops (`docs/database.md` there) and in
-`compose.dev.yaml`; `test/service-wiring.int-spec.ts` proves on the kit tables that the policies are
-forced, that one organization cannot read or write another's rows, and that the application role
-runs no DDL and cannot touch the migration journal. The same test for each business table, and the
-linting of migrations, arrive with the first business module. Until then these conventions are
-applied by review.
+The two roles exist in cadenway-ops (`docs/database.md` there) and in `compose.dev.yaml`;
+`test/service-wiring.int-spec.ts` proves that the policies of the kit tables are forced and that no
+other table has one, that one organization cannot read or write another's rows, and that the
+application role runs no DDL and cannot touch the migration journal; `test/auth-flows.int-spec.ts`
+exercises the business tables as the application role. The linting of migrations is not there yet:
+these conventions are applied by review.
