@@ -34,9 +34,10 @@ same in the ten services. `cw-expand-contract-migrations` covers how a schema ch
   transaction starts. Never set it by hand; never open a connection around the runner.
 - Two roles per service: `<svc>_migrator` runs the migrations, `<svc>_app` runs the service and is
   subject to the policies. The service connects with `DATABASE_URL` (`identity_app`);
-  `src/migrate.ts` and drizzle-kit with `MIGRATION_DATABASE_URL` (`identity_migrator`). The application role reads and
-  writes the tables and sequences of `public` only: the default privileges of the migrator are
-  scoped to that schema, so it never reaches the `drizzle` schema of the migration journal.
+  `src/migrate.ts` and drizzle-kit with `MIGRATION_DATABASE_URL` (`identity_migrator`). The
+  application role reads and writes the tables and sequences of `public` only: the default
+  privileges of the migrator are scoped to that schema, so it never reaches the `drizzle` schema of
+  the migration journal.
 - Row-level security is the second barrier, not the first: a query still filters on
   `organization_id` explicitly (`rules/infrastructure.md`).
 
@@ -63,5 +64,6 @@ as `migrations/0000_platform_tables.sql` does.
 No business table exists yet. The two roles exist in cadenway-ops (`docs/database.md` there) and in
 `compose.dev.yaml`; `test/service-wiring.int-spec.ts` proves on the kit tables that the policies are
 forced, that one organization cannot read or write another's rows, and that the application role
-runs no DDL and cannot touch the migration journal. The same test for each business table, and the linting of migrations, arrive with the
-first business module. Until then these conventions are applied by review.
+runs no DDL and cannot touch the migration journal. The same test for each business table, and the
+linting of migrations, arrive with the first business module. Until then these conventions are
+applied by review.
