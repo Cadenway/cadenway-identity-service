@@ -1,29 +1,34 @@
-import { NestFactory } from '@nestjs/core';
-import type { INestApplication } from '@nestjs/common';
+import { createApplication } from '@cadenway/nest-common';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 
 import { AppModule } from './app.module.js';
-import { loadAppConfig } from './config/app-config.js';
-import type { AppConfig } from './config/app-config.js';
+import { config } from './config/config.js';
 
-/**
- * Constant config
- *
- * @description
- * Validated configuration for the service process.
- *
- * @type {AppConfig}
- */
-const config: AppConfig = loadAppConfig(process.env);
+// Started after `telemetry.js`: `node --experimental-loader=@cadenway/nest-common/hook.mjs
+// --import ./dist/telemetry.js dist/main.js` (Dockerfile and `pnpm start:dev`).
 /**
  * Constant app
  *
  * @description
- * Nest application serving the internal HTTP API.
+ * Nest application serving the internal HTTP API, with every shared format of
+ * `@cadenway/nest-common` applied: JSON log lines, `application/problem+json` errors, zod
+ * validation, entity tags, a 1 MB JSON body limit, a 10 second request budget and shutdown hooks
+ * that drain connections before the process exits.
  *
- * @type {INestApplication}
+ * Every route but the health probes requires an internal token whose `aud` is
+ * `INTERNAL_TOKEN_AUDIENCE` and whose signature verifies with a key of
+ * `INTERNAL_TOKEN_TRUSTED_ISSUERS`; the organization of a request comes from that token only.
+ *
+ * @type {NestExpressApplication}
  */
-const app: INestApplication = await NestFactory.create(AppModule);
-// The deployment starts the new version next to the old one, then stops the old one: the stop must
-// close open connections instead of cutting them.
-app.enableShutdownHooks();
-await app.listen(config.port);
+const app: NestExpressApplication = await createApplication(AppModule, {
+  service: 'identity-service',
+  config,
+  internalToken: {
+    verifier: {
+      audience: config.INTERNAL_TOKEN_AUDIENCE,
+      trustedIssuers: config.INTERNAL_TOKEN_TRUSTED_ISSUERS,
+    },
+  },
+});
+await app.listen(config.PORT);

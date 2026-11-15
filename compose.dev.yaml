@@ -1,7 +1,11 @@
 # Dependencies of cadenway-identity-service for working on it alone: its own PostgreSQL database and
 # NATS JetStream. The service itself runs on the host with `pnpm start:dev`.
 #
-# The credentials below are local development values, matching .env.example.
+# The credentials below are local development values, matching .env.example. PostgreSQL has the two
+# roles of cadenway-ops (docs/database.md there): identity_migrator owns the database and runs the DDL;
+# identity_app runs the service, owns nothing and is subject to row-level security. The roles are created
+# when the data volume is empty: after pulling this change, recreate an older volume once with
+# `docker compose -f compose.dev.yaml down --volumes`.
 name: cadenway-identity-service-dev
 
 services:
@@ -9,21 +13,38 @@ services:
     image: postgres:18.6-alpine@sha256:9ba53c7d41ea093baf5c1ba635ba5434c4f979880527d49bb7d9237d3193085b
     environment:
       POSTGRES_DB: identity
-      POSTGRES_USER: identity
-      POSTGRES_PASSWORD: identity
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    configs:
+      - source: service-roles
+        target: /docker-entrypoint-initdb.d/10-service-roles.sql
     ports:
       - '127.0.0.1:${DEV_POSTGRES_PORT:-5432}:5432'
     volumes:
       - postgres-data:/var/lib/postgresql
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U identity -d identity']
+      # Over TCP: during the first start the image runs the init scripts on a server that listens on
+      # its socket only, so the roles exist once TCP answers.
+      test: ['CMD-SHELL', 'pg_isready -h 127.0.0.1 -U postgres -d identity']
       interval: 5s
       timeout: 3s
       retries: 10
 
   nats:
     image: nats:2.15.2-alpine@sha256:afae2fdbe2e326c65e1246cb83b9d05d319188734f3bd577ac8072daae78a10f
-    command: ['--jetstream', '--store_dir', '/data', '--http_port', '8222']
+    # The user of this service, as on the servers: a connection without it is refused.
+    command:
+      [
+        '--jetstream',
+        '--store_dir',
+        '/data',
+        '--http_port',
+        '8222',
+        '--user',
+        'identity',
+        '--pass',
+        'identity',
+      ]
     ports:
       - '127.0.0.1:${DEV_NATS_PORT:-4222}:4222'
     volumes:
@@ -33,6 +54,29 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+
+configs:
+  service-roles:
+    content: |
+      CREATE ROLE identity_migrator LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS
+        PASSWORD 'identity_migrator';
+      CREATE ROLE identity_app LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS
+        PASSWORD 'identity_app';
+      ALTER ROLE identity_migrator SET statement_timeout = '15min';
+      ALTER ROLE identity_migrator SET lock_timeout = '5s';
+      ALTER ROLE identity_migrator SET idle_in_transaction_session_timeout = '60s';
+      ALTER ROLE identity_app SET statement_timeout = '10s';
+      ALTER ROLE identity_app SET lock_timeout = '5s';
+      ALTER ROLE identity_app SET idle_in_transaction_session_timeout = '30s';
+      ALTER DATABASE identity OWNER TO identity_migrator;
+      REVOKE ALL ON DATABASE identity FROM PUBLIC;
+      GRANT CONNECT ON DATABASE identity TO identity_app;
+      REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+      GRANT USAGE ON SCHEMA public TO identity_app;
+      ALTER DEFAULT PRIVILEGES FOR ROLE identity_migrator GRANT USAGE ON SCHEMAS TO identity_app;
+      ALTER DEFAULT PRIVILEGES FOR ROLE identity_migrator
+        GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO identity_app;
+      ALTER DEFAULT PRIVILEGES FOR ROLE identity_migrator GRANT USAGE, SELECT ON SEQUENCES TO identity_app;
 
 volumes:
   postgres-data:

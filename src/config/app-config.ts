@@ -1,55 +1,79 @@
-/**
- * Constant DEFAULT_PORT
- *
- * @description
- * Local port used when `PORT` is not set.
- *
- * @type {number}
- */
-export const DEFAULT_PORT: number = 3010;
+import { baseConfigShape, internalTokenVerifierConfigShape } from '@cadenway/nest-common';
+import type { BaseConfig, InternalTokenVerifierConfig } from '@cadenway/nest-common';
+import { databaseConfigShape } from '@cadenway/nest-common/database';
+import type { DatabaseConfig } from '@cadenway/nest-common/database';
+import { z } from 'zod';
 
 /**
- * Interface AppConfig
+ * Type AppConfig
  *
  * @description
- * Start-up settings read from the environment.
+ * Variables the running service reads, validated once at start-up by `loadConfig`.
  *
- * Bootstrap placeholder: the typed, validated configuration of `@cadenway/nest-common` replaces it
- * once that package is published.
+ * - `NODE_ENV`, `PORT`, `LOG_LEVEL`, `LOG_PRETTY`: `baseConfigShape` of `@cadenway/nest-common`;
+ *   `PORT` is required, the others default to `production`, `info` and `false`.
+ * - `DATABASE_URL`: the application role of this service's own database (`identity_app`), subject to
+ *   row-level security and holding no DDL right.
+ * - `INTERNAL_TOKEN_AUDIENCE` and `INTERNAL_TOKEN_TRUSTED_ISSUERS`: the `aud` this service accepts
+ *   and the public keys of the backends allowed to call it.
+ *
+ * `NATS_URL`, `NATS_USER` and `NATS_PASSWORD` are set by the definitions but read by nothing until
+ * `@cadenway/nest-messaging` is wired; `OTEL_EXPORTER_OTLP_ENDPOINT` is read by `telemetry.ts`.
+ *
+ * @type {BaseConfig & DatabaseConfig & InternalTokenVerifierConfig}
  */
-export interface AppConfig {
+export type AppConfig = BaseConfig & DatabaseConfig & InternalTokenVerifierConfig;
+
+/**
+ * Constant appConfigSchema
+ *
+ * @description
+ * Zod schema of `AppConfig`, composed from the shapes of `@cadenway/nest-common` so the names,
+ * defaults and validation stay those of the kit. A missing or invalid variable makes `loadConfig`
+ * throw a `ConfigError` that names it without printing its value.
+ *
+ * @type {z.ZodType<AppConfig>}
+ */
+export const appConfigSchema: z.ZodType<AppConfig> = z.object({
+  ...baseConfigShape,
+  ...databaseConfigShape,
+  ...internalTokenVerifierConfigShape,
+});
+
+/**
+ * Interface MigrationConfig
+ *
+ * @description
+ * Variable the one-off migration container reads (`node dist/migrate.js`). The running service
+ * never reads it: only the migrator role may change the structure of the database.
+ */
+export interface MigrationConfig {
   // #region Properties
   /**
-   * Property port
+   * Property MIGRATION_DATABASE_URL
    *
    * @description
-   * TCP port of the internal HTTP API.
+   * Connection string of the migrator role (`identity_migrator`), which owns the tables and runs the
+   * DDL. A secret; cadenway-ops passes it from `IDENTITY_SERVICE_MIGRATION_DATABASE_URL`.
    *
-   * @type {number}
+   * @type {string}
    * @readonly
    */
-  readonly port: number;
+  readonly MIGRATION_DATABASE_URL: string;
   // #endregion
 }
 
 /**
- * Function loadAppConfig
+ * Constant migrationConfigSchema
  *
  * @description
- * Reads the start-up settings from an environment map.
+ * Zod schema of `MigrationConfig`: a `postgres://` or `postgresql://` URL, like `DATABASE_URL`.
  *
- * @param {Readonly<Record<string, string | undefined>>} env - Environment variables, usually `process.env`.
- * @returns {AppConfig} The validated settings.
- * @throws {RangeError} When `PORT` is set but is not an integer between 1 and 65535.
+ * @type {z.ZodType<MigrationConfig>}
  */
-export function loadAppConfig(env: Readonly<Record<string, string | undefined>>): AppConfig {
-  const raw: string | undefined = env.PORT;
-  if (raw === undefined || raw === '') {
-    return { port: DEFAULT_PORT };
-  }
-  const port: number = Number(raw);
-  if (!Number.isInteger(port) || port < 1 || port > 65535) {
-    throw new RangeError(`PORT must be an integer between 1 and 65535, received "${raw}".`);
-  }
-  return { port };
-}
+export const migrationConfigSchema: z.ZodType<MigrationConfig> = z.object({
+  MIGRATION_DATABASE_URL: z.url({
+    protocol: /^postgres(?:ql)?$/u,
+    error: 'Expected the postgres:// URL of the migrator role.',
+  }),
+});
