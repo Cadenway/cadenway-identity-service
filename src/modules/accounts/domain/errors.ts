@@ -117,6 +117,30 @@ export class EmailAlreadyVerifiedError extends DomainError {
 }
 
 /**
+ * Class SignUpReplacedError
+ *
+ * @description
+ * A verification with the right code that does not prove the latest sign-up of the address: its
+ * password differs from the one of that sign-up, or it sends none although a later sign-up replaced
+ * the name and password of the pending account (`auth.sign-up-replaced`).
+ */
+export class SignUpReplacedError extends DomainError {
+  // #region Constructor
+  /**
+   * Constructor
+   *
+   * @description
+   * Refuses the verification without quoting any password.
+   *
+   * @constructor
+   */
+  public constructor() {
+    super('The verification does not prove the latest sign-up of the address.');
+  }
+  // #endregion
+}
+
+/**
  * Class PasswordTooShortError
  *
  * @description
@@ -157,7 +181,8 @@ export class PasswordTooShortError extends DomainError {
  * Class CodeThrottledError
  *
  * @description
- * A code request for an address and a purpose less than 30 seconds after the previous one.
+ * A code request of an address, whatever its purpose, less than 30 seconds after the last accepted
+ * one, or once 5 were accepted in the current hour.
  */
 export class CodeThrottledError extends DomainError {
   // #region Properties
@@ -165,7 +190,7 @@ export class CodeThrottledError extends DomainError {
    * Property resendAvailableAt
    *
    * @description
-   * When the next request for the same address and purpose is accepted.
+   * When the next request of the address is accepted.
    *
    * @type {Date}
    * @readonly
@@ -184,7 +209,7 @@ export class CodeThrottledError extends DomainError {
    * @constructor
    */
   public constructor(resendAvailableAt: Date) {
-    super('A code was requested for this address less than 30 seconds ago.');
+    super('A code was requested for this address too recently or too often.');
     this.resendAvailableAt = resendAvailableAt;
   }
   // #endregion

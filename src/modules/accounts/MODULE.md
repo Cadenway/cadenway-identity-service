@@ -4,7 +4,8 @@
 
 Who the person is and how they prove it before a session exists:
 
-- users: name, address, language, the verified flag and the version of the account;
+- users: name, address, language, the verified flag, the version of the account and its count of
+  accepted sign-ups;
 - password credentials: the argon2id hash of each password, with the pepper;
 - one-time codes: the 6-digit codes of the email verification and of the sign-in by email, stored
   as keyed hashes, with their expiry and their wrong attempts;
@@ -30,7 +31,8 @@ them, their introspection and their revocation.
 | `code_requests`        | `email`                                | None: per address, account or not, no policy    |
 | `sign_in_attempts`     | `email`                                | None: per address, account or not, no policy    |
 
-Created by `migrations/0001_accounts_and_sessions.sql`. Row-level security applies to the tables
+Created by `migrations/0001_accounts_and_sessions.sql`; `users.sign_up_count` by
+`migrations/0002_sign_up_count.sql`, which backfills it from the version. Row-level security applies to the tables
 with an `organization_id` (`cw-database-conventions`); none of these has one, since the contracts
 give an account, its codes and its lockout no organization (`organizationId` is always `null` in
 `asyncapi/identity-service.yaml`). So they carry no policy and nothing to force: the barrier is
@@ -48,7 +50,7 @@ From `openapi/internal/identity-service.yaml` of the installed `@cadenway/contra
 | `POST /internal/v1/auth/sign-in-methods`           | `anonymous` | 200         | 400                                                                                           |
 | `POST /internal/v1/auth/sign-up`                   | `anonymous` | 202         | 400, 409 `auth.email-taken`, 422 terms or password, 429 `auth.code-throttled`                 |
 | `POST /internal/v1/auth/sign-up/code`              | `anonymous` | 202         | 400, 429 `auth.code-throttled`                                                                |
-| `POST /internal/v1/auth/sign-up/verification`      | `anonymous` | 200         | 400, 422 `auth.code-invalid`, `auth.code-expired`                                             |
+| `POST /internal/v1/auth/sign-up/verification`      | `anonymous` | 200         | 400, 422 `auth.code-invalid`, `auth.code-expired`, `auth.sign-up-replaced`                    |
 | `POST /internal/v1/auth/sign-in`                   | `anonymous` | 200         | 400, 403 `auth.email-not-verified`, 422 `auth.invalid-credentials`, 429 `auth.account-locked` |
 | `POST /internal/v1/auth/sign-in/code`              | `anonymous` | 202         | 400, 429 `auth.code-throttled`                                                                |
 | `POST /internal/v1/auth/sign-in/code/verification` | `anonymous` | 200         | 400, 422 `auth.code-invalid`, `auth.code-expired`                                             |
@@ -70,7 +72,10 @@ All appended to the outbox in the transaction of the use case, in a system trans
 `one-time-code.issued.v1` is restricted: listed in `restrictedEvents` from
 `RESTRICTED_EVENT_NAMES`, it is published on `restricted.one-time-code.issued.v1` into
 `EVENTS_RESTRICTED`, read by notification-service only. It is the only place the code exists in
-clear, with its outbox row until the kit purges sent rows (7 days). No rebuild use case exists yet:
+clear, with its outbox row until the relay publishes it: the relay of `@cadenway/nest-messaging`
+0.1.2 then replaces the payload with a redacted envelope in the statement that marks the row sent,
+so a requeue never sends it again (a code lost with NATS is replaced by a new request). No rebuild
+use case exists yet:
 no consumer of these events keeps a projection to rebuild.
 
 ## Events consumed
@@ -84,7 +89,14 @@ None.
   list of compromised passwords (a short repository-authored list until the provenance of the full
   list is decided).
 - A verified address cannot be signed up again (`auth.email-taken`); an unverified one keeps its
-  account id and takes the new name and password, with the next version.
+  account id and takes the new name and password, with the next version and one more accepted
+  sign-up (a refused sign-up changes nothing).
+- The verification is bound to the password of the latest sign-up (`@cadenway/contracts` 0.4.0).
+  The code is checked first: a wrong or unusable one answers `auth.code-invalid` or
+  `auth.code-expired` whatever `password` holds. With the right code, a `password` that differs
+  from the one of the latest sign-up, or no `password` once the address was signed up more than
+  once, answers `auth.sign-up-replaced` and the code stops working. Without `password`, an address
+  signed up once is verified by its code alone.
 - Codes: 6 digits, 10 minutes (`email-verification`, `sign-in`), single use, stopped by a newer code
   of the same account and purpose, and by the fifth wrong attempt. A code from an older email answers
   `auth.code-expired`, a wrong one `auth.code-invalid`.
@@ -107,7 +119,11 @@ Each flow runs in system transactions of `SystemAccountsUnitOfWork` (see Decisio
   is eligible, in one transaction.
 - Verification and code sign-in: the current code is locked; its use, the verification and its
   event, and the session opened by the sessions module commit together. A wrong code is committed
-  with its counted attempt, then refused.
+  with its counted attempt, then refused. A sign-up verification with `password` runs in two
+  transactions around the password check, as the password sign-in does: the first commits the use
+  of the right code and reads the hash; the hash is checked outside any transaction; for the right
+  password the second locks the account again and verifies it unless its version moved meanwhile
+  (`auth.sign-up-replaced`).
 - Password sign-in: a first transaction locks the lockout row of the address, counts the attempt as
   a failure in advance and commits; the hash is checked outside any transaction; for the right
   password a second transaction resets the count and opens the session. Concurrent attempts of an
@@ -133,8 +149,12 @@ Each flow runs in system transactions of `SystemAccountsUnitOfWork` (see Decisio
   `one_time_codes` has no `version`, since the contract fixes the version of a code at 1.
 - Code hashes are HMAC-SHA-256 under a key derived from `PASSWORD_PEPPER` with HKDF, bound to the
   account and the purpose; the argon2 secret is derived from the same pepper under another label.
+- `users.sign_up_count` records the replacements of a pending account rather than deriving them
+  from `version`, which any later change of an unverified account would move. Replacements made by
+  the previous version between migration 0002 and the start of this one are not counted.
 - The rows of `code_requests` and `sign_in_attempts` for addresses without an account, and expired
   codes, are not purged yet: a purge job arrives with the first durable job of the service.
-- `test/auth-flows.int-spec.ts` proves each route, the events and their routes, concurrent
-  attempts, the rollback of a unit of work, and the absence of secrets from the logs, on real
-  PostgreSQL and NATS.
+- `test/auth-flows.int-spec.ts` proves each route, the events and their routes, the binding of the
+  verification to the password of the latest sign-up, concurrent attempts, the rollback of a unit of
+  work, the redaction of a sent code in the outbox, and the absence of secrets from the logs, on real
+  PostgreSQL and NATS; it reads codes from `EVENTS_RESTRICTED`, as notification-service does.

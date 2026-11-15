@@ -89,6 +89,7 @@ describe('answerRefusals', () => {
       [{ reason: 'password-compromised' }, 422, 'auth.password-compromised'],
       [{ reason: 'code-invalid' }, 422, 'auth.code-invalid'],
       [{ reason: 'code-expired' }, 422, 'auth.code-expired'],
+      [{ reason: 'sign-up-replaced' }, 422, 'auth.sign-up-replaced'],
       [{ reason: 'email-taken' }, 409, 'auth.email-taken'],
       [{ reason: 'email-not-verified' }, 403, 'auth.email-not-verified'],
       [{ reason: 'user-not-found' }, 404, 'user.not-found'],
@@ -97,6 +98,15 @@ describe('answerRefusals', () => {
     for (const [refusal, status, code] of expected) {
       expect((await problemOf(refusal)).problem).toMatchObject({ status, code });
     }
+  });
+
+  it('answers a replaced sign-up with the English title of its status and no details', async () => {
+    expect((await problemOf({ reason: 'sign-up-replaced' })).problem).toEqual({
+      type: 'about:blank',
+      title: 'Unprocessable Content',
+      status: 422,
+      code: 'auth.sign-up-replaced',
+    });
   });
 
   it('carries the details the gateway formats its lines from', async () => {

@@ -79,15 +79,18 @@ export interface AcceptedCodeRequest {
  * Class CodeRequestThrottle
  *
  * @description
- * How often a code may be asked for one address, whatever the purpose. Sources:
+ * How often a code may be asked for one address. Sources:
  *
- * - `openapi/internal/identity-service.yaml`: "at most one request every 30 seconds per address,
- *   account or not"; a repeated sign-up "follows the 30-second throttle of the codes"; and the
+ * - `CodeThrottled` of `openapi/internal/identity-service.yaml` (`@cadenway/contracts` 0.4.0): the
+ *   code requests of an address are throttled whatever their purpose, account or not, so the
+ *   sign-up, the sign-up code and the sign-in code routes count together; a request is refused less
+ *   than 30 seconds after the last accepted one, and once 5 were accepted in the current hour, which
+ *   starts with the first request accepted after the previous hour ended; `resendAvailableAt` is 30
+ *   seconds after the last accepted request, or the end of the hour. The 30 seconds are also the
  *   "Renvoyer le code (30 s)" of the Otp screen of the mockup;
- * - decision of this service (security review of the walking skeleton): at most 5 accepted requests
- *   per address in an hour. Each code takes 5 wrong attempts, so without a cap two codes a minute
- *   would allow about 14 400 guesses a day at a 6-digit code; with it, 25 an hour. The cap answers
- *   the same `auth.code-throttled`, with the end of the hour as `resendAvailableAt`.
+ * - why the hourly cap (security review of the walking skeleton): each code takes 5 wrong attempts,
+ *   so without a cap two codes a minute would allow about 14 400 guesses a day at a 6-digit code;
+ *   with it, 25 an hour.
  *
  * The throttle counts requests, not codes: a request for an address without an account counts too,
  * so the answer never tells whether an account exists.

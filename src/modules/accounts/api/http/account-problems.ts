@@ -77,6 +77,7 @@ function shapeOf(refusal: Refusal): ProblemShape {
     case 'password-compromised':
     case 'code-invalid':
     case 'code-expired':
+    case 'sign-up-replaced':
       return { status: 422, code: `auth.${refusal.reason}` };
     case 'password-too-short':
       return {

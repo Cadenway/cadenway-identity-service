@@ -76,6 +76,14 @@ verified. A value below is changed here first, then in code.
   replaces the previous one; the fifth wrong attempt stops a code. Stored as HMAC-SHA-256 under a
   key derived from the pepper by HKDF, bound to the account and the purpose; the digits leave the
   service only in the restricted `one-time-code.issued.v1`.
+- Sign-up verification: bound to the password of the latest sign-up of the address
+  (`@cadenway/contracts` 0.4.0). The code is checked first, so a wrong or unusable code answers as
+  before whatever `password` holds; with the right code, a `password` that differs from the one of
+  the latest sign-up, or no `password` once a later accepted sign-up replaced the pending account
+  (`users.sign_up_count` above 1), answers `auth.sign-up-replaced` and uses the code up. The hash is
+  checked outside any transaction, between a first transaction that uses the code and a second that
+  verifies the account if its version did not move. Without it, signing up someone else's pending
+  address again would let its owner verify a password chosen by another person.
 - Resend: one code request every 30 seconds per address whatever the purpose, sign-ups included,
   account or not (45 s for an email change in the mockup, when it exists), and 5 at most per address
   in an hour, so successive codes cannot be guessed at length (5 codes of 5 attempts, 25 guesses an
