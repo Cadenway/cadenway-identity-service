@@ -1,0 +1,34 @@
+import type { OpenedSession } from '../../models/sessions/opened-session.model.js';
+import type { AccountView } from '../accounts/account-view.projection.js';
+
+/**
+ * Interface SessionIssuedView
+ *
+ * @description
+ * The answer of a successful sign-in (`SessionIssued` of the contract).
+ */
+export interface SessionIssuedView {
+  // #region Properties
+  /**
+   * Property session
+   *
+   * @description
+   * The session and its token, which leaves this service here only.
+   *
+   * @type {OpenedSession}
+   * @readonly
+   */
+  readonly session: OpenedSession;
+
+  /**
+   * Property user
+   *
+   * @description
+   * The signed-in account.
+   *
+   * @type {AccountView}
+   * @readonly
+   */
+  readonly user: AccountView;
+  // #endregion
+}

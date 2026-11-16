@@ -8,6 +8,8 @@ paths:
 
 # Events
 
+- In V2, place incoming handlers under `presentation/messaging/handlers/<family>/`; use the
+  existing handler paths in modules awaiting migration.
 - Event names: `<entity>.<past-tense-fact>.v<version>`; the payload is the AsyncAPI schema of the
   installed `@cadenway/contracts`.
 - Publish only through the outbox of `@cadenway/nest-messaging`, in the use case transaction. Never a

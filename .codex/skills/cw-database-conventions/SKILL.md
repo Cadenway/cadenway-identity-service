@@ -75,8 +75,8 @@ column, its policy and its `FORCE` statement in a new migration.
 ## Not there yet
 
 The two roles exist in cadenway-ops (`docs/database.md` there) and in `compose.dev.yaml`;
-`test/service-wiring.int-spec.ts` proves that the policies of the kit tables are forced and that no
+`tests/service-wiring.int-spec.ts` proves that the policies of the kit tables are forced and that no
 other table has one, that one organization cannot read or write another's rows, and that the
-application role runs no DDL and cannot touch the migration journal; `test/auth-flows.int-spec.ts`
+application role runs no DDL and cannot touch the migration journal; `tests/auth-flows.int-spec.ts`
 exercises the business tables as the application role. The linting of migrations is not there yet:
 these conventions are applied by review.

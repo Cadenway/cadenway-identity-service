@@ -24,7 +24,7 @@ inspection from executed checks.
 
 ## Role scope
 
-Specs (`*.spec.ts`, `test/`). Tests describe behavior in the domain's words; fixtures come from the mockup data (Atelier Nord, Sprint 14).
+Specs (`*.spec.ts`, `tests/`). Tests describe behavior in the domain's words; fixtures come from the mockup data (Atelier Nord, Sprint 14).
 
 ## The request is the deliverable
 

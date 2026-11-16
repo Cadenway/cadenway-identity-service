@@ -15,10 +15,13 @@ gateway sets from the token.
 
 ## Public entry points
 
-| Entry point                         | Consumers |
-| ----------------------------------- | --------- |
-| `sessions.module`                   | accounts  |
-| `application/commands/open-session` | accounts  |
+| Entry point                   | Consumers |
+| ----------------------------- | --------- |
+| `sessions.module`             | accounts  |
+| `public/session/open-session` | accounts  |
+
+`SessionsModule` exports the `OpenSession` provider. Accounts binds it to its own session opener
+port. The public signature exposes `OpenSessionInput` and `OpenSessionOutput`.
 
 ## Owned tables
 
@@ -74,7 +77,7 @@ a session.
 
 `SystemSessionsUnitOfWork` runs each use case in one system transaction (see Decisions).
 `OpenSession` runs inside the transaction of the sign-in of the accounts module and joins it, so a
-session exists only if the sign-in commits (`test/auth-flows.int-spec.ts` proves the rollback). The
+session exists only if the sign-in commits (`tests/auth-flows.int-spec.ts` proves the rollback). The
 revocation locks the session row, writes it and appends its event together. The introspection
 writes the last activity only when it moved by a minute, without a lock: a concurrent later write
 wins.
@@ -99,5 +102,5 @@ wins.
   says "Either session also ends after 12 hours of inactivity by default"; a longer inactivity for
   them would start in cadenway-api-contracts.
 - The token is SHA-256 hashed without a key: 256 random bits cannot be recovered from their hash.
-- `test/auth-flows.int-spec.ts` proves the introspection of an active, idle and revoked session,
+- `tests/auth-flows.int-spec.ts` proves the introspection of an active, idle and revoked session,
   the revocation and its event, on real PostgreSQL and NATS.

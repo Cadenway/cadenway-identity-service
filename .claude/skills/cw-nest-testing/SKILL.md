@@ -14,7 +14,7 @@ description: "How to write unit, integration and contract tests in a Cadenway Ne
   from the mockup (`CAD-482`) so a failing test reads like the product.
 - **Containers**: the disposable PostgreSQL and NATS are Testcontainers started by
   `@cadenway/nest-testing`; a service never depends on `testcontainers` itself. Until that package
-  exports them, `test/service-wiring.int-spec.ts` starts the PostgreSQL, NATS and `nats-streams` of
+  exports them, `tests/service-wiring.int-spec.ts` starts the PostgreSQL, NATS and `nats-streams` of
   `compose.dev.yaml` as a throwaway Compose project on free ports, applies the migrations with
   `src/migrate.ts` as the migrator role, and runs the application as the `identity_app` role and the
   `identity` NATS user, under the permissions of cadenway-ops; move it to `createTestApp()` when it

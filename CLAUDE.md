@@ -13,7 +13,11 @@
 
 1. Read before writing: the touched module's `MODULE.md`, the matching contract in `@cadenway/contracts`, the `cw-identity-domain` skill.
 2. Contract first: a route or an event that is not in the installed `@cadenway/contracts` is not written; the change starts in cadenway-api-contracts.
-3. Layering: pure domain, write use cases own their transaction, controllers and handlers only map. Dependencies point inward.
+3. Layering: follow the V2 layout in `cw-hexagonal-module-layout` for new modules and explicit
+   migrations. Follow the checked-out layout for existing modules awaiting migration. Keep
+   domain and application pure. Write use cases own their transaction; presentation adapters
+   translate and call use cases. Cross-module calls use the consumer's outbound port wired to
+   the producer's documented and exported public provider.
 4. Own data only: this service reads and writes its own database; everything else goes through contracts and events.
 5. A query of tenant data is scoped by organization, from the request context only; accounts, codes and sessions have no organization and are named by the verified actor or an explicit key.
 6. Events go through the outbox of `@cadenway/nest-messaging`; handlers are idempotent; shape changes get a new version.

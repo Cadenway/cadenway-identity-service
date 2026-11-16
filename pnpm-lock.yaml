@@ -222,8 +222,8 @@ importers:
         version: 4.6.7
     devDependencies:
       '@cadenway/nest-testing':
-        specifier: 0.1.1
-        version: 0.1.1(8d097a72c717b3635525125bca54edc7)
+        specifier: 0.3.0
+        version: 0.3.0(8d097a72c717b3635525125bca54edc7)
       '@commitlint/cli':
         specifier: ^21.2.4
         version: 21.2.4(conventional-commits-parser@7.1.4)(typescript@6.0.3)
@@ -393,8 +393,8 @@ packages:
       pg: ^8.23.1
       zod: ^4.6.0
 
-  '@cadenway/nest-testing@0.1.1':
-    resolution: {integrity: sha512-uGrb7rdZzY2stxJzY3KHyDp5CcDLwy4ZZYTaV2Uy4hpf+CQAXcat17HZD6skhW3hh/9fg66AszTIZTmmItSugg==, tarball: https://npm.pkg.github.com/download/@cadenway/nest-testing/0.1.1/f92582b7404ed50ca7af584b78eac6fc47ca7722}
+  '@cadenway/nest-testing@0.3.0':
+    resolution: {integrity: sha512-IkhgxZfvO1vPjupvzcBEdChzWGt732oAPQy2PCX54fUcX1y8DE4Q8YURMZzTXwWR7+pa6idGHUbMdnEdCbw9dQ==, tarball: https://npm.pkg.github.com/download/@cadenway/nest-testing/0.3.0/29f8ed4a39e1095c14b43cec369f80c6e2e213a8}
     peerDependencies:
       '@cadenway/nest-messaging': ^0.0.1
       '@nestjs/testing': ^12.4.2
@@ -4407,7 +4407,7 @@ snapshots:
       pg: 8.23.1
       zod: 4.6.7
 
-  '@cadenway/nest-testing@0.1.1(8d097a72c717b3635525125bca54edc7)':
+  '@cadenway/nest-testing@0.3.0(8d097a72c717b3635525125bca54edc7)':
     dependencies:
       '@cadenway/nest-messaging': 0.1.2(@cadenway/contracts@0.4.0)(@cadenway/nest-common@0.4.1(@grpc/grpc-js@1.14.7)(@grpc/proto-loader@0.8.1)(@nestjs/common@12.4.2(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@12.4.2)(@nestjs/platform-express@12.4.2)(@opentelemetry/api@1.10.0)(drizzle-orm@0.45.4(@opentelemetry/api@1.10.0)(@types/pg@8.23.1)(pg@8.23.1))(ioredis@6.0.0)(pg@8.23.1)(reflect-metadata@0.2.2)(rxjs@7.8.2)(zod@4.6.7))(@nestjs/common@12.4.2(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@12.4.2)(@opentelemetry/api@1.10.0)(drizzle-orm@0.45.4(@opentelemetry/api@1.10.0)(@types/pg@8.23.1)(pg@8.23.1))(pg@8.23.1)(zod@4.6.7)
       '@nestjs/testing': 12.4.2(@nestjs/common@12.4.2(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@12.4.2)(@nestjs/platform-express@12.4.2)

@@ -21,6 +21,11 @@ them, their introspection and their revocation.
 | ----------- | --------- |
 | None        | None      |
 
+`accounts.module.ts` registers the HTTP controllers and the module's providers. The
+consumer-owned `SessionOpener` port is wired in `composition/providers/adapters/accounts/` to the
+`OpenSession` provider exported by `sessions/public/session/open-session`. The provider mapping
+preserves the active system transaction when a successful sign-in opens a session.
+
 ## Owned tables
 
 | Table                  | Key                                    | Organization scoping                            |
@@ -160,7 +165,7 @@ Each flow runs in system transactions of `SystemAccountsUnitOfWork` (see Decisio
   their count once it stopped.
 - The rows of `code_requests` and `sign_in_attempts` for addresses without an account, and expired
   codes, are not purged yet: a purge job arrives with the first durable job of the service.
-- `test/auth-flows.int-spec.ts` proves each route, the events and their routes, the binding of the
+- `tests/auth-flows.int-spec.ts` proves each route, the events and their routes, the binding of the
   verification to the password of the latest sign-up, concurrent attempts, the rollback of a unit of
   work, the redaction of a sent code in the outbox, and the absence of secrets from the logs, on real
   PostgreSQL and NATS; it reads codes from `EVENTS_RESTRICTED`, as notification-service does.

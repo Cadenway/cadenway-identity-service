@@ -12,7 +12,7 @@ if (existsSync('.env')) {
 export default defineConfig({
   dialect: 'postgresql',
   // Each module keeps its tables in its own infrastructure layer.
-  schema: './src/modules/*/infrastructure/persistence/*.schema.ts',
+  schema: './src/modules/*/infrastructure/persistence/drizzle/schemas/*/*.schema.ts',
   out: './migrations',
   dbCredentials: { url: process.env.MIGRATION_DATABASE_URL ?? '' },
 });

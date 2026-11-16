@@ -151,7 +151,7 @@ in its changeset: upgrade the package, generate, review the new migration.
 
 ### Integration tests
 
-`pnpm test:integration` needs Docker. `test/service-wiring.int-spec.ts` starts PostgreSQL, NATS
+`pnpm test:integration` needs Docker. `tests/service-wiring.int-spec.ts` starts PostgreSQL, NATS
 and `nats-streams` from `compose.dev.yaml` as a throwaway Compose project on free ports (the data
 of the dev stack is never touched), applies the migrations with `src/migrate.ts` as the migrator
 role, and assembles the application as `main.ts` does, as `identity_app` and the NATS user
@@ -160,7 +160,7 @@ application role reads and writes the rows of its organization only, runs no DDL
 the migration journal of the `drizzle` schema, that the relay runs against an empty outbox, that
 the broker enforces the permissions of cadenway-ops, the health routes (readiness 503 while NATS or
 PostgreSQL is down and from the start of a shutdown, back to 200 once NATS returns) and the
-internal token. `test/auth-flows.int-spec.ts` starts its own throwaway project and calls every
+internal token. `tests/auth-flows.int-spec.ts` starts its own throwaway project and calls every
 route of `openapi/internal/identity-service.yaml` as the API gateway would, for each success and
 error code of the contract; it checks that the outbox publishes the four events, the code on
 `restricted.` only, that a revoked or idle session introspects as inactive, and that no log line

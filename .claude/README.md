@@ -88,10 +88,11 @@ check that writes files. No agent delegates further.
 | `domain.md` | Domain layer | `src/modules/**/domain/**` |
 | `application.md` | Application layer | `src/modules/**/application/**` |
 | `infrastructure.md` | Infrastructure layer | `src/modules/**/infrastructure/**` |
-| `api.md` | API layer | `src/modules/**/api/**`, `src/**/*.controller.ts` |
+| `api.md` | Presentation layer | `src/modules/**/presentation/**`, `src/modules/**/api/**`, `src/**/*.controller.ts` |
+| `module-wiring.md` | Public entry points and Nest composition | `src/modules/**/public/**`, `src/modules/**/composition/**`, `src/modules/**/*.module.ts` |
 | `events.md` | Events | `src/**/*.events.ts`, `src/**/*.handler.ts`, `src/**/*.publisher.ts`, `src/**/events/**` |
 | `migrations.md` | Migrations | `migrations/**`, `src/**/migrations/**` |
-| `tests.md` | Tests | `**/*.spec.ts`, `test/**` |
+| `tests.md` | Tests | `**/*.spec.ts`, `tests/**` |
 | `deploy.md` | Deployment files | `Dockerfile`, `deploy/**`, `compose.dev.yaml`, `.env.example` |
 | `module-docs.md` | MODULE.md | `src/modules/**/MODULE.md` |
 | `language.md` | Language | always |
@@ -107,7 +108,7 @@ See [skills/](skills/) for the complete inventory, including the technology guid
 | --- | --- |
 | `cw-context` | What Cadenway is, where the mockup, the integration guide and the repository map live, the product vocabulary (spaces, lists, sprints, tasks, statuses, milestones) and the multi-repository ownership rules. |
 | `cw-identity-domain` | The data, rules, events and screens cadenway-identity-service owns, taken from the mockup, the integration guide and the repositories document. |
-| `cw-hexagonal-module-layout` | Where each kind of code goes in a module (domain, application, infrastructure, api), the naming of files and classes, and the dependency direction. |
+| `cw-hexagonal-module-layout` | V2 module structure, naming, dependency direction and public entry points. |
 | `cw-outbox-and-events` | How to publish and consume events reliably with @cadenway/nest-messaging: outbox in the use case transaction, idempotent handlers, retries, dead letters, versioned names. |
 | `cw-contract-first` | The order in which a route or an event change travels: cadenway-api-contracts, then the producing service, then gateways and consumers, then the web app; and how to check the installed contract version. |
 | `cw-expand-contract-migrations` | How to change a database schema without breaking the running version: expand, dual-write, backfill, contract in a later release, and how to roll back. |
