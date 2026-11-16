@@ -1,4 +1,4 @@
-import { PasswordLockout } from './password-lockout.policy.js';
+import type { PasswordLockout } from './password-lockout.policy.js';
 
 /**
  * Type PasswordFailure

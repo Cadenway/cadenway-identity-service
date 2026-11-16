@@ -76,6 +76,6 @@ a single-use code does not stay readable in `outbox_events`, and such a row is n
   statements of the migration are written by hand, as the READMEs of both kit packages require. A
   kit version that changes a table is applied with `pnpm migration:generate` in a new migration,
   following the note of its changeset; a forced policy on a new tenant table is added by hand again.
-- `test/service-wiring.int-spec.ts` proves that `src/migrate.ts` applies the migration as the
+- `tests/service-wiring.int-spec.ts` proves that `src/migrate.ts` applies the migration as the
   migrator role, that the policies are forced, that the application role reads and writes the rows
   of its organization only and runs no DDL, and that the relay runs against an empty outbox.

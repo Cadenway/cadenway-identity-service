@@ -1,4 +1,4 @@
-import { CodeRequestThrottle } from './code-request-throttle.policy.js';
+import type { CodeRequestThrottle } from './code-request-throttle.policy.js';
 
 /**
  * Interface AcceptedCodeRequest

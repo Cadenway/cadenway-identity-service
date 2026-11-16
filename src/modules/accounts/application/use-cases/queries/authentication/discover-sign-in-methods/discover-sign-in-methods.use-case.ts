@@ -1,6 +1,6 @@
 import { EmailAddress } from '../../../../../domain/value-objects/email/email-address.value-object.js';
 import type { DiscoverSignInMethodsInput } from './discover-sign-in-methods.input.js';
-import type { SignInMethodsView } from './discover-sign-in-methods.output.js';
+import type { DiscoverSignInMethodsOutput } from './discover-sign-in-methods.output.js';
 
 /**
  * Class DiscoverSignInMethods
@@ -19,9 +19,9 @@ export class DiscoverSignInMethods {
    * Returns the methods offered for the address.
    *
    * @param {DiscoverSignInMethodsInput} input - The address, as typed.
-   * @returns {SignInMethodsView} The methods.
+   * @returns {DiscoverSignInMethodsOutput} The methods.
    */
-  public execute(input: DiscoverSignInMethodsInput): SignInMethodsView {
+  public execute(input: DiscoverSignInMethodsInput): DiscoverSignInMethodsOutput {
     EmailAddress.of(input.email);
     return { methods: [{ type: 'password' }, { type: 'email-code' }] };
   }

@@ -3,7 +3,7 @@ import { and, desc, eq, isNotNull, isNull, or, sql } from 'drizzle-orm';
 
 import type { OneTimeCodeRepository } from '../../../../../application/ports/outbound/persistence/accounts/one-time-code-repository.port.js';
 import type { OneTimeCodeIssue } from '../../../../../domain/aggregates/one-time-codes/one-time-code-issue.aggregate.js';
-import { OneTimeCode } from '../../../../../domain/aggregates/one-time-codes/one-time-code.aggregate.js';
+import type { OneTimeCode } from '../../../../../domain/aggregates/one-time-codes/one-time-code.aggregate.js';
 import type { OneTimeCodePurpose } from '../../../../../domain/value-objects/one-time-code-purpose/one-time-code-purpose.value-object.js';
 import type { OneTimeCodeRow } from '../../mappers/authentication/one-time-code.mapper.js';
 import { toOneTimeCode } from '../../mappers/authentication/one-time-code.mapper.js';

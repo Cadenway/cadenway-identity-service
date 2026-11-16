@@ -1,4 +1,4 @@
-import { OneTimeCode } from './one-time-code.aggregate.js';
+import type { OneTimeCode } from './one-time-code.aggregate.js';
 
 /**
  * Type OneTimeCodeCheck

@@ -4,7 +4,7 @@ import type { SessionTokens } from '../../../../ports/outbound/security/session/
 import type { Clock } from '../../../../ports/outbound/time/session/clock.port.js';
 import type { SessionsUnitOfWork } from '../../../../ports/outbound/transactions/session/sessions-unit-of-work.port.js';
 import type { IntrospectTokenInput } from './introspect-token.input.js';
-import type { IntrospectionView } from './introspect-token.output.js';
+import type { IntrospectTokenOutput } from './introspect-token.output.js';
 
 /**
  * Class IntrospectToken
@@ -79,15 +79,15 @@ export class IntrospectToken {
    * Introspects a token.
    *
    * @param {IntrospectTokenInput} input - The value of the cookie.
-   * @returns {Promise<IntrospectionView>} Whether it is active, and its subject when it is.
+   * @returns {Promise<IntrospectTokenOutput>} Whether it is active, and its subject when it is.
    */
-  public async execute(input: IntrospectTokenInput): Promise<IntrospectionView> {
+  public async execute(input: IntrospectTokenInput): Promise<IntrospectTokenOutput> {
     const tokenHash: string | null = this.tokens.hashOf(input.token);
     if (tokenHash === null) {
       return { active: false };
     }
     const now: Date = this.clock.now();
-    return this.unitOfWork.run(async (store: SessionsStore): Promise<IntrospectionView> => {
+    return this.unitOfWork.run(async (store: SessionsStore): Promise<IntrospectTokenOutput> => {
       const session: Session | null = await store.sessions.findByTokenHash(tokenHash);
       if (!session?.isActiveAt(now)) {
         return { active: false };

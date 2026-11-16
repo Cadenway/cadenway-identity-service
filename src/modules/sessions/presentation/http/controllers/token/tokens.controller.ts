@@ -2,7 +2,7 @@ import type { Introspection } from '@cadenway/contracts/types/internal/identity-
 import { InternalAccess } from '@cadenway/nest-common';
 import { Body, Controller, HttpCode, Post } from '@nestjs/common';
 
-import type { IntrospectionView } from '../../../../application/use-cases/commands/session/introspect-token/introspect-token.output.js';
+import type { IntrospectTokenOutput } from '../../../../application/use-cases/commands/session/introspect-token/introspect-token.output.js';
 import { IntrospectToken } from '../../../../application/use-cases/commands/session/introspect-token/introspect-token.use-case.js';
 import { IntrospectionBody } from '../../dto/input/token/introspection-body.dto.js';
 
@@ -59,7 +59,7 @@ export class TokensController {
   @Post('introspect')
   @HttpCode(200)
   public async introspect(@Body() body: IntrospectionBody): Promise<Introspection> {
-    const view: IntrospectionView = await this.introspectToken.execute(body);
+    const view: IntrospectTokenOutput = await this.introspectToken.execute(body);
     if (!view.active) {
       return { active: false };
     }

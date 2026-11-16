@@ -8,7 +8,7 @@ import {
   InMemoryAccounts,
 } from '../../../../models/accounts/accounts.fixture.js';
 import type { SessionIssuedView } from '../../../../projections/authentication/session-issued-view.projection.js';
-import type { PasswordSignInInput } from './sign-in-with-password.input.js';
+import type { SignInWithPasswordInput } from './sign-in-with-password.input.js';
 import { SignInWithPassword } from './sign-in-with-password.use-case.js';
 
 /**
@@ -17,9 +17,9 @@ import { SignInWithPassword } from './sign-in-with-password.use-case.js';
  * @description
  * The sign-in of the Main screen, as the contract's example.
  *
- * @type {PasswordSignInInput}
+ * @type {SignInWithPasswordInput}
  */
-const SIGN_IN: PasswordSignInInput = {
+const SIGN_IN: SignInWithPasswordInput = {
   email: 'camille.martin@ateliernord.fr',
   password: 'atelier-nord-sprint-14',
   rememberMe: true,

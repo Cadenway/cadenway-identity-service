@@ -3,8 +3,8 @@ import { and, eq, sql } from 'drizzle-orm';
 
 import type { UserRepository } from '../../../../../application/ports/outbound/persistence/accounts/user-repository.port.js';
 import type { UserRegistration } from '../../../../../domain/aggregates/account/user-registration.aggregate.js';
-import { User } from '../../../../../domain/aggregates/account/user.aggregate.js';
-import { EmailAddress } from '../../../../../domain/value-objects/email/email-address.value-object.js';
+import type { User } from '../../../../../domain/aggregates/account/user.aggregate.js';
+import type { EmailAddress } from '../../../../../domain/value-objects/email/email-address.value-object.js';
 import type { UserRow } from '../../mappers/accounts/user.mapper.js';
 import { toUser } from '../../mappers/accounts/user.mapper.js';
 import users from '../../schemas/accounts/user.schema.js';

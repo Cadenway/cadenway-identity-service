@@ -13,7 +13,7 @@ import type { SessionOpener } from '../../../../ports/outbound/identity/sessions
 import type { PasswordHasher } from '../../../../ports/outbound/security/authentication/password-hasher.port.js';
 import type { AccountsUnitOfWork } from '../../../../ports/outbound/transactions/accounts/accounts-unit-of-work.port.js';
 import type { SessionIssuedView } from '../../../../projections/authentication/session-issued-view.projection.js';
-import type { PasswordSignInInput } from './sign-in-with-password.input.js';
+import type { SignInWithPasswordInput } from './sign-in-with-password.input.js';
 
 /**
  * Class SignInWithPassword
@@ -113,12 +113,12 @@ export class SignInWithPassword {
    * @description
    * Signs the account of the address in with its password.
    *
-   * @param {PasswordSignInInput} input - The address, the password and the browser.
+   * @param {SignInWithPasswordInput} input - The address, the password and the browser.
    * @returns {Promise<SessionIssuedView>} The session, its token and the account.
    * @throws {AccountRefusal} `auth.account-locked`, `auth.invalid-credentials` or
    * `auth.email-not-verified`.
    */
-  public async execute(input: PasswordSignInInput): Promise<SessionIssuedView> {
+  public async execute(input: SignInWithPasswordInput): Promise<SessionIssuedView> {
     const email: EmailAddress = EmailAddress.of(input.email);
     const now: Date = this.clock.now();
     const attempt: CountedAttempt | Refusal = await this.unitOfWork.run(

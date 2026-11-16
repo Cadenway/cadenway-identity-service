@@ -1,12 +1,12 @@
 import type { SessionClient } from '../../../../models/sessions/session-client.model.js';
 
 /**
- * Interface PasswordSignInInput
+ * Interface SignInWithPasswordInput
  *
  * @description
  * A sign-in with a password, as the Main screen sends it (`PasswordSignIn` of the contract).
  */
-export interface PasswordSignInInput {
+export interface SignInWithPasswordInput {
   // #region Properties
   /**
    * Property email

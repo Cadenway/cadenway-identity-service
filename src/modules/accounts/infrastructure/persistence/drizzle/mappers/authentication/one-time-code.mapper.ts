@@ -1,5 +1,5 @@
 import { OneTimeCode } from '../../../../../domain/aggregates/one-time-codes/one-time-code.aggregate.js';
-import oneTimeCodes from '../../schemas/authentication/one-time-code.schema.js';
+import type oneTimeCodes from '../../schemas/authentication/one-time-code.schema.js';
 
 /**
  * Type OneTimeCodeRow

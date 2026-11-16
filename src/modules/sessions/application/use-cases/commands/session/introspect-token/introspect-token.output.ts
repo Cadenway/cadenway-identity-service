@@ -1,5 +1,5 @@
 /**
- * Type IntrospectionView
+ * Type IntrospectTokenOutput
  *
  * @description
  * Whether a token is active and whose it is (`Introspection` of the contract). The organization,
@@ -8,7 +8,7 @@
  *
  * @type {{ readonly active: true; readonly tokenType: 'session'; readonly sessionId: string; readonly userId: string; readonly organizationId: null; readonly role: null; readonly scopes: readonly string[]; readonly expiresAt: Date } | { readonly active: false }}
  */
-export type IntrospectionView =
+export type IntrospectTokenOutput =
   | {
       readonly active: true;
       readonly tokenType: 'session';

@@ -1,6 +1,6 @@
 import { User } from '../../../../../domain/aggregates/account/user.aggregate.js';
 import { EmailAddress } from '../../../../../domain/value-objects/email/email-address.value-object.js';
-import users from '../../schemas/accounts/user.schema.js';
+import type users from '../../schemas/accounts/user.schema.js';
 
 /**
  * Type UserRow

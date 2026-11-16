@@ -3,7 +3,7 @@ import { and, eq, lt, sql } from 'drizzle-orm';
 
 import type { SessionOrigin } from '../../../../../application/models/session/session-origin.model.js';
 import type { SessionRepository } from '../../../../../application/ports/outbound/persistence/session/session-repository.port.js';
-import { Session } from '../../../../../domain/aggregates/session/session.aggregate.js';
+import type { Session } from '../../../../../domain/aggregates/session/session.aggregate.js';
 import type { SessionStart } from '../../../../../domain/value-objects/session/session-start.value-object.js';
 import { toSession } from '../../mappers/session/session.mapper.js';
 import type { SessionRow } from '../../mappers/session/session.mapper.js';
