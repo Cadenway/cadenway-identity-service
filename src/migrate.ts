@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 import { loadConfig } from '@cadenway/nest-common';
+import { finishOutboxLeaseMigration } from '@cadenway/nest-messaging/outbox/schema';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import pg from 'pg';
@@ -36,8 +37,19 @@ if (!existsSync(`${migrationsFolder}/meta/_journal.json`)) {
     application_name: 'identity-service-migrator',
   });
   try {
-    await migrate(drizzle({ client: pool }), { migrationsFolder });
-    console.log('Migrations applied.');
+    const client: pg.PoolClient = await pool.connect();
+    try {
+      // Serialize the Drizzle transaction and its concurrent index finalization.
+      await client.query(
+        "select pg_advisory_lock(hashtextextended('cadenway:service-migrations', 0))",
+      );
+      await migrate(drizzle({ client }), { migrationsFolder });
+      await finishOutboxLeaseMigration(client);
+      console.log('Migrations applied.');
+    } finally {
+      // Closing the session also releases the advisory lock.
+      client.release(true);
+    }
   } finally {
     await pool.end();
   }

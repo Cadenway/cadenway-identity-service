@@ -654,6 +654,18 @@
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
+        },
+        "lease_token": {
+          "name": "lease_token",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "lease_expires_at": {
+          "name": "lease_expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {
@@ -674,10 +686,10 @@
             }
           ],
           "isUnique": false,
-          "with": {},
-          "method": "btree",
           "where": "\"outbox_events\".\"status\" = 'pending'",
-          "concurrently": false
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         },
         "outbox_events_sent_at_index": {
           "name": "outbox_events_sent_at_index",
@@ -690,10 +702,32 @@
             }
           ],
           "isUnique": false,
-          "with": {},
-          "method": "btree",
           "where": "\"outbox_events\".\"status\" = 'sent'",
-          "concurrently": false
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "outbox_events_lease_expiry_index": {
+          "name": "outbox_events_lease_expiry_index",
+          "columns": [
+            {
+              "expression": "lease_expires_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"outbox_events\".\"status\" = 'leased'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {},
@@ -714,7 +748,11 @@
       "checkConstraints": {
         "outbox_events_status_check": {
           "name": "outbox_events_status_check",
-          "value": "\"outbox_events\".\"status\" in ('pending', 'sent', 'failed')"
+          "value": "\"outbox_events\".\"status\" in ('pending', 'leased', 'sent', 'failed')"
+        },
+        "outbox_events_lease_check": {
+          "name": "outbox_events_lease_check",
+          "value": "(\"outbox_events\".\"status\" = 'leased' and \"outbox_events\".\"lease_token\" is not null and \"outbox_events\".\"lease_expires_at\" is not null)\n        or (\"outbox_events\".\"status\" <> 'leased' and \"outbox_events\".\"lease_token\" is null and \"outbox_events\".\"lease_expires_at\" is null)"
         }
       },
       "isRLSEnabled": false

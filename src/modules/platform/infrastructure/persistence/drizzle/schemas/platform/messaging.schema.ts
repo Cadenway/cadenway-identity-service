@@ -1,6 +1,6 @@
-// Tables of @cadenway/nest-messaging/outbox, re-exported so that drizzle-kit writes them into the
-// migrations of this service: the outbox written in the transaction of a use case and published by
-// the relay, the processed ids that make every handler run once per event, and the versions that
-// `claimVersion` raises. Their definition belongs to the kit and is never changed here; a new kit
-// version that changes them ships a migration note, applied with `pnpm migration:generate`.
-export { eventVersions, outboxEvents, processedEvents } from '@cadenway/nest-messaging/outbox';
+// Re-export the kit's table declarations so Drizzle manages them in this service's migrations.
+export {
+  eventVersions,
+  outboxEvents,
+  processedEvents,
+} from '@cadenway/nest-messaging/outbox/schema';
