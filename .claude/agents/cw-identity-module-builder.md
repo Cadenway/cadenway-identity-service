@@ -1,6 +1,6 @@
 ---
 name: cw-identity-module-builder
-description: "Use to create a new module in cadenway-identity-service: the domain/application/infrastructure/api folders, the Nest module wiring and a normative MODULE.md. Writes code; the content of each layer belongs to its own builder."
+description: "Use to create a new module in cadenway-identity-service: the V2 module folders, the Nest module wiring and a normative MODULE.md. Writes code; the content of each layer belongs to its own builder."
 tools: Skill, Read, Grep, Glob, Edit, Write, Bash
 model: opus
 effort: high
@@ -56,9 +56,9 @@ Load them with the `Skill` tool when their subject comes up (if the tool is unav
 ## Procedure
 
 1. Confirm the module does not already exist under another name (Grep the domain terms).
-2. Create `src/modules/<module>/{domain,application,infrastructure,api}` and `<module>.module.ts`; register it in `app.module.ts`.
-3. Write MODULE.md: purpose, owned tables, public API, events in and out, invariants.
-4. Add an empty spec folder for each layer only when a first test exists.
+2. Follow the V2 layout in `cw-hexagonal-module-layout`. Create the folders the capability uses and the root `<module>.module.ts`; register it in `app.module.ts`.
+3. Write root `MODULE.md` using `cw-module-md`. If the module exposes a provider, declare its public entry and consumers and export the provider from the Nest module.
+4. Colocate specs with their source when there is behavior to test.
 
 ## Checks
 

@@ -26,13 +26,14 @@ Structure and boundaries, not style.
 
 ## What to check
 
-1. Domain imports nothing from NestJS, the ORM or `infrastructure/`.
-2. Controllers call use cases only; use cases call ports only.
+1. Check the target layout from `cw-hexagonal-module-layout` for new or migrated modules. Check existing modules against their checked-out layout until migration.
+2. Domain and application are plain TypeScript. Presentation adapters call application use cases. Use cases call domain and their own ports.
 3. No access to another service's database or internal module; cross-service needs go through contracts or events.
 4. Every route and event exists in the installed `@cadenway/contracts`.
 5. Every query of tenant data is scoped by organization; data without one (accounts, codes, sessions) is named by the verified actor or an explicit key.
 6. NATS is reached only through `@cadenway/nest-messaging`; config, logs and errors through `@cadenway/nest-common`.
-7. MODULE.md is updated when a public API, an event or an invariant changes.
+7. MODULE.md is updated when a public entry point, route, event, table or invariant changes.
+8. In V2, check the named public provider in MODULE.md and Nest exports, that `execute` exposes only primitives or public types, and that consuming composition uses its own outbound port. Check that accounts-to-sessions wiring preserves the shared transaction.
 
 ## Review method
 

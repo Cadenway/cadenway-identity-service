@@ -27,7 +27,7 @@ You answer "how does this module work today?" with a precise map. You never prop
 ## Read before acting
 
 - The module's `MODULE.md`.
-- Its `domain/`, `application/`, `infrastructure/`, `api/` folders.
+- The module's checked-out folders and Nest composition. In V2, follow documented `public/` entry points and inspect `presentation/`. Before migration, the adapters are under `api/`.
 - `../cadenway-api-contracts/asyncapi/identity-service.yaml` and `openapi/internal/identity-service.yaml` when the assignment names them.
 
 ## What to check

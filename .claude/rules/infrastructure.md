@@ -5,6 +5,11 @@ paths:
 
 # Infrastructure layer
 
+- In V2, place Drizzle schemas, mappers, repositories and transaction adapters under
+  `infrastructure/persistence/drizzle/{schemas,mappers,repositories,transactions}/<area>/`.
+  Put other outbound adapters under `infrastructure/adapters/<integration>/`. Follow checked-out
+  paths in modules awaiting migration.
+- Infrastructure implements application ports. Bind those implementations in composition.
 - Repositories implement the ports declared by the application layer; they map rows to domain
   objects and back, nothing more.
 - Use the ORM already declared in package.json; never add a second one.

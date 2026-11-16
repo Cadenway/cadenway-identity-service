@@ -41,7 +41,8 @@ consumed only once its AsyncAPI spec is released (`cw-contract-first`).
 
 ## Consuming
 
-1. Register the handler from `onApplicationBootstrap` of a provider of the `api/messaging/` layer,
+1. Register the handler from `onApplicationBootstrap` of a provider under
+   `presentation/messaging/handlers/<family>/` in V2 (`api/messaging/` before migration),
    with the injected `EventConsumers`. It gets the durable consumer `identity-service__<handler>`,
    filtered on the one subject of its event:
 

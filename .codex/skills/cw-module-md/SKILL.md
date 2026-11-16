@@ -14,6 +14,9 @@ What it owns, as a short list. One sentence on what it does NOT own.
 ## Public entry points
 | Entry point | Consumers |
 Owner-relative paths without `.ts`, exact consumer module names; `None` when there is no consumer.
+For V2, use `public/<area>/<operation>` in the table and name the exported Nest provider in this section.
+Declare a separate `<module>.module` row when another module imports the Nest module wiring.
+For an existing module awaiting migration, document the entry points it actually exposes.
 
 ## Owned tables
 ## API
@@ -28,5 +31,5 @@ The nine sections and their order are those of the
 [module template](https://github.com/Cadenway/cadenway-service-kit/blob/main/docs/hexagonal-architecture.md#modulemd-template)
 and of `rules/module-docs.md`.
 
-Update it in the same change that adds or moves a route, publishes or retires an event, adds a
-table, or changes an invariant. "I'll update the doc after" is a defect.
+Update it in the same change that adds or moves a public entry point or route, publishes or
+retires an event, adds a table, or changes an invariant.

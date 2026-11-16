@@ -1,44 +1,54 @@
 ---
 name: cw-hexagonal-module-layout
-description: "Where each kind of code goes in a module (domain, application, infrastructure, api), the naming of files and classes, and the dependency direction. Load it before creating or moving a file."
+description: "Place files and review dependencies in the Cadenway V2 module layout."
 ---
 
-# Module layout
+# V2 module layout
+
+Use this layout for new modules and authorized migrations. For an existing module awaiting
+migration, follow the paths in its checked-out source and MODULE.md. The existing
+`pnpm test:architecture` still uses the installed checker. Adopt strict V2 after the checker is
+published and the service is migrated, as described in the
+[Cadenway NestJS architecture reference](https://github.com/Cadenway/cadenway-service-kit/blob/main/docs/hexagonal-architecture.md).
 
 ```text
 src/modules/<module>/
-├─ domain/                 ← entities, value objects, domain errors, domain events (pure)
-├─ application/
-│  ├─ commands/            ← write use cases, named by action and subject
-│  ├─ queries/             ← read use cases
-│  └─ ports/               ← outbound interfaces, `<name>.port.ts`
-├─ api/
-│  ├─ http/                ← controllers, `<name>.controller.ts`
-│  └─ messaging/           ← incoming event and job handlers, `<name>.handler.ts`
-├─ infrastructure/
-│  ├─ persistence/         ← `<name>.schema.ts` and `<name>.repository.ts`
-│  └─ messaging/           ← wire event mapping and outbox adapter
-├─ <module>.module.ts
-└─ MODULE.md
+  MODULE.md
+  <module>.module.ts
+  public/<area>/<operation>.ts
+  domain/aggregates/<aggregate>/
+  domain/value-objects/<concept>/
+  domain/{policies,events,errors}/<area>/
+  application/use-cases/{commands,queries}/<area>/<operation>/
+  application/{models,projections,mappers,services}/<area>/
+  application/ports/outbound/<concern>/<area>/
+  presentation/http/{controllers,dto/input,dto/output,mappers,validation,errors,guards}/<resource>/
+  presentation/http/webhooks/<provider>/
+  presentation/messaging/handlers/<event-family>/
+  presentation/jobs/handlers/<job-family>/
+  presentation/websocket/gateways/<channel>/
+  presentation/cli/commands/<area>/
+  infrastructure/persistence/drizzle/{schemas,mappers,repositories,transactions}/<area>/
+  infrastructure/messaging/{outbox,rebuild}/<area>/
+  infrastructure/jobs/pg-boss/<area>/
+  infrastructure/adapters/<integration>/
+  composition/tokens/<area>/
+  composition/providers/{use-cases,adapters}/<area>/
 ```
 
-Dependencies point inward: `api → application → domain`, `infrastructure → application/domain`.
-Nothing in `domain/` imports another layer.
+Create the directories the capability uses. Keep kebab-case file stems and the role suffixes
+defined by the reference. Keep a use case's `.use-case.ts`, `.input.ts` and `.output.ts` together.
+Use at most one named exported type or interface declaration per TypeScript file. Colocate specs
+with the source they cover.
 
-| Kind | File | Class |
-| --- | --- | --- |
-| Entity | `domain/task.ts` | `Task` |
-| Value object | `domain/task-status.ts` | `TaskStatus` |
-| Domain error | `domain/errors.ts` | `MilestoneEstimateError` |
-| Use case | `application/commands/change-task-status.ts` | `ChangeTaskStatus` |
-| Port | `application/ports/task-unit-of-work.port.ts` | `TaskUnitOfWork` (interface) |
-| Schema | `infrastructure/persistence/task.schema.ts` | none |
-| Repository | `infrastructure/persistence/drizzle-task.repository.ts` | `DrizzleTaskRepository` |
-| Controller | `api/http/tasks.controller.ts` | `TasksController` |
-| Event handler | `api/messaging/member-removed.handler.ts` | `MemberRemovedHandler` |
+Domain is plain TypeScript and depends only on domain. Application is plain TypeScript and
+depends on its own application and domain. Presentation validates and maps to application use
+cases. Infrastructure implements outbound ports. Composition wires providers with Nest and keeps
+the module root focused on module registration.
 
-Classes carry no `Service` or `Component` suffix unless NestJS requires a provider token name.
-
-`pnpm test:architecture` enforces these folders and suffixes. The
-[architecture reference](https://github.com/Cadenway/cadenway-service-kit/blob/main/docs/hexagonal-architecture.md)
-of the service kit is authoritative when this skill and the check disagree.
+A public operation file explicitly re-exports one use case provider and any module-local named
+types reachable from its `execute` signature. Declare the owner-relative entry path and consumers
+in the owner's MODULE.md, name the provider there, and include that provider in Nest exports.
+Declare the module wiring entry separately when another module imports it, and import that wiring
+from composition. A consuming module binds its own outbound port to the public provider. The
+accounts session opener uses the sessions provider and preserves the active system transaction.

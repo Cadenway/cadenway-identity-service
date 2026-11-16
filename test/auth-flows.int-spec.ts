@@ -18,10 +18,10 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { AppModule } from '../src/app.module.js';
 import { appConfigSchema } from '../src/config/app-config.js';
-import { EmailAddress } from '../src/modules/accounts/domain/email-address.js';
-import { User } from '../src/modules/accounts/domain/user.js';
-import { SystemAccountsUnitOfWork } from '../src/modules/accounts/infrastructure/persistence/system-accounts-unit-of-work.js';
-import { OpenSession } from '../src/modules/sessions/application/commands/open-session.js';
+import { User } from '../src/modules/accounts/domain/aggregates/account/user.aggregate.js';
+import { EmailAddress } from '../src/modules/accounts/domain/value-objects/email/email-address.value-object.js';
+import { SystemAccountsUnitOfWork } from '../src/modules/accounts/infrastructure/persistence/drizzle/transactions/accounts/system-accounts.unit-of-work.js';
+import { OpenSession } from '../src/modules/sessions/public/session/open-session.js';
 
 // The seven authentication flows, the introspection, the revocation and the reading of a user,
 // through HTTP as the API gateway calls them, on the service as main.ts assembles it, against a

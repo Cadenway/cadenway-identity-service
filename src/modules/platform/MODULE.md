@@ -3,8 +3,7 @@
 ## Purpose
 
 Gives the tables of the service kit their place in this service's own migrations. drizzle-kit reads
-`src/modules/*/infrastructure/persistence/*.schema.ts` only, so a kit table enters the migration
-history by being re-exported from this module. It owns:
+`src/modules/*/infrastructure/persistence/drizzle/schemas/*/*.schema.ts` only. A kit table enters the migration history through a schema re-export in this module. It owns:
 
 - `outbox_events`, `processed_events` and `event_versions`, defined by
   `@cadenway/nest-messaging/outbox`;

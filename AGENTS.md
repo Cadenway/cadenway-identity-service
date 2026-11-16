@@ -18,7 +18,8 @@ and [Codex](.codex/README.md) for agents, skills, commands and hooks.
 
 ## What this repository is
 
-The structure and workflows below describe the bootstrap target. Check the checkout for available files and commands.
+Check the checkout for the modules and commands currently available. The architecture target is
+defined below.
 
 cadenway-identity-service owns who the user is and how they sign in. NestJS, its own PostgreSQL database (one database with a migrator role and an application role in the shared PostgreSQL of the VPS), events over NATS JetStream through `@cadenway/nest-messaging`, internal REST for the API gateway. Local port 3010.
 
@@ -44,9 +45,26 @@ Decided: this service is built in NestJS, without an existing identity provider 
 
 ## Architectural ownership
 
-See the [Cadenway NestJS architecture reference](https://github.com/Cadenway/cadenway-service-kit/blob/main/docs/hexagonal-architecture.md) for dependency and test rules.
+The [Cadenway NestJS architecture reference](https://github.com/Cadenway/cadenway-service-kit/blob/main/docs/hexagonal-architecture.md)
+defines the strict V2 layout, dependency rules and rollout. Read `cw-hexagonal-module-layout`
+before placing files.
 
-- Business code lives in modules under `src/modules/<module>/`, each with `domain/`, `application/`, `infrastructure/`, `api/` and a `MODULE.md`.
+- Each business module lives under `src/modules/<module>/` and has root `MODULE.md` and
+  `<module>.module.ts` files. Use `domain/`, `application/`, `presentation/`,
+  `infrastructure/`, `composition/` and `public/` for the responsibilities the module actually has.
+- Use V2 for new modules. Existing modules use the layout shown by their source and `MODULE.md`
+  until an explicit migration. Adopt the strict checker in the migration after a published
+  `@cadenway/nest-testing` version includes `convention: 'strict'`. Run the architecture check
+  already configured in this checkout for source changes.
+- Keep domain and application plain TypeScript. Group files by capability or resource under the
+  V2 directories, with at most one named exported type or interface declaration per file.
+- Cross-module calls go through a port owned by the consumer. Its composition binds the port to
+  the named provider at the producer's `public/<area>/<operation>.ts` entry point. The producer
+  declares the entry and consumers in `MODULE.md` and exports that provider from its Nest module.
+  Declare a separate wiring entry when another module imports the Nest module from its composition.
+  Re-export the module-local types reachable from the public provider's `execute` signature.
+  For accounts calling sessions, keep the accounts-owned session opener and join the existing
+  system transaction when opening the session.
 - `src/infrastructure/` holds the few adapters several modules bind to their own ports (the system clock); it holds no business rule and imports no module.
 - Cross-cutting plumbing (config, logging, tracing, errors, auth guards, messaging) comes from the cadenway-service-kit packages (`@cadenway/nest-common`, `@cadenway/nest-messaging`); development-only `@cadenway/nest-testing` is maintained in [cadenway-tooling](https://github.com/Cadenway/cadenway-tooling).
 - The domain is pure; use cases own transactions; controllers and handlers translate.
@@ -80,14 +98,14 @@ The scripts below are this repository's contract. While the repository is being 
 create them with these exact names; afterwards, use them and never an ad-hoc equivalent. Run the
 narrowest check that covers the change first, then widen:
 
-| Changed                         | Minimum check                                                |
-| ------------------------------- | ------------------------------------------------------------ |
-| Domain or use case code         | `pnpm test <module>`, then `pnpm test:coverage`              |
-| Persistence, events, migrations | `pnpm test:integration <module>`                             |
-| Routes                          | `pnpm test <module>/api` and the contract tests              |
-| Any source                      | `pnpm format:check`, `pnpm lint`, `pnpm typecheck`           |
-| Build or runtime configuration  | `pnpm build`, `docker compose -f compose.dev.yaml config -q` |
-| Docs or agent instructions only | Scoped formatting and link review                            |
+| Changed                         | Minimum check                                                                                                |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| Domain or use case code         | `pnpm test <module>`, then `pnpm test:coverage`                                                              |
+| Persistence, events, migrations | `pnpm test:integration <module>`                                                                             |
+| Routes                          | `pnpm test <module>/presentation` (V2) or `pnpm test <module>/api` (existing layout), and the contract tests |
+| Any source                      | `pnpm format:check`, `pnpm lint`, `pnpm typecheck`                                                           |
+| Build or runtime configuration  | `pnpm build`, `docker compose -f compose.dev.yaml config -q`                                                 |
+| Docs or agent instructions only | Scoped formatting and link review                                                                            |
 
 Report the commands you actually ran and their results; a check you did not run is reported as not
 run.

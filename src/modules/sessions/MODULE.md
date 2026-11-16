@@ -15,10 +15,13 @@ gateway sets from the token.
 
 ## Public entry points
 
-| Entry point                         | Consumers |
-| ----------------------------------- | --------- |
-| `sessions.module`                   | accounts  |
-| `application/commands/open-session` | accounts  |
+| Entry point                   | Consumers |
+| ----------------------------- | --------- |
+| `sessions.module`             | accounts  |
+| `public/session/open-session` | accounts  |
+
+`SessionsModule` exports the `OpenSession` provider. Accounts binds it to its own session opener
+port. The public signature exposes `OpenSessionInput` and `OpenSessionOutput`.
 
 ## Owned tables
 

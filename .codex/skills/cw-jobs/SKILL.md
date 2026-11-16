@@ -26,6 +26,9 @@ restart, and ESLint refuses the first two.
 
 ## Handling
 
+In V2, place handlers under `presentation/jobs/handlers/<family>/`. Use the existing layout in
+modules awaiting migration.
+
 1. A handler calls a use case; the use case is idempotent on the job key.
 2. Delivery is at least once and never lost. "Never twice" cannot be guaranteed over SMTP or HTTP:
    make a duplicate harmless rather than assuming it away.

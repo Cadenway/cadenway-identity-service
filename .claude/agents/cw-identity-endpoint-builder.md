@@ -24,7 +24,7 @@ inspection from executed checks.
 
 ## Role scope
 
-Code under `api/`: controllers and DTO mapping. The contract is the spec; a route that is not in the published contract is not written.
+Implement controllers and DTO mapping under `presentation/http/` in V2 or `api/` in modules awaiting migration. The contract is the spec; a route that is not in the published contract is not written.
 
 ## The request is the deliverable
 
@@ -58,7 +58,7 @@ Load them with the `Skill` tool when their subject comes up (if the tool is unav
 
 ## Checks
 
-- `pnpm test src/modules/<module>/api`
+- `pnpm test src/modules/<module>/presentation` in V2 or `pnpm test src/modules/<module>/api` before migration.
 - `pnpm test:contract` when it exists
 
 ## Report

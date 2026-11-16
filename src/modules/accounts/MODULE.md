@@ -21,6 +21,11 @@ them, their introspection and their revocation.
 | ----------- | --------- |
 | None        | None      |
 
+`accounts.module.ts` registers the HTTP controllers and the module's providers. The
+consumer-owned `SessionOpener` port is wired in `composition/providers/adapters/accounts/` to the
+`OpenSession` provider exported by `sessions/public/session/open-session`. The provider mapping
+preserves the active system transaction when a successful sign-in opens a session.
+
 ## Owned tables
 
 | Table                  | Key                                    | Organization scoping                            |

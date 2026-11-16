@@ -1,10 +1,15 @@
 ---
 paths:
+  - 'src/modules/**/presentation/**'
   - 'src/modules/**/api/**'
   - 'src/**/*.controller.ts'
 ---
 
-# API layer
+# Presentation layer
+
+- In V2, group HTTP controllers, input and output DTO mapping, validation, errors and guards
+  by resource under `presentation/http/`. Place webhooks in `presentation/http/webhooks/<provider>/`.
+- Use the existing `api/` paths for modules awaiting migration. These rules apply to both layouts.
 
 - A route exists only if it is in the installed `@cadenway/contracts`; its paths, fields, status
   codes and error codes match the spec exactly.
