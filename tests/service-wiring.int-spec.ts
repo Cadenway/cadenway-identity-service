@@ -80,7 +80,7 @@ const businessTables = [
 const allTables = [...platformTables, ...businessTables].sort();
 
 /** Migrations of `migrations/meta/_journal.json`. */
-const migrationCount = 3;
+const migrationCount = 4;
 
 /**
  * Runs `docker compose` on the throwaway project.
@@ -581,6 +581,41 @@ describe('identity-service wiring', () => {
     );
     const response = await request(service().getHttpServer()).get('/health/ready');
     expect(response.status).toBe(200);
+  });
+
+  it('leaves a leased outbox row untouched by the legacy relay', async () => {
+    const system = service().get(SystemTransactionRunner);
+    const leaseToken = '01938f6e-0000-7000-8000-000000000003';
+    await system.run((tx) =>
+      tx.client.query(
+        `insert into outbox_events
+           (id, event_name, subject, stream, payload, status, lease_token, lease_expires_at)
+         values (uuidv7(), 'user.wiring-probe.v1', 'evt.user.wiring-probe.v1', 'EVENTS',
+                 '{}', 'leased', $1, now() + interval '1 minute')`,
+        [leaseToken],
+      ),
+    );
+
+    try {
+      const pass = await service().get(OutboxRelay).publishPending();
+      expect(pass).toEqual({ published: 0, failed: 0, interrupted: false });
+
+      await expect(
+        system.run((tx) =>
+          tx.client.query("update outbox_events set status = 'pending' where lease_token = $1", [
+            leaseToken,
+          ]),
+        ),
+      ).rejects.toMatchObject({ code: '23514', constraint: 'outbox_events_lease_check' });
+      const reserved = await system.run((tx) =>
+        tx.client.query('select status from outbox_events where lease_token = $1', [leaseToken]),
+      );
+      expect(reserved.rows).toEqual([{ status: 'leased' }]);
+    } finally {
+      await system.run((tx) =>
+        tx.client.query('delete from outbox_events where lease_token = $1', [leaseToken]),
+      );
+    }
   });
 
   it('runs against a broker that enforces the permissions of cadenway-ops', () => {

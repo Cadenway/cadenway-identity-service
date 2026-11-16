@@ -50,8 +50,14 @@ consumed, through the PostgreSQL deduplicator of `OutboxModule`; no handler exis
 
 ## Invariants
 
-- No business rule, column, index or policy of this service is added to these tables: they keep the
-  definition of the installed kit version.
+- Platform tables follow the kit's shared schema. The additive migration
+  `migrations/0003_outbox_leases.sql` prepares the table for outbox reservations while the
+  deployed relay keeps selecting pending events.
+- Before enabling the leased relay, update the schema import to the published
+  `@cadenway/nest-messaging/outbox/schema` entry and reconcile the Drizzle snapshot. Call
+  `finishOutboxLeaseMigration` from the migrator on a dedicated PostgreSQL connection after
+  Drizzle commits. This creates the index concurrently and validates the checks. A rollback to
+  the historic relay leaves the additive schema in place after expired leases are recovered.
 - Row-level security is enabled and forced on `outbox_events`, `event_versions` and
   `idempotency_keys`; `processed_events` has none.
 - Only a migration, run by the migrator role, changes their structure.
