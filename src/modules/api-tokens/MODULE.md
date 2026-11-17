@@ -99,13 +99,16 @@ answers `active: false` for a token whose user is no longer a member of its orga
   refused without a query, and a secret scanner recognize one.
 - A token is bound to its organization, not to the membership of its creation: a person removed
   then invited again finds the tokens that are neither revoked nor expired working again, as the
-  contract states ("its user still belongs to its organization"). The sessions behave differently
-  (see the sessions module).
-- The query parameter `limit` is read from its digits before the generated schema checks it: the
-  generated `ListApiTokensInternalQueryParams` types it as an integer, which a query string never
-  is.
-- A cursor that is not one of this list answers `400 request.invalid` with an issue on `cursor`,
-  the code the contract declares, rather than the kit's `pagination.cursor-invalid`.
+  contract states ("A token of a removed member is inactive while the person is not a member, and
+  active again, until revoked or expired, once they join the organization again with a new
+  membership"). The sessions behave differently (see the sessions module).
+- The query parameter `limit` is checked by the generated `ListApiTokensInternalQueryParams`
+  alone, which reads it from its text with `Number()` (`@cadenway/contracts` 0.6.0): a value that
+  is not then a whole number from 1 to 100 answers `400 request.invalid`.
+- A cursor that is not one of this list answers `400 request.invalid` with one issue on `cursor`
+  (`invalid_cursor`), the code the contract declares: `decodeCursor` of `@cadenway/nest-common`
+  raises it for a malformed cursor or one issued for another sort, and the mapper raises the same
+  for a decoded position without a creation instant and a token id.
 - `tests/organization-context.int-spec.ts` proves the lifecycle on real PostgreSQL and NATS:
   creation, introspection with scopes and organization, `lastUsedAt` written once a minute,
   revocation, expiry, and a removal of the membership.

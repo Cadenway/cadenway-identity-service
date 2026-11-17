@@ -135,15 +135,18 @@ later write wins; it reads the copy of the memberships in the same transaction.
   `member.removed.v1` empties its organization without a write here: the memberships module marks
   the membership removed in its tenant transaction, which could not clear a `sessions` row, and the
   introspection compares the membership of the session with the active one. A person invited again
-  gets a new membership and chooses the organization again; a new session starts there anyway,
-  since the last choice keeps the organization, as the contract asks ("if they are still a member
-  of it").
+  gets a new membership and chooses the organization again, as the contract states ("A session
+  whose organization was emptied by a removal stays without one, even after the person joins the
+  organization again with a new membership, until an organization is chosen again"); a new session
+  starts there anyway, since the last choice keeps the organization ("a new session starts in the
+  last organization the person chose, if they are a member of it").
 - The last choice of an account lives in `organization_choices`, one row per account, rather than
   being derived from its sessions, which a future purge of ended sessions would lose.
-- Choosing the current organization again leaves the session as it is ("changes nothing") but
-  records it as the last choice of the account, since the contract also makes every choice "the one
-  the next sessions of the actor start in": a person who chose another organization in another
-  browser and comes back to this one starts there next time.
+- Choosing the current organization again leaves the session as it is but records it as the last
+  choice of the account, as the contract states ("records the organization as the last choice of
+  the actor again, the one their next sessions start in, also when another session of theirs chose
+  another organization since"): a person who chose another organization in another browser and
+  comes back to this one starts there next time.
 - `session.revoked.v1` keeps `organizationId: null`, as the contract fixes it for this version.
 - The scopes of a session are the four of `ApiTokenScope`, kept in the domain
   (`SESSION_SCOPES`); a spec compares them with the installed contract.

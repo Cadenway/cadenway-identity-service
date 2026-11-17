@@ -183,8 +183,8 @@ Each flow runs in system transactions of `SystemAccountsUnitOfWork` (see Decisio
   their count once it stopped.
 - A blank display name or job title (spaces only) answers `400 request.invalid`, like a blank name,
   rather than clearing it: the contract clears them with `null` only. A malformed `If-Match` answers
-  `400 request.invalid` with an issue on the header, the code the contract declares, rather than the
-  kit's `request.if-match-invalid`.
+  `400 request.invalid` with one issue on the header (`in: 'header'`, `invalid_format`), the code
+  the contract declares, which `parseIfMatch` of `@cadenway/nest-common` raises itself from 0.6.0.
 - The time zone is checked against `Intl.supportedValuesOf('timeZone')` of the runtime, and a link
   the runtime still resolves (`Asia/Calcutta`) is accepted as given; a UTC offset (`+01:00`), which
   the runtime also accepts as a time zone, is refused, not being an IANA name. That check, like the

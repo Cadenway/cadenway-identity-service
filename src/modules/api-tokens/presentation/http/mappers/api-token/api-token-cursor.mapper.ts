@@ -44,31 +44,35 @@ export function toCursor(position: ApiTokenPosition | null): string | null {
  *
  * @description
  * Decodes the cursor of a previous page. A cursor that is not one of this list answers
- * `400 request.invalid` with an issue on `cursor`, the code the contract declares for a query that
- * does not match it.
+ * `400 request.invalid` with one issue on `cursor` (`invalid_cursor`), the code the contract
+ * declares for a query that does not match it: `decodeCursor` of the kit answers it for a malformed
+ * cursor or one issued for another sort, and this function answers the same for a decoded position
+ * that does not name a creation instant and a token id.
  *
  * @param {string | undefined} cursor - The `cursor` query parameter.
  * @returns {ApiTokenPosition | null} Where the page starts, or `null` for the first page.
- * @throws {ProblemException} `400 request.invalid` for a malformed cursor.
+ * @throws {ProblemException} `400 request.invalid` for a cursor that is not one of this list.
  */
 export function toPosition(cursor: string | undefined): ApiTokenPosition | null {
   if (cursor === undefined) {
     return null;
   }
+  const position: CursorPosition = decodeCursor(cursor, LIST_FILTERS);
   const invalid: ProblemException = new ProblemException({
     status: 400,
     code: 'request.invalid',
     detail: 'The request does not match its contract.',
     details: {
-      issues: [{ in: 'query', path: 'cursor', code: 'invalid_cursor', message: 'Unknown cursor.' }],
+      issues: [
+        {
+          in: 'query',
+          path: 'cursor',
+          code: 'invalid_cursor',
+          message: 'Expected the nextCursor of a previous page of this list.',
+        },
+      ],
     },
   });
-  let position: CursorPosition;
-  try {
-    position = decodeCursor(cursor, LIST_FILTERS);
-  } catch {
-    throw invalid;
-  }
   const createdAt: unknown = position.sort[0];
   if (position.sort.length !== 1 || typeof createdAt !== 'string') {
     throw invalid;
