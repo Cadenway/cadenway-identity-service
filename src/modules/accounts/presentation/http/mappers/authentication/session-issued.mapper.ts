@@ -1,6 +1,7 @@
 import type { SessionIssued } from '@cadenway/contracts/types/internal/identity-service';
 
 import type { SessionIssuedView } from '../../../../application/projections/authentication/session-issued-view.projection.js';
+import { toUser } from '../accounts/user.mapper.js';
 
 /**
  * Function toSessionIssued
@@ -20,12 +21,6 @@ export function toSessionIssued(view: SessionIssuedView): SessionIssued {
       expiresAt: view.session.expiresAt.toISOString(),
       persistent: view.session.persistent,
     },
-    user: {
-      id: view.user.id,
-      name: view.user.name,
-      email: view.user.email,
-      language: view.user.language,
-      version: view.user.version,
-    },
+    user: toUser(view.user),
   };
 }

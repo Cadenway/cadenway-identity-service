@@ -4,6 +4,7 @@ import type { OutboxRelay, OutboxWriter } from '@cadenway/nest-messaging/outbox'
 import type { SessionsStore } from '../../../../../application/models/session/sessions-store.model.js';
 import type { SessionsUnitOfWork } from '../../../../../application/ports/outbound/transactions/session/sessions-unit-of-work.port.js';
 import { OutboxSessionEvents } from '../../../../messaging/outbox/session/outbox-session-events.adapter.js';
+import { DrizzleOrganizationChoiceRepository } from '../../repositories/session/drizzle-organization-choice.repository.js';
 import { DrizzleSessionRepository } from '../../repositories/session/drizzle-session.repository.js';
 
 /**
@@ -11,10 +12,13 @@ import { DrizzleSessionRepository } from '../../repositories/session/drizzle-ses
  *
  * @description
  * `SessionsUnitOfWork` on the system transaction runner of `@cadenway/nest-common/database`, for
- * the reasons of the accounts module: no flow of this module has an organization, the tenant runner
- * refuses to run without one, and `session.revoked.v1` is appended with `organizationId: null`.
- * The `sessions` table carries no organization and no policy; every query names its session by id
- * or token hash, and a user reaches only its own sessions because the use case compares the owner.
+ * the reasons of the accounts module: no route of this module has an organization in its internal
+ * token, the tenant runner refuses to run without one, a session is opened inside the system
+ * transaction of a sign-in, and `session.revoked.v1` is appended with `organizationId: null`. Every
+ * query names its session by id or token hash, or its choice by account, and a user reaches only
+ * its own sessions because the use case compares the owner; the system access lifts the policy of
+ * `sessions.organization_id` and `organization_choices.organization_id` for these named rows only.
+ * The copy of the memberships, read through its port inside `run`, joins the same transaction.
  * Inside the system transaction of a sign-in, `run` joins it. A run that appended events wakes the
  * relay once it resolves.
  */
@@ -89,6 +93,7 @@ export class SystemSessionsUnitOfWork implements SessionsUnitOfWork {
       (transaction: TransactionScope): Promise<TResult> =>
         work({
           sessions: new DrizzleSessionRepository(transaction.db),
+          organizationChoices: new DrizzleOrganizationChoiceRepository(transaction.db),
           events: new OutboxSessionEvents(transaction, this.outbox, (): void => {
             appends.count += 1;
           }),

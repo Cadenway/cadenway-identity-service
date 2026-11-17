@@ -28,6 +28,8 @@ export function toSession(row: SessionRow): Session {
     lastActiveAt: row.lastActiveAt,
     expiresAt: row.expiresAt,
     revokedAt: row.revokedAt,
+    organizationId: row.organizationId,
+    memberId: row.memberId,
     version: row.version,
   });
 }

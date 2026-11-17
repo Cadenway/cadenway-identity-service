@@ -1,0 +1,99 @@
+import { beforeEach, describe, expect, it } from 'vitest';
+
+import {
+  FakeActiveMemberships,
+  FakeApiTokenSecrets,
+  FixedClock,
+  InMemoryApiTokens,
+} from '../api-tokens.fixture.js';
+import type { CreateApiTokenOutput } from '../create-api-token/create-api-token.output.js';
+import { CreateApiToken } from '../create-api-token/create-api-token.use-case.js';
+import { RevokeApiToken } from '../revoke-api-token/revoke-api-token.use-case.js';
+import { IntrospectApiToken } from './introspect-api-token.use-case.js';
+
+const ATELIER_NORD = '019a5f3c-8d2e-7c4a-9b1f-3e5d7a9c1b2f';
+const CAMILLE_ID = '019a5f3c-8d2e-7c4a-9b1f-3e5d7a9c1b30';
+const DAY = 24 * 60 * 60_000;
+
+describe('IntrospectApiToken', () => {
+  let store: InMemoryApiTokens;
+  let memberships: FakeActiveMemberships;
+  let clock: FixedClock;
+  let introspect: IntrospectApiToken;
+  let created: CreateApiTokenOutput;
+
+  beforeEach(async () => {
+    store = new InMemoryApiTokens();
+    memberships = new FakeActiveMemberships();
+    clock = new FixedClock('2026-11-08T14:02:00Z');
+    const secrets: FakeApiTokenSecrets = new FakeApiTokenSecrets();
+    introspect = new IntrospectApiToken(store, secrets, memberships, clock);
+    created = await new CreateApiToken(store, secrets, clock).execute({
+      actorUserId: CAMILLE_ID,
+      organizationId: ATELIER_NORD,
+      name: 'Synchronisation GitLab',
+      scopes: ['tasks:read', 'members:read'],
+      expiration: '30-days',
+    });
+    memberships.join(CAMILLE_ID, {
+      memberId: '019a6b10-0000-7000-8000-000000000001',
+      organizationId: ATELIER_NORD,
+      role: 'member',
+    });
+  });
+
+  it('answers an active token with its user, organization, role, scopes and expiry', async () => {
+    await expect(introspect.execute({ token: created.secret })).resolves.toEqual({
+      active: true,
+      tokenType: 'api-token',
+      apiTokenId: created.apiToken.id,
+      userId: CAMILLE_ID,
+      organizationId: ATELIER_NORD,
+      role: 'member',
+      scopes: ['tasks:read', 'members:read'],
+      expiresAt: new Date('2026-12-08T14:02:00Z'),
+    });
+  });
+
+  it('records the use at most once a minute', async () => {
+    await introspect.execute({ token: created.secret });
+    clock.advance(59_000);
+    await introspect.execute({ token: created.secret });
+    expect(store.useWrites).toBe(1);
+
+    clock.advance(1_000);
+    await introspect.execute({ token: created.secret });
+    expect(store.useWrites).toBe(2);
+    expect(store.rows.get(created.apiToken.id)?.state.lastUsedAt).toEqual(
+      new Date('2026-11-08T14:03:00Z'),
+    );
+  });
+
+  it('answers inactive for a malformed or unknown token, and a session token', async () => {
+    for (const token of ['short', `cw_pat_${'x'.repeat(36)}`, 'U'.repeat(43)]) {
+      await expect(introspect.execute({ token })).resolves.toEqual({ active: false });
+    }
+  });
+
+  it('answers inactive once revoked, once expired, and once the user left the organization', async () => {
+    memberships.active.clear();
+    await expect(introspect.execute({ token: created.secret })).resolves.toEqual({ active: false });
+    expect(store.useWrites).toBe(0);
+
+    memberships.join(CAMILLE_ID, {
+      memberId: '019a6b10-0000-7000-8000-000000000001',
+      organizationId: ATELIER_NORD,
+      role: 'member',
+    });
+    clock.advance(30 * DAY);
+    await expect(introspect.execute({ token: created.secret })).resolves.toEqual({ active: false });
+
+    clock.advance(-30 * DAY);
+    await new RevokeApiToken(store, clock).execute({
+      actorUserId: CAMILLE_ID,
+      organizationId: ATELIER_NORD,
+      apiTokenId: created.apiToken.id,
+    });
+    await expect(introspect.execute({ token: created.secret })).resolves.toEqual({ active: false });
+  });
+});

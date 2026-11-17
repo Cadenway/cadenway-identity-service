@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 
 import {
+  FakeActiveMemberships,
   FakeDeviceReader,
   FakeSessionTokens,
   FixedClock,
@@ -10,20 +11,33 @@ import type { StoredSession } from '../sessions.fixture.js';
 import type { OpenSessionOutput } from './open-session.output.js';
 import { OpenSession } from './open-session.use-case.js';
 
+const CAMILLE_ID = '019a5f3c-8d2e-7c4a-9b1f-3e5d7a9c1b30';
+const ATELIER_NORD = '019a5f3c-8d2e-7c4a-9b1f-3e5d7a9c1b2f';
+const MEMBER_ID = '019a6b10-0000-7000-8000-000000000001';
+const CLIENT = { ipAddress: '86.247.12.30', userAgent: 'Mozilla/5.0 Firefox/145.0' } as const;
+
 describe('OpenSession', () => {
-  it('stores the hash of the token with the browser, and returns the token once', async () => {
-    const store: InMemorySessions = new InMemorySessions();
-    const open: OpenSession = new OpenSession(
+  let store: InMemorySessions;
+  let memberships: FakeActiveMemberships;
+  let open: OpenSession;
+
+  beforeEach(() => {
+    store = new InMemorySessions();
+    memberships = new FakeActiveMemberships();
+    open = new OpenSession(
       store,
       new FakeSessionTokens(),
       new FakeDeviceReader(),
+      memberships,
       new FixedClock('2026-11-08T13:07:00Z'),
     );
+  });
 
+  it('stores the hash of the token with the browser, and returns the token once', async () => {
     const opened: OpenSessionOutput = await open.execute({
-      userId: '019a5f3c-8d2e-7c4a-9b1f-3e5d7a9c1b30',
+      userId: CAMILLE_ID,
       persistent: true,
-      client: { ipAddress: '86.247.12.30', userAgent: 'Mozilla/5.0 Firefox/145.0' },
+      client: CLIENT,
     });
 
     expect(opened).toEqual({
@@ -39,6 +53,43 @@ describe('OpenSession', () => {
       userAgent: 'Mozilla/5.0 Firefox/145.0',
       device: { browser: 'Firefox 145', operatingSystem: 'Windows 10', deviceType: 'desktop' },
     });
+    expect(stored?.state).toMatchObject({ organizationId: null, memberId: null });
     expect(JSON.stringify(stored?.state)).not.toContain(opened.token);
+  });
+
+  it('starts in the organization the account last chose while it is still a member there', async () => {
+    store.choices.set(CAMILLE_ID, ATELIER_NORD);
+    memberships.join(CAMILLE_ID, {
+      memberId: MEMBER_ID,
+      organizationId: ATELIER_NORD,
+      role: 'owner',
+    });
+
+    const opened: OpenSessionOutput = await open.execute({
+      userId: CAMILLE_ID,
+      persistent: false,
+      client: CLIENT,
+    });
+
+    expect(store.sessions.get(opened.id)?.state).toMatchObject({
+      organizationId: ATELIER_NORD,
+      memberId: MEMBER_ID,
+      version: 1,
+    });
+  });
+
+  it('starts in no organization once the account left the one it last chose', async () => {
+    store.choices.set(CAMILLE_ID, ATELIER_NORD);
+
+    const opened: OpenSessionOutput = await open.execute({
+      userId: CAMILLE_ID,
+      persistent: false,
+      client: CLIENT,
+    });
+
+    expect(store.sessions.get(opened.id)?.state).toMatchObject({
+      organizationId: null,
+      memberId: null,
+    });
   });
 });

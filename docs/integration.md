@@ -14,9 +14,9 @@ Who the user is and how they sign in.
 
 **API**: Sign-in, sign-up, MFA, one-time codes, password reset, sessions (list, revoke), API tokens, profile, preferences. Issues the tokens the gateways verify.
 
-**Events emitted**: `user.signed-up.v1`, `user.email-verified.v1`, `session.revoked.v1` and the restricted `one-time-code.issued.v1`, from `asyncapi/identity-service.yaml`. Planned, not in the contracts yet: `user.status-changed`, `api-token.created`, `api-token.revoked`.
+**Events emitted**: `user.signed-up.v1`, `user.email-verified.v1`, `user.profile-updated.v1`, `session.revoked.v1` and the restricted `one-time-code.issued.v1`, from `asyncapi/identity-service.yaml`. Planned, not in the contracts yet: `user.status-changed`, `api-token.created`, `api-token.revoked`.
 
-**Events consumed**: Nothing yet. Planned, not in the contracts yet: `member.removed` (closes the user's sessions in that organization).
+**Events consumed**: `member.joined.v1`, `member.role-changed.v1` and `member.removed.v1` of `asyncapi/organization-service.yaml`, for the copy of the memberships (module `memberships`). The choice of the current organization of a session checks it, and both introspections fill the organization and the role from it. A removal ends the organization of the member's sessions there, for good (a person who joins again gets a new membership and chooses the organization again), and makes its personal API tokens of that organization inactive.
 
 **External systems**: OAuth providers, customers' SAML identity providers, WebAuthn for security keys.
 
@@ -34,7 +34,7 @@ Who the user is and how they sign in.
 
 Decided: this service is built in NestJS, without an existing identity provider (Keycloak, Zitadel, Ory). Its security parameters are fixed in the `cw-identity-security` skill. Organizations and members belong to cadenway-organization-service from the start.
 
-Decided: this service keeps a projection of memberships, fed by the `member.*` events, so that introspection returns the user, the organization and the member role. The authentication policies of an organization (required MFA, session lifetime, allowed sign-in methods) and its SAML connection are stored here, where they are enforced. The realtime gateway redeems its single-use connection ticket here. Two events are to be added in cadenway-api-contracts before they are coded: `user.profile-updated` and `user.deleted`. The security emails (sign-in code, reset link, password changed, new sign-in, MFA enabled, account deletion) are triggered by a dedicated family of events of this service; an event carries the single-use, short-lived code or link when the email needs one. Their NATS subjects are readable by cadenway-notification-service only, and the code or link is never logged. These events are to be added in cadenway-api-contracts before they are coded.
+Decided: this service keeps a projection of memberships, fed by the `member.*` events, so that introspection returns the user, the organization and the member role. The authentication policies of an organization (required MFA, session lifetime, allowed sign-in methods) and its SAML connection are stored here, where they are enforced. The realtime gateway redeems its single-use connection ticket here. `user.profile-updated.v1` is in the contracts since `@cadenway/contracts` 0.5.0 and emitted on a profile change; `user.deleted` is still to be added in cadenway-api-contracts before it is coded. The security emails (sign-in code, reset link, password changed, new sign-in, MFA enabled, account deletion) are triggered by a dedicated family of events of this service; an event carries the single-use, short-lived code or link when the email needs one. Their NATS subjects are readable by cadenway-notification-service only, and the code or link is never logged. These events are to be added in cadenway-api-contracts before they are coded.
 
 Everything above comes from the [repositories document](https://claude.ai/artifact/BPinmYxoF3mbK8w9BMB43N) and the
 [integration guide](https://claude.ai/artifact/CpJHVCiFfF9j3KbHQ2S1Et). If the mockup disagrees with this guide, update the guide and its source skill for both assistants.
@@ -87,6 +87,30 @@ Decisions of this service, taken while building it:
 - The activity of a session is recorded at most once a minute.
 - The flows run in the system transaction runner, since they and their events have no organization
   (see the `MODULE.md` of the accounts module).
+
+## Decisions of the organization context (P2b)
+
+The organization context, the personal API tokens and the profile follow the decisions of the P2b
+plan, which the `MODULE.md` files of the sessions, memberships, api-tokens and accounts modules
+cite:
+
+1. A session acts on at most one organization, chosen with
+   `PUT /internal/v1/sessions/{sessionId}/organization` and checked against the copy of the
+   memberships; a membership not there yet answers `404 organization.not-found` and the web
+   application retries. The session keeps the membership it acts through: a removal ends its
+   organization for good, even if the person joins again.
+2. A new session starts in the organization the account last chose, when it is still a member
+   there, else in none.
+3. The copy of the memberships follows `member.joined.v1`, `member.role-changed.v1` and
+   `member.removed.v1` from the start of the stream, by version, a removed membership staying
+   removed; beyond the seven days of `EVENTS` it is rebuilt by organization-service (see the
+   `MODULE.md` of the memberships module).
+4. A personal API token belongs to its user and to the current organization of the session that
+   created it; it works while neither revoked nor expired and while its user is a member of that
+   organization; its last use is recorded at most once a minute.
+5. A session holds every scope: `tasks:read`, `tasks:write`, `members:read`, `webhooks:manage`.
+6. The profile changes by a JSON Merge Patch, emits `user.profile-updated.v1` when something moved,
+   and takes `Europe/Paris` as the time zone of an account that never chose one.
 
 ## Engineering standards
 

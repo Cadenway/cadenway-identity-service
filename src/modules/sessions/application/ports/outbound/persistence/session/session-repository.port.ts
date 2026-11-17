@@ -6,8 +6,8 @@ import type { SessionOrigin } from '../../../../models/session/session-origin.mo
  * Interface SessionRepository
  *
  * @description
- * The sessions, bound to the transaction of a unit of work. A session belongs to no organization:
- * every read names it by its id or by the hash of its token.
+ * The sessions, bound to the transaction of a unit of work. A session belongs to its account, not
+ * to its current organization: every read names it by its id or by the hash of its token.
  */
 export interface SessionRepository {
   // #region Methods
@@ -55,6 +55,18 @@ export interface SessionRepository {
    * @returns {Promise<void>} Resolves once written.
    */
   recordActivity(session: Session): Promise<void>;
+
+  /**
+   * Method chooseOrganization
+   *
+   * @description
+   * Writes the current organization, its membership and the version of a session locked by
+   * `findForUpdate`.
+   *
+   * @param {Session} session - The session after the choice.
+   * @returns {Promise<void>} Resolves once written.
+   */
+  chooseOrganization(session: Session): Promise<void>;
 
   /**
    * Method revoke

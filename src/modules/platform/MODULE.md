@@ -45,8 +45,10 @@ stores: `evt.<name>` in `EVENTS`, or `restricted.<name>` in `EVENTS_RESTRICTED` 
 
 ## Events consumed
 
-None. `processed_events` and `event_versions` record what the handlers of the business modules
-consumed, through the PostgreSQL deduplicator of `OutboxModule`; no handler exists yet.
+None of its own. `processed_events` records what the handlers of the business modules consumed,
+through the PostgreSQL deduplicator of `OutboxModule`: today the three member event handlers of the
+memberships module, in the tenant transaction of the organization of each event. No handler uses
+`claimVersion`, so `event_versions` stays empty.
 
 ## Invariants
 

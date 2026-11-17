@@ -1,9 +1,12 @@
 import { EmailAlreadyVerifiedError } from '../../errors/accounts/email-already-verified.error.js';
+import { InvalidProfileError } from '../../errors/accounts/invalid-profile.error.js';
 import { InvalidUserNameError } from '../../errors/accounts/invalid-user-name.error.js';
 import { InvalidUserStateError } from '../../errors/accounts/invalid-user-state.error.js';
 import { SignUpReplacedError } from '../../errors/accounts/sign-up-replaced.error.js';
 import type { EmailAddress } from '../../value-objects/email/email-address.value-object.js';
 import type { SignUpPasswordCheck } from '../../value-objects/password/sign-up-password-check.value-object.js';
+import type { ProfilePatch } from '../../value-objects/profile/profile-patch.value-object.js';
+import type { ProfileUpdate } from '../../value-objects/profile/profile-update.value-object.js';
 import type { UserRegistration } from './user-registration.aggregate.js';
 import type { UserState } from './user-state.aggregate.js';
 
@@ -27,7 +30,12 @@ import type { UserState } from './user-state.aggregate.js';
  *   of someone else's pending address never leaves the owner verifying a password it did not choose;
  *   an address signed up once is still verified by its code alone;
  * - the name is trimmed, 1 to 120 characters; the language is `fr` by default, as the contract
- *   says (`Language`), since no route sets it yet.
+ *   says (`Language`);
+ * - the profile ("Profil" of the mockup, `PATCH /v1/me` of `openapi/public/auth.yaml`) changes by
+ *   a merge patch: a member left out is kept, `null` clears the display name or the job title; the
+ *   display name is trimmed, 1 to 60 characters, the job title 1 to 120; the time zone is an IANA
+ *   name, `Europe/Paris` until the person chooses another; a patch that changes something takes
+ *   the next version (`user.profile-updated.v1`), one that changes nothing keeps it.
  */
 export class User {
   // #region Properties
@@ -52,6 +60,61 @@ export class User {
    * @readonly
    */
   public static readonly NAME_MAX_LENGTH: number = 120;
+
+  /**
+   * Property DISPLAY_NAME_MAX_LENGTH
+   *
+   * @description
+   * Longest display name, in code points (`maxLength: 60`).
+   *
+   * @type {number}
+   * @readonly
+   */
+  public static readonly DISPLAY_NAME_MAX_LENGTH: number = 60;
+
+  /**
+   * Property JOB_TITLE_MAX_LENGTH
+   *
+   * @description
+   * Longest job title, in code points (`maxLength: 120`).
+   *
+   * @type {number}
+   * @readonly
+   */
+  public static readonly JOB_TITLE_MAX_LENGTH: number = 120;
+
+  /**
+   * Property TIME_ZONE_MAX_LENGTH
+   *
+   * @description
+   * Longest time zone name (`maxLength: 64`).
+   *
+   * @type {number}
+   * @readonly
+   */
+  public static readonly TIME_ZONE_MAX_LENGTH: number = 64;
+
+  /**
+   * Property LANGUAGE_MAX_LENGTH
+   *
+   * @description
+   * Longest language tag (BCP 47 recommends 35 characters at most).
+   *
+   * @type {number}
+   * @readonly
+   */
+  public static readonly LANGUAGE_MAX_LENGTH: number = 35;
+
+  /**
+   * Property DEFAULT_TIME_ZONE
+   *
+   * @description
+   * Time zone of an account that never chose one (`TimeZone` of `openapi/public/auth.yaml`).
+   *
+   * @type {string}
+   * @readonly
+   */
+  public static readonly DEFAULT_TIME_ZONE: string = 'Europe/Paris';
 
   /**
    * Property state
@@ -114,6 +177,45 @@ export class User {
    */
   public get language(): string {
     return this.state.language;
+  }
+
+  /**
+   * Property displayName
+   *
+   * @description
+   * "Nom affiché", or `null`.
+   *
+   * @type {string | null}
+   * @readonly
+   */
+  public get displayName(): string | null {
+    return this.state.displayName;
+  }
+
+  /**
+   * Property jobTitle
+   *
+   * @description
+   * "Poste (facultatif)", or `null`.
+   *
+   * @type {string | null}
+   * @readonly
+   */
+  public get jobTitle(): string | null {
+    return this.state.jobTitle;
+  }
+
+  /**
+   * Property timeZone
+   *
+   * @description
+   * IANA time zone name of the account.
+   *
+   * @type {string}
+   * @readonly
+   */
+  public get timeZone(): string {
+    return this.state.timeZone;
   }
 
   /**
@@ -189,7 +291,8 @@ export class User {
    * Method register
    *
    * @description
-   * The account a first sign-up creates, not verified, at version 1, signed up once.
+   * The account a first sign-up creates, not verified, at version 1, signed up once, with no
+   * display name nor job title, in the default time zone.
    *
    * @param {EmailAddress} email - The address signed up.
    * @param {string} name - The full name as typed.
@@ -201,6 +304,9 @@ export class User {
       email,
       name: User.normalizeName(name),
       language: User.DEFAULT_LANGUAGE,
+      displayName: null,
+      jobTitle: null,
+      timeZone: User.DEFAULT_TIME_ZONE,
       version: 1,
       signUpCount: 1,
     };
@@ -215,7 +321,7 @@ export class User {
    * @param {UserState} state - The stored state.
    * @returns {User} The account.
    * @throws {InvalidUserStateError} When the version or the sign-up count is not a positive
-   * integer, or the language is empty.
+   * integer, or the language or the time zone is empty.
    */
   public static restore(state: UserState): User {
     if (!Number.isInteger(state.version) || state.version < 1) {
@@ -226,6 +332,9 @@ export class User {
     }
     if (state.language.length === 0) {
       throw new InvalidUserStateError('the language is set');
+    }
+    if (state.timeZone.length === 0) {
+      throw new InvalidUserStateError('the time zone is set');
     }
     return new User(state);
   }
@@ -248,6 +357,101 @@ export class User {
       throw new InvalidUserNameError();
     }
     return trimmed;
+  }
+
+  /**
+   * Method normalizeOptional
+   *
+   * @description
+   * Trims a display name or a job title, `null` clearing it, and checks its length.
+   *
+   * @param {string | null} value - The value as typed, or `null`.
+   * @param {number} maxLength - Its longest length, in code points.
+   * @param {string} member - Its name, for the error.
+   * @returns {string | null} The trimmed value, or `null`.
+   * @throws {InvalidProfileError} When the trimmed value is empty or too long.
+   */
+  private static normalizeOptional(
+    value: string | null,
+    maxLength: number,
+    member: string,
+  ): string | null {
+    if (value === null) {
+      return null;
+    }
+    const trimmed: string = value.trim();
+    const length: number = Array.from(trimmed).length;
+    if (length === 0 || length > maxLength) {
+      throw new InvalidProfileError(member);
+    }
+    return trimmed;
+  }
+
+  /**
+   * Method normalizeRequired
+   *
+   * @description
+   * Checks a time zone or a language, kept as given.
+   *
+   * @param {string} value - The value.
+   * @param {number} maxLength - Its longest length.
+   * @param {string} member - Its name, for the error.
+   * @returns {string} The value.
+   * @throws {InvalidProfileError} When the value is empty or too long.
+   */
+  private static normalizeRequired(value: string, maxLength: number, member: string): string {
+    if (value.length === 0 || value.length > maxLength) {
+      throw new InvalidProfileError(member);
+    }
+    return value;
+  }
+
+  /**
+   * Method updateProfile
+   *
+   * @description
+   * Applies a merge patch to the profile: each member given replaces the current one once
+   * normalized, and the account takes the next version when one of them moved.
+   *
+   * @param {ProfilePatch} patch - The patch.
+   * @returns {ProfileUpdate} The account after the patch and the members that moved; this account
+   * and no member when nothing moved.
+   * @throws {InvalidUserNameError} When the trimmed name is empty or too long.
+   * @throws {InvalidProfileError} When another member breaks its rule.
+   */
+  public updateProfile(patch: ProfilePatch): ProfileUpdate {
+    const next: UserState = {
+      ...this.state,
+      name: patch.name === undefined ? this.state.name : User.normalizeName(patch.name),
+      displayName:
+        patch.displayName === undefined
+          ? this.state.displayName
+          : User.normalizeOptional(patch.displayName, User.DISPLAY_NAME_MAX_LENGTH, 'display name'),
+      jobTitle:
+        patch.jobTitle === undefined
+          ? this.state.jobTitle
+          : User.normalizeOptional(patch.jobTitle, User.JOB_TITLE_MAX_LENGTH, 'job title'),
+      timeZone:
+        patch.timeZone === undefined
+          ? this.state.timeZone
+          : User.normalizeRequired(patch.timeZone, User.TIME_ZONE_MAX_LENGTH, 'time zone'),
+      language:
+        patch.language === undefined
+          ? this.state.language
+          : User.normalizeRequired(patch.language, User.LANGUAGE_MAX_LENGTH, 'language'),
+    };
+    const members: readonly ('name' | 'displayName' | 'jobTitle' | 'timeZone' | 'language')[] = [
+      'name',
+      'displayName',
+      'jobTitle',
+      'timeZone',
+      'language',
+    ];
+    const changed: string[] = members.filter((member) => next[member] !== this.state[member]);
+    if (changed.length === 0) {
+      return { user: this, changed };
+    }
+    return { user: new User({ ...next, version: this.state.version + 1 }), changed };
   }
 
   /**

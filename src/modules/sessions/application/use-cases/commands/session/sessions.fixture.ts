@@ -1,12 +1,15 @@
 import { Session } from '../../../../domain/aggregates/session/session.aggregate.js';
 import type { SessionStart } from '../../../../domain/value-objects/session/session-start.value-object.js';
 import type { SessionState } from '../../../../domain/value-objects/session/session-state.value-object.js';
+import type { ActiveMembership } from '../../../models/session/active-membership.model.js';
 import type { DeviceDescription } from '../../../models/session/device-description.model.js';
 import type { IssuedToken } from '../../../models/session/issued-token.model.js';
 import type { SessionOrigin } from '../../../models/session/session-origin.model.js';
 import type { SessionsStore } from '../../../models/session/sessions-store.model.js';
 import type { DeviceReader } from '../../../ports/outbound/device/session/device-reader.port.js';
+import type { ActiveMemberships } from '../../../ports/outbound/memberships/session/active-memberships.port.js';
 import type { SessionEvents } from '../../../ports/outbound/messaging/session/session-events.port.js';
+import type { OrganizationChoiceRepository } from '../../../ports/outbound/persistence/session/organization-choice-repository.port.js';
 import type { SessionRepository } from '../../../ports/outbound/persistence/session/session-repository.port.js';
 import type { SessionTokens } from '../../../ports/outbound/security/session/session-tokens.port.js';
 import type { Clock } from '../../../ports/outbound/time/session/clock.port.js';
@@ -83,6 +86,16 @@ export class InMemorySessions implements SessionsUnitOfWork {
   public activityWrites: number = 0;
 
   /**
+   * Property choices
+   *
+   * @description
+   * Committed last organization chosen, by account.
+   *
+   * @type {Map<string, string>}
+   */
+  public choices: Map<string, string> = new Map<string, string>();
+
+  /**
    * Property ids
    *
    * @description
@@ -109,6 +122,7 @@ export class InMemorySessions implements SessionsUnitOfWork {
       ...this.revoked,
     ];
     const writes: { count: number } = { count: this.activityWrites };
+    const choices: Map<string, string> = new Map<string, string>(this.choices);
     const repository: SessionRepository = {
       insert: (start: SessionStart, origin: SessionOrigin): Promise<Session> => {
         this.ids += 1;
@@ -138,6 +152,14 @@ export class InMemorySessions implements SessionsUnitOfWork {
         }
         return Promise.resolve();
       },
+      chooseOrganization: (session: Session): Promise<void> => {
+        const stored: StoredSession | undefined = sessions.get(session.id);
+        if (stored?.state.version !== session.snapshot.version - 1) {
+          return Promise.reject(new Error('The session changed since it was loaded.'));
+        }
+        sessions.set(session.id, { ...stored, state: session.snapshot });
+        return Promise.resolve();
+      },
       revoke: (session: Session): Promise<void> => {
         const stored: StoredSession | undefined = sessions.get(session.id);
         if (stored !== undefined) {
@@ -152,11 +174,82 @@ export class InMemorySessions implements SessionsUnitOfWork {
         return Promise.resolve();
       },
     };
-    const result: TResult = await work({ sessions: repository, events });
+    const organizationChoices: OrganizationChoiceRepository = {
+      find: (userId: string): Promise<string | null> =>
+        Promise.resolve(choices.get(userId) ?? null),
+      remember: (userId: string, organizationId: string): Promise<void> => {
+        choices.set(userId, organizationId);
+        return Promise.resolve();
+      },
+    };
+    const result: TResult = await work({ sessions: repository, organizationChoices, events });
     this.sessions = sessions;
+    this.choices = choices;
     this.revoked = revoked;
     this.activityWrites = writes.count;
     return result;
+  }
+  // #endregion
+}
+
+/**
+ * Class FakeActiveMemberships
+ *
+ * @description
+ * A fake copy of the memberships: the active membership of each account in each organization.
+ */
+export class FakeActiveMemberships implements ActiveMemberships {
+  // #region Properties
+  /**
+   * Property active
+   *
+   * @description
+   * Active memberships by `<organizationId>/<userId>`.
+   *
+   * @type {Map<string, ActiveMembership>}
+   */
+  public active: Map<string, ActiveMembership> = new Map<string, ActiveMembership>();
+  // #endregion
+
+  // #region Methods
+  /**
+   * Method join
+   *
+   * @description
+   * Makes an account a member of an organization, replacing a previous membership there.
+   *
+   * @param {string} userId - The account.
+   * @param {ActiveMembership} membership - The membership.
+   */
+  public join(userId: string, membership: ActiveMembership): void {
+    this.active.set(`${membership.organizationId}/${userId}`, membership);
+  }
+
+  /**
+   * Method remove
+   *
+   * @description
+   * Ends the membership of an account in an organization.
+   *
+   * @param {string} userId - The account.
+   * @param {string} organizationId - The organization.
+   */
+  public remove(userId: string, organizationId: string): void {
+    this.active.delete(`${organizationId}/${userId}`);
+  }
+
+  /**
+   * Method find
+   *
+   * @description
+   * The active membership of an account in an organization.
+   *
+   * @param {string} organizationId - The organization.
+   * @param {string} userId - The account.
+   * @returns {Promise<ActiveMembership | null>} The membership, or `null`.
+   */
+  public find(organizationId: string, userId: string): Promise<ActiveMembership | null> {
+    return Promise.resolve(this.active.get(`${organizationId}/${userId}`) ?? null);
   }
   // #endregion
 }

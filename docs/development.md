@@ -10,10 +10,11 @@ one JSON line on the standard error; it writes JSON log lines, starts OpenTeleme
 application, requires the internal token on every route but the health probes, connects to NATS as
 the `identity` user, runs the outbox relay, and its readiness checks PostgreSQL and NATS. The first
 migration creates the tables of the service kit, owned by the platform module
-(`src/modules/platform/MODULE.md`); the second, the tables of the accounts and sessions modules,
-which serve every route of `openapi/internal/identity-service.yaml` and emit the four events of
-`asyncapi/identity-service.yaml` (their `MODULE.md` files). Nothing is consumed yet. The target
-architecture in this guide is what the next modules must follow.
+(`src/modules/platform/MODULE.md`); the next ones, the tables of the accounts, sessions,
+memberships and api-tokens modules, which serve every route of
+`openapi/internal/identity-service.yaml`, emit the five events of `asyncapi/identity-service.yaml`
+and consume the three member events of `asyncapi/organization-service.yaml` (their `MODULE.md`
+files). The target architecture in this guide is what the next modules must follow.
 
 The commands below are the documented workflow. Inspect the repository's actual manifests and files before running them, and report unavailable checks rather than inventing replacements. Run Git, pnpm, build, and test commands with this repository as the working directory, never from the parent workspace.
 
@@ -124,9 +125,11 @@ console.log(await signer.sign("identity-service", {
 
 and send it as `Authorization: Bearer <token>`. Each route accepts the issuer `api-gateway` only,
 and one kind of actor: `anonymous` (above) for the authentication flows, `system` for
-`POST /internal/v1/tokens/introspect`, and `user` (`{ type: "user", id: "<user id>" }`) for
-`DELETE /internal/v1/sessions/{sessionId}` and `GET /internal/v1/users/{userId}`. No route needs an
-organization. The codes of a sign-up go to notification-service through `EVENTS_RESTRICTED`; alone,
+`POST /internal/v1/tokens/introspect` and `POST /internal/v1/api-tokens/introspect`, and `user`
+(`{ type: "user", id: "<user id>" }`) for the routes of a session and of a user. Only the routes of
+the personal API tokens need an organization (`organizationId: "<organization id>"`); a membership
+reaches the copy of this service from `member.joined.v1`, which a workstation publishes with the
+`admin` user: `docker compose -f compose.dev.yaml exec nats-streams nats pub --jetstream evt.member.joined.v1 '<payload>'`. The codes of a sign-up go to notification-service through `EVENTS_RESTRICTED`; alone,
 on a workstation only, read the latest from the stream with the `admin` user:
 `docker compose -f compose.dev.yaml exec nats-streams nats stream get EVENTS_RESTRICTED --last-for restricted.one-time-code.issued.v1`.
 The outbox row no longer holds it once the relay published it. Use a workstation key only: the keys of staging and

@@ -59,24 +59,38 @@ on a table that declares a policy but never forces it: every migration that crea
 of a business module or of the kit, adds `ALTER TABLE "<table>" FORCE ROW LEVEL SECURITY;` by hand,
 as `migrations/0000_platform_tables.sql` does.
 
-## Tables without an organization
+## Tables without an organization, and the system runner
 
-The business tables of today (`users`, `password_credentials`, `one_time_codes`, `code_requests`,
-`sign_in_attempts` of the accounts module, `sessions` of the sessions module) carry no
-`organization_id`: the contracts give an account, its codes, its lockout and its sessions no
-organization. They therefore have no policy and nothing to force; their MODULE.md says so, and every
-query names its row by key or by the verified actor. Their use cases run in the system runner: the
+The tables of an account (`users`, `password_credentials`, `one_time_codes`, `code_requests`,
+`sign_in_attempts` of the accounts module) carry no `organization_id`: the contracts give an
+account, its codes and its lockout no organization. They have no policy and nothing to force; their
+MODULE.md says so, and every query names its row by key or by the verified actor.
+
+Four tables carry an `organization_id` and the forced policy of the kit (migration 0003):
+
+- `memberships` (memberships module) and `api_tokens` (api-tokens module), tenant data: written in
+  the tenant transaction of their organization (the handler of a member event, the routes of a
+  session that manage tokens). In a system transaction, by key only: the copy of the memberships is
+  read by organization and account (the choice of an organization, both introspections, the
+  opening of a session inside a sign-in), and the introspection of a token finds it by the hash of
+  its secret and writes its last use;
+- `sessions` (its current organization, `null` without one) and `organization_choices` (the last
+  organization each account chose), of the sessions module: rows of an account that name an
+  organization, read and written in system transactions only, by id, token hash or account.
+
+The use cases that serve a route or an event without an organization run in the system runner: the
 kit README reserves it for "events or routes without an organization" but also says "never use it
-to serve the request of a user", so this is a reviewed exception, recorded in the Decisions of both
-MODULE.md files and bounded to these tables and to outbox rows without organization. A tenant table
-is always read and written through the tenant runner. A table that gains an organization gets its
-column, its policy and its `FORCE` statement in a new migration.
+to serve the request of a user", so this is a reviewed exception, recorded in the Decisions of each
+MODULE.md and bounded to the rows each query names and to outbox rows without organization. A
+route whose internal token carries an organization (the API tokens) always uses the tenant runner.
+A table that gains an organization gets its column, its policy and its `FORCE` statement in a new
+migration.
 
 ## Not there yet
 
 The two roles exist in cadenway-ops (`docs/database.md` there) and in `compose.dev.yaml`;
-`tests/service-wiring.int-spec.ts` proves that the policies of the kit tables are forced and that no
-other table has one, that one organization cannot read or write another's rows, and that the
+`tests/service-wiring.int-spec.ts` proves that every table with an `organization_id` has its policy
+forced and that no other table has one, that one organization cannot read or write another's rows, and that the
 application role runs no DDL and cannot touch the migration journal; `tests/auth-flows.int-spec.ts`
 exercises the business tables as the application role. The linting of migrations is not there yet:
 these conventions are applied by review.

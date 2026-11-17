@@ -4,6 +4,8 @@ import type { SessionsUnitOfWork } from '../../../../application/ports/outbound/
 import type { SessionTokens } from '../../../../application/ports/outbound/security/session/session-tokens.port.js';
 import type { DeviceReader } from '../../../../application/ports/outbound/device/session/device-reader.port.js';
 import type { Clock } from '../../../../application/ports/outbound/time/session/clock.port.js';
+import type { ActiveMemberships } from '../../../../application/ports/outbound/memberships/session/active-memberships.port.js';
+import { ACTIVE_MEMBERSHIPS } from '../../../tokens/session/active-memberships.token.js';
 import { UNIT_OF_WORK } from '../../../tokens/session/unit-of-work.token.js';
 import { SESSION_TOKENS } from '../../../tokens/session/session-tokens.token.js';
 import { DEVICE_READER } from '../../../tokens/session/device-reader.token.js';
@@ -19,11 +21,12 @@ import { CLOCK } from '../../../tokens/session/clock.token.js';
  */
 export const openSessionProvider: FactoryProvider<OpenSession> = {
   provide: OpenSession,
-  inject: [UNIT_OF_WORK, SESSION_TOKENS, DEVICE_READER, CLOCK],
+  inject: [UNIT_OF_WORK, SESSION_TOKENS, DEVICE_READER, ACTIVE_MEMBERSHIPS, CLOCK],
   useFactory: (
     unitOfWork: SessionsUnitOfWork,
     sessionTokens: SessionTokens,
     devices: DeviceReader,
+    memberships: ActiveMemberships,
     systemClock: Clock,
-  ): OpenSession => new OpenSession(unitOfWork, sessionTokens, devices, systemClock),
+  ): OpenSession => new OpenSession(unitOfWork, sessionTokens, devices, memberships, systemClock),
 };

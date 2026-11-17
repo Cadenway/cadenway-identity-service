@@ -16,6 +16,9 @@ export function toAccountView(user: User): AccountView {
     name: user.name,
     email: user.email.value,
     language: user.language,
+    displayName: user.displayName,
+    jobTitle: user.jobTitle,
+    timeZone: user.timeZone,
     version: user.version,
   };
 }

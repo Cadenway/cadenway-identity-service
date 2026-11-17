@@ -111,6 +111,12 @@ function shapeOf(refusal: Refusal): ProblemShape {
       };
     case 'user-not-found':
       return { status: 404, code: 'user.not-found' };
+    case 'version-mismatch':
+      return {
+        status: 412,
+        code: 'request.version-mismatch',
+        details: { version: refusal.version },
+      };
   }
 }
 

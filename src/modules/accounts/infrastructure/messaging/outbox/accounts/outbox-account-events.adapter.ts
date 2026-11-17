@@ -130,6 +130,33 @@ export class OutboxAccountEvents implements AccountEvents {
   }
 
   /**
+   * Method userProfileUpdated
+   *
+   * @description
+   * Appends `user.profile-updated.v1`; its actor is the user. It carries the profile, never the
+   * address, a password or a code.
+   *
+   * @param {User} user - The account after the change.
+   * @param {readonly string[]} changed - The members that moved.
+   * @returns {Promise<void>} Resolves once appended.
+   */
+  public async userProfileUpdated(user: User, changed: readonly string[]): Promise<void> {
+    await this.outbox.append(this.transaction, eventSchemas, 'user.profile-updated.v1', {
+      organizationId: null,
+      actor: { type: 'user', id: user.id },
+      version: user.version,
+      userId: user.id,
+      name: user.name,
+      displayName: user.displayName,
+      jobTitle: user.jobTitle,
+      timeZone: user.timeZone,
+      language: user.language,
+      changed: [...changed],
+    });
+    this.onAppend();
+  }
+
+  /**
    * Method oneTimeCodeIssued
    *
    * @description

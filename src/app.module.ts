@@ -12,6 +12,8 @@ import { Module } from '@nestjs/common';
 
 import type { AppConfig } from './config/app-config.js';
 import { AccountsModule } from './modules/accounts/accounts.module.js';
+import { ApiTokensModule } from './modules/api-tokens/api-tokens.module.js';
+import { MembershipsModule } from './modules/memberships/memberships.module.js';
 import { PlatformModule } from './modules/platform/platform.module.js';
 import { SessionsModule } from './modules/sessions/sessions.module.js';
 
@@ -53,7 +55,12 @@ import { SessionsModule } from './modules/sessions/sessions.module.js';
  * - `PlatformModule`: the owner of the kit tables in the migrations of the service.
  * - `AccountsModule`: users, password credentials, one-time codes and the password lockout, with
  *   the authentication flows and the reading of a user.
- * - `SessionsModule`: sessions, their introspection and their revocation.
+ * - `MembershipsModule`: the copy of the memberships of organization-service, fed by the member
+ *   events (`member.joined.v1`, `member.role-changed.v1`, `member.removed.v1`), which the choice of
+ *   an organization and both introspections read.
+ * - `SessionsModule`: sessions, their current organization, their introspection and their
+ *   revocation.
+ * - `ApiTokensModule`: the personal API tokens and their introspection.
  */
 @Module({
   imports: [
@@ -86,8 +93,10 @@ import { SessionsModule } from './modules/sessions/sessions.module.js';
       }),
     }),
     PlatformModule,
+    MembershipsModule,
     SessionsModule,
     AccountsModule,
+    ApiTokensModule,
   ],
 })
 export class AppModule {}

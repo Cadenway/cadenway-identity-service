@@ -31,11 +31,16 @@ import type { AccountsStore } from '../transactions/accounts-store.model.js';
  * @description
  * An event a use case appended, as the fake outbox keeps it.
  *
- * @type {{ readonly name: 'user.signed-up.v1' | 'user.email-verified.v1'; readonly user: User } | { readonly name: 'one-time-code.issued.v1'; readonly issued: IssuedCode }}
+ * @type {{ readonly name: 'user.signed-up.v1' | 'user.email-verified.v1'; readonly user: User } | { readonly name: 'one-time-code.issued.v1'; readonly issued: IssuedCode } | { readonly name: 'user.profile-updated.v1'; readonly user: User; readonly changed: readonly string[] }}
  */
 export type RecordedEvent =
   | { readonly name: 'user.signed-up.v1' | 'user.email-verified.v1'; readonly user: User }
-  | { readonly name: 'one-time-code.issued.v1'; readonly issued: IssuedCode };
+  | { readonly name: 'one-time-code.issued.v1'; readonly issued: IssuedCode }
+  | {
+      readonly name: 'user.profile-updated.v1';
+      readonly user: User;
+      readonly changed: readonly string[];
+    };
 
 /**
  * Interface AccountsState
@@ -249,6 +254,9 @@ export class InMemoryAccounts implements AccountsUnitOfWork {
       email: EmailAddress.of(email),
       name: 'Camille Martin',
       language: 'fr',
+      displayName: null,
+      jobTitle: null,
+      timeZone: 'Europe/Paris',
       emailVerifiedAt: verified ? new Date('2026-11-08T12:00:00Z') : null,
       version: verified ? 2 : 1,
       signUpCount: 1,
@@ -274,6 +282,7 @@ export class InMemoryAccounts implements AccountsUnitOfWork {
           [...draft.users.values()].find((user: User) => user.email.equals(email)) ?? null,
         ),
       findById: (id: string): Promise<User | null> => Promise.resolve(draft.users.get(id) ?? null),
+      lock: (id: string): Promise<User | null> => Promise.resolve(draft.users.get(id) ?? null),
       insert: (registration: UserRegistration): Promise<User> => {
         this.ids += 1;
         const user: User = User.restore({
@@ -385,6 +394,10 @@ export class InMemoryAccounts implements AccountsUnitOfWork {
       },
       userEmailVerified: (user: User): Promise<void> => {
         draft.events.push({ name: 'user.email-verified.v1', user });
+        return Promise.resolve();
+      },
+      userProfileUpdated: (user: User, changed: readonly string[]): Promise<void> => {
+        draft.events.push({ name: 'user.profile-updated.v1', user, changed });
         return Promise.resolve();
       },
       oneTimeCodeIssued: (issued: IssuedCode): Promise<void> => {
