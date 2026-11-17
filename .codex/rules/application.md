@@ -7,10 +7,7 @@ paths:
 
 - Application is plain TypeScript. Keep Nest decorators, transport DTOs and exceptions, ORM and
   adapter dependencies at the edges.
-- In V2, group commands and queries by area and operation under
-  `application/use-cases/{commands,queries}/<area>/<operation>/` and put outbound ports under
-  `application/ports/outbound/<concern>/<area>/`. Use the checked-out paths in modules awaiting
-  migration.
+- Use the [V2 module layout](../skills/cw-hexagonal-module-layout/SKILL.md) for operations and ports. Follow checked-out paths until migration.
 - One use case per class, with explicit input and output types; the name says the intent
   (`SignInWithPassword`, `GetUser`). Use at most one named exported type or interface per file
   in V2. A public use case's `execute` signature uses primitives or types explicitly re-exported by

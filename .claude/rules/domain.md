@@ -6,10 +6,7 @@ paths:
 # Domain layer
 
 - Plain TypeScript only. Domain depends only on its own domain and runs in a unit test without Nest.
-- In V2, group aggregates under `domain/aggregates/<aggregate>/`, value objects under
-  `domain/value-objects/<concept>/` and policies, events and errors under
-  `domain/{policies,events,errors}/<area>/`. Use at most one named exported type or interface per
-  file. Follow checked-out paths in modules awaiting migration.
+- Use the [V2 module layout](../skills/cw-hexagonal-module-layout/SKILL.md) for domain files. Follow checked-out paths until migration.
 - An invalid state is impossible to build: constructors and methods refuse it with a typed domain
   error (`class XxxError extends DomainError`), never with a boolean.
 - Each rule cites its source in a docblock (mockup screen, integration guide, decision).

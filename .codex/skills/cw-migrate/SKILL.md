@@ -3,10 +3,8 @@ name: cw-migrate
 description: Write an expand/contract migration.
 ---
 
-Use the **cw-identity-migration-builder** specialist for this task when delegation is available and authorized; otherwise read `.codex/agents/cw-identity-migration-builder.toml` and follow its instructions directly: the user-provided arguments
+Delegate the user's arguments to **cw-identity-migration-builder** if delegation is available and authorized.
+Otherwise read and follow `.codex/agents/cw-identity-migration-builder.toml` directly with those arguments.
+Do not restate its rules or procedure.
 
-The agent carries its own procedure and rules; do not restate them.
-
-Require its report to state:
-
-- Which release the contract step belongs to.
+Require the report to name the release for the contract step.

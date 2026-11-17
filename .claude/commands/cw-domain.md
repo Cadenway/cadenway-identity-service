@@ -3,11 +3,7 @@ description: "Add or change a domain rule (pure TypeScript)."
 argument-hint: "<rule>"
 ---
 
-Delegate to the **cw-identity-domain-builder** subagent: $ARGUMENTS
+Delegate to subagent **cw-identity-domain-builder** without restating its rules or procedure: $ARGUMENTS
 
-The agent carries its own procedure and rules; do not restate them.
-
-Require its report to state:
-
-- The source of the rule (mockup, guide, decision).
-- Tests added for accepted and refused cases.
+Require the report to name the rule's source (mockup, guide, decision) and tests added for
+accepted and refused cases.

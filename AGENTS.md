@@ -9,28 +9,24 @@ and [Codex](.codex/README.md) for agents, skills, commands and hooks.
 
 ## First read
 
-- The `MODULE.md` of the module you touch, and `src/app.module.ts` for the module list.
-- `@cadenway/contracts` (installed) and `../cadenway-api-contracts`: `openapi/internal/identity-service.yaml` and `asyncapi/identity-service.yaml`.
-- The [repositories document](https://claude.ai/artifact/BPinmYxoF3mbK8w9BMB43N), section "cadenway-identity-service", and the data model of the [integration guide](https://claude.ai/artifact/CpJHVCiFfF9j3KbHQ2S1Et).
+- Before module edits, read its `MODULE.md`, the installed `@cadenway/contracts` entry and the
+  `cw-identity-domain` skill. Use `src/app.module.ts` for module inventory.
+- For HTTP and events, consult `../cadenway-api-contracts/openapi/internal/identity-service.yaml`
+  or `../cadenway-api-contracts/asyncapi/identity-service.yaml` as applicable. Use `cw-contract-first`
+  before adding or changing either.
+- For product decisions, use the repository's section of the repositories document and the
+  integration guide's data model. See [References](#references).
 - The mockup screens this service serves: Main, Inscription, Mfa, Otp, MotDePasseOublie, Reinitialisation, Deconnexion; Compte › Profil, Sécurité, Préférences, Jetons d’API; Organisation › Sécurité et SSO.
-- `package.json` for versions and scripts once the repository is bootstrapped. Do not restate
-  versions elsewhere: a copy goes stale.
+- Use `package.json` for available scripts and versions. Keep versions in the manifest.
 
 ## What this repository is
 
-Check the checkout for the modules and commands currently available. The architecture target is
-defined below.
+cadenway-identity-service owns who the user is and how they sign in. The local port is 3010. Its NestJS runtime uses a
+service-owned PostgreSQL database with separate migrator and application roles, NATS JetStream
+via `@cadenway/nest-messaging`, and internal REST.
 
-cadenway-identity-service owns who the user is and how they sign in. NestJS, its own PostgreSQL database (one database with a migrator role and an application role in the shared PostgreSQL of the VPS), events over NATS JetStream through `@cadenway/nest-messaging`, internal REST for the API gateway. Local port 3010.
-
-|            |                                                                                                                                                                                                                                                                                                                                                                                          |
-| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Data       | Users, hashed passwords, MFA factors (authenticator app, security keys, recovery codes), linked accounts (Google, GitHub, Microsoft, GitLab), SAML SSO connections per organization, sessions, personal API tokens, one-time codes and links, profile and preferences (theme, language, density, personal status).                                                                       |
-| API        | Sign-in, sign-up, MFA, one-time codes, password reset, sessions (list, revoke), API tokens, profile, preferences. Issues the tokens the gateways verify.                                                                                                                                                                                                                                 |
-| Emits      | `user.signed-up.v1`, `user.email-verified.v1`, `user.profile-updated.v1`, `session.revoked.v1` and the restricted `one-time-code.issued.v1`, from `asyncapi/identity-service.yaml`. Planned, not in the contracts yet: `user.status-changed`, `api-token.created`, `api-token.revoked`                                                                                                   |
-| Listens to | `member.joined.v1`, `member.role-changed.v1` and `member.removed.v1` of `asyncapi/organization-service.yaml`, for its copy of the memberships: the choice of the current organization of a session and the organization and role of both introspections. A removal ends the organization of the member's sessions there and makes its personal API tokens of that organization inactive. |
-| External   | OAuth providers, customers' SAML identity providers, WebAuthn for security keys.                                                                                                                                                                                                                                                                                                         |
-| Phase      | First version                                                                                                                                                                                                                                                                                                                                                                            |
+Check the checkout for implemented capabilities. See the [ownership and contract map](docs/architecture.md#purpose-and-target-structure)
+for data, APIs, emitted and consumed events, external systems and rollout.
 
 Decided: this service is built in NestJS, without an existing identity provider (Keycloak, Zitadel, Ory). Its security parameters are fixed in the `cw-identity-security` skill. Organizations and members belong to cadenway-organization-service from the start.
 
@@ -45,30 +41,26 @@ Decided: this service is built in NestJS, without an existing identity provider 
 
 ## Architectural ownership
 
-The [Cadenway NestJS architecture reference](https://github.com/Cadenway/cadenway-service-kit/blob/main/docs/hexagonal-architecture.md)
-defines the strict V2 layout, dependency rules and rollout. Read `cw-hexagonal-module-layout`
-before placing files.
-
-- Each business module lives under `src/modules/<module>/` and has root `MODULE.md` and
-  `<module>.module.ts` files. Use `domain/`, `application/`, `presentation/`,
-  `infrastructure/`, `composition/` and `public/` for the responsibilities the module actually has.
-- Use V2 for new modules. Existing modules use the layout shown by their source and `MODULE.md`
-  until an explicit migration. Adopt the strict checker in the migration after a published
-  `@cadenway/nest-testing` version includes `convention: 'strict'`. Run the architecture check
-  already configured in this checkout for source changes.
-- Keep domain and application plain TypeScript. Group files by capability or resource under the
-  V2 directories, with at most one named exported type or interface declaration per file.
-- Cross-module calls go through a port owned by the consumer. Its composition binds the port to
-  the named provider at the producer's `public/<area>/<operation>.ts` entry point. The producer
-  declares the entry and consumers in `MODULE.md` and exports that provider from its Nest module.
-  Declare a separate wiring entry when another module imports the Nest module from its composition.
-  Re-export the module-local types reachable from the public provider's `execute` signature.
-  For accounts calling sessions, keep the accounts-owned session opener and join the existing
-  system transaction when opening the session.
+- Read `cw-hexagonal-module-layout` before placing files. Use `MODULE.md` for public paths and
+  consumers, and bind cross-module calls through consumer-owned ports. Keep TypeScript strict
+  with explicit types and `readonly`, without `any` or non-null assertions.
+- Use V2 for new modules and explicit migrations. Existing modules follow the paths in source and
+  `MODULE.md` until migrated. Adopt the strict checker in the migration once a published
+  `@cadenway/nest-testing` version includes `convention: 'strict'`. Run the configured architecture
+  check for source changes.
+- The accounts-owned session opener joins the active system transaction.
 - `src/infrastructure/` holds the few adapters several modules bind to their own ports (the system clock); it holds no business rule and imports no module.
-- Cross-cutting plumbing (config, logging, tracing, errors, auth guards, messaging) comes from the cadenway-service-kit packages (`@cadenway/nest-common`, `@cadenway/nest-messaging`); development-only `@cadenway/nest-testing` is maintained in [cadenway-tooling](https://github.com/Cadenway/cadenway-tooling).
-- The domain is pure; use cases own transactions; controllers and handlers translate.
-- Rendering of anything user-facing belongs to the webapp; this service returns data and stable error codes.
+- Domain and application are pure TypeScript. Write use cases own transactions. Presentation
+  adapters validate, map and delegate. Dependencies point inward. Scope tenant reads to the
+  organization in the verified request context. Account, code and session queries use the verified
+  actor or an explicit key. A session only names its current organization. See
+  `cw-database-conventions` for system transactions and tenant exceptions.
+- Follow the scoped application and event rules for the transactional outbox, idempotent
+  handlers and versioned shapes. Use expand/contract migrations that keep the running version
+  working, per the migration rule.
+- Use cadenway-service-kit for shared runtime plumbing. [Cadenway tooling](https://github.com/Cadenway/cadenway-tooling)
+  owns the development-only `@cadenway/nest-testing` package. The webapp renders user-facing
+  output. This service returns data and stable error codes.
 
 ## Boundaries (hard rules)
 
@@ -80,46 +72,45 @@ before placing files.
 
 ## GitHub files (`.github/`)
 
-This repository carries everything GitHub reads from it; Cadenway has no organization `.github`
-repository and nothing is inherited.
+Use the matching `github.md` rule in the active assistant's rules directory for files,
+workflows and cross-repository changes. [`.github/README.md`](.github/README.md) is the
+repository home page. Keep CI, release and deploy workflows and Renovate configuration
+complete in this repository. Use local Renovate settings without a shared preset.
+Shared changes ship through each owning repository's pull request.
 
-- [`.github/README.md`](.github/README.md) is the repository home page; `CONTRIBUTING.md`,
-  `CODE_OF_CONDUCT.md`, `SECURITY.md`, `SUPPORT.md`, `PULL_REQUEST_TEMPLATE.md`, `ISSUE_TEMPLATE/` and
-  `CODEOWNERS` sit next to it.
-- `.github/workflows/` holds this repository's complete CI, release and deploy workflows: no reusable
-  workflow from another repository. The Renovate configuration is complete here too, with no shared
-  preset.
-- The parts shared with the other repositories are duplicated on purpose; a change to them is repeated
-  in each repository through its own pull request.
+## Code quality
+
+- Read the affected entry point, its callers, and its relevant tests before editing.
+  Preserve the behavior callers rely on unless the task changes it.
+- Keep the diff focused. Use names that express intent and reuse existing code when
+  it preserves the required behavior. Extract code when it clarifies a responsibility.
+- Keep business decisions with their owning module. Validate external inputs at the
+  boundary and use documented public interfaces across modules and repositories.
+- For writes that can fail, overlap, or be retried, verify the resulting state.
+  Check transaction boundaries, tenant scope, and repeated delivery where relevant.
+- For collections and repeated work, check what grows with input size. Measure or
+  inspect the bottleneck before adding an index, cache, worker, or replica.
+- Run the repository checks that cover the affected behavior. Report the commands
+  and their results, including checks that did not run and tests that selected zero cases.
 
 ## Commands and quality gates
 
-The scripts below are this repository's contract. While the repository is being bootstrapped,
-create them with these exact names; afterwards, use them and never an ad-hoc equivalent. Run the
-narrowest check that covers the change first, then widen:
+Use the [minimum checks by change](docs/development.md#minimum-checks-by-change) and the
+[full local quality gate](docs/development.md#full-local-quality-gate). Use the documented
+scripts or add them under those names during bootstrap. Start with the narrowest check.
 
-| Changed                         | Minimum check                                                                                                |
-| ------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| Domain or use case code         | `pnpm test <module>`, then `pnpm test:coverage`                                                              |
-| Persistence, events, migrations | `pnpm test:integration <module>`                                                                             |
-| Routes                          | `pnpm test <module>/presentation` (V2) or `pnpm test <module>/api` (existing layout), and the contract tests |
-| Any source                      | `pnpm format:check`, `pnpm lint`, `pnpm typecheck`                                                           |
-| Build or runtime configuration  | `pnpm build`, `docker compose -f compose.dev.yaml config -q`                                                 |
-| Docs or agent instructions only | Scoped formatting and link review                                                                            |
-
-Report the commands you actually ran and their results; a check you did not run is reported as not
-run.
+For routes, use `pnpm test <module>/presentation` in V2 or `pnpm test <module>/api` in the
+existing layout, then the contract tests. Report results for commands run and identify
+unrun checks.
 
 ## Git and branch flow
 
-- Trunk-based: work branches come from `main`, named `<type>/<lowercase-kebab-description>` with a
-  type among `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`,
-  `revert`; put the Cadenway task id first when there is one (`feat/cad-482-sso-screen`). Never an
-  agent name as a prefix. Validate with `git check-ref-format --branch <name>`.
-- Commits and PR titles follow Conventional Commits: `type(scope): subject`, English, imperative,
-  lowercase subject, no trailing period, at most 100 characters; `!` only for a breaking change.
-- Pull requests target `main` and are squash-merged after review and green CI. release-please opens the release pull request; its merge tags the version, publishes the image to GHCR, and the deploy workflow of this repository (`.github/workflows/deploy.yml`) writes the new version into cadenway-ops (staging, then production after approval).
-- Stage only the files of your task; preserve other people's changes in the working tree.
+Branch from `main` and validate with `git check-ref-format --branch <name>`. Follow the
+matching `git-and-commits.md` rule for branch names, Conventional Commits and scoped staging.
+
+Pull requests target `main` and squash-merge after review and green CI. release-please opens
+the release PR. Its merge tags and publishes the GHCR image. [The deploy workflow](.github/workflows/deploy.yml)
+updates cadenway-ops staging, then production after approval.
 
 ## Hard limits (never without the user's explicit request in this conversation)
 
@@ -140,14 +131,11 @@ not to find another way around it.
 
 ## Agent tooling
 
-- **Claude Code**: [CLAUDE.md](CLAUDE.md) and [.claude/README.md](.claude/README.md): the
-  `cw-identity-*` agents, the `/cw-*` commands (`/cw-quality` runs the whole local gate),
-  path-scoped rules and hooks.
-- **Codex**: [.codex/README.md](.codex/README.md) covers the specialists, `$cw-*` skills, rules and hooks.
-- **Builders** (assigned writes): `cw-identity-module-builder`, `cw-identity-domain-builder`, `cw-identity-usecase-builder`, `cw-identity-endpoint-builder`, `cw-identity-event-builder`, `cw-identity-persistence-builder`, `cw-identity-migration-builder`, `cw-identity-test-writer`, `cw-identity-deploy-maintainer`, `cw-identity-github-maintainer`.
-- **Reviewers** (read-only): `cw-identity-module-explorer`, `cw-identity-architecture-reviewer`, `cw-identity-contract-reviewer`, `cw-identity-security-auditor`, `cw-identity-observability-reviewer`, `cw-identity-performance-reviewer`.
-- Specialists are available, not mandatory. Delegate a bounded responsibility with explicit files and
-  checks, assign disjoint files to parallel agents and integrate their results yourself.
+Use the [Codex](.codex/README.md) or [Claude Code](.claude/README.md) guide to find specialists,
+commands, skills and hooks. Read the applicable scoped rules for the active assistant.
+
+Specialists are optional. Assign bounded, disjoint files and checks to builders. Keep reviewers
+read-only and integrate their results.
 
 ## Repository hygiene
 

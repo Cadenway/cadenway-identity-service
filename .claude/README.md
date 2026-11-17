@@ -1,8 +1,7 @@
 # cadenway-identity-service: Claude Code tooling
 
-This `.claude/` folder ships the Claude Code tooling of cadenway-identity-service: **16 agents**,
-17 slash commands, 13 rules, 22 skills, 3 hooks, the project
-settings and launch configuration. The application launch requires the planned package scripts.
+This directory contains the repository's Claude Code agents, commands, scoped rules, skills,
+hooks and project settings. The tables below explain when to use them.
 
 Start from [AGENTS.md](../AGENTS.md) (the rules every assistant follows) and [CLAUDE.md](../CLAUDE.md)
 (the Claude entry point).
@@ -92,7 +91,7 @@ check that writes files. No agent delegates further.
 | `module-wiring.md` | Public entry points and Nest composition | `src/modules/**/public/**`, `src/modules/**/composition/**`, `src/modules/**/*.module.ts` |
 | `events.md` | Events | `src/**/*.events.ts`, `src/**/*.handler.ts`, `src/**/*.publisher.ts`, `src/**/events/**` |
 | `migrations.md` | Migrations | `migrations/**`, `src/**/migrations/**` |
-| `tests.md` | Tests | `**/*.spec.ts`, `tests/**` |
+| `tests.md` | Tests | `**/*.spec.ts`, `src/**/*.int-spec.ts`, `tests/**` |
 | `deploy.md` | Deployment files | `Dockerfile`, `deploy/**`, `compose.dev.yaml`, `.env.example` |
 | `module-docs.md` | MODULE.md | `src/modules/**/MODULE.md` |
 | `language.md` | Language | always |

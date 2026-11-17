@@ -1,6 +1,7 @@
 ---
 paths:
   - '**/*.spec.ts'
+  - 'src/**/*.int-spec.ts'
   - 'tests/**'
 ---
 
@@ -13,3 +14,5 @@ paths:
 - Fixtures come from the mockup data: Atelier Nord, Camille Martin (CM), Sprint 14, CAD-482.
 - Never mock the database in an integration test; never assert on log text. The one exception:
   asserting that no log line holds a password, a code, a token or the pepper.
+- Use the focused unit or integration procedure in `docs/development.md`. Report the executed
+  test count. A run with zero tests leaves the behavior unverified.
