@@ -166,10 +166,16 @@ The operations of the accounts module (`CheckSessionAuthentication`, `Authentica
 `EndRecentAuthentication`, `RevokeUserSessions`, `CountOpenSessions`, `EraseUserSessions`) join the
 system transaction of their caller: a change of password, a reset, a change of address, the
 scheduling and the completion of a deletion commit with their effects on the sessions, and their
-events, or not at all. They lock the sessions they write. "Déconnecter les autres" locks the
-session of the request, then the others, in one system transaction. The list reads in one system
-transaction. `CheckOrganizationSessionAuthentication` runs in `TenantSessionsUnitOfWork` and joins
-the tenant transaction of the creation of a personal API token.
+events, or not at all. They lock the sessions they write; every operation that locks several
+sessions of an account (`AuthenticateSession`, `EndRecentAuthentication`, `RevokeUserSessions`,
+"Déconnecter les autres") locks all its open sessions at once, in the order of their ids, and then
+works on that set, so two of them never wait on each other in a cycle
+(`tests/account-security.int-spec.ts` signs the others out from two devices at once). The list
+reads in one system transaction. `CheckOrganizationSessionAuthentication` runs in
+`TenantSessionsUnitOfWork`, joins the tenant transaction of the creation of a personal API token
+and locks the session it checks: the scheduling of the deletion locks the open sessions before it
+revokes the tokens, so it either waits for that token and revokes it, or revokes the session first
+and the creation finds it ended.
 
 ## Decisions
 
@@ -227,8 +233,10 @@ the tenant transaction of the creation of a personal API token.
   contract (`Device`); a page holds 100 sessions at most. The version of Windows and macOS is
   `null`, which a `User-Agent` does not tell reliably.
 - "Nouvelle connexion" reads the distinct `User-Agent` of the sessions of the account active in the
-  last 90 days (by `last_active_at`, revoked and expired ones included) and compares their devices
-  in the use case. Detection by type, browser and operating system is the rule of the contract; the
+  last 90 days (by `last_active_at`, revoked and expired ones included), the 100 used last at most,
+  and compares their devices in the use case: the header comes from the browser, so without the
+  bound an account signing in with ever new ones would make each of its sign-ins read and parse more
+  of them in its transaction. Detection by type, browser and operating system is the rule of the contract; the
   device cookie of P2c-2 refines it. The first session of an account, opened by the sign-up
   verification, tells nobody.
 - `signed_in_at` is a column of its own, written by the service to the millisecond, rather than

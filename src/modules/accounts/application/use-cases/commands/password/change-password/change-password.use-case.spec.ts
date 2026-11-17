@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { User } from '../../../../../domain/aggregates/account/user.aggregate.js';
 import { EmailAddress } from '../../../../../domain/value-objects/email/email-address.value-object.js';
@@ -128,6 +128,33 @@ describe('ChangePassword', () => {
       }),
     ).rejects.toMatchObject({ refusal: { reason: 'session-not-found' } });
     expect(accounts.state.events).toEqual([]);
+  });
+
+  it('keeps a password reset during the check of the current one, counting the attempt', async () => {
+    const hasher: FakePasswordHasher = new FakePasswordHasher();
+    const verify: FakePasswordHasher['verify'] = hasher.verify.bind(hasher);
+    vi.spyOn(hasher, 'verify').mockImplementation(
+      async (password: string, passwordHash: string | null): Promise<boolean> => {
+        const matches: boolean = await verify(password, passwordHash);
+        accounts.state.credentials.set(camille.id, 'hashed:reset-by-camille-2026');
+        return matches;
+      },
+    );
+    const racing: ChangePassword = new ChangePassword(
+      accounts,
+      hasher,
+      new FakeCompromisedPasswords(),
+      sessions,
+      new FakeDeviceReader(),
+      clock,
+    );
+
+    await expect(racing.execute(input)).rejects.toMatchObject({
+      refusal: { reason: 'password-incorrect', remainingAttempts: 4 },
+    });
+    expect(accounts.state.credentials.get(camille.id)).toBe('hashed:reset-by-camille-2026');
+    expect(accounts.userByEmail(camille.email.value)?.version).toBe(camille.version);
+    await expect(sessions.check(camille.id, SESSION_ID)).resolves.toBe('stale');
   });
 
   it('checks the new password first, without counting an attempt', async () => {

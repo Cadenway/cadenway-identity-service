@@ -1,3 +1,4 @@
+import type { User } from '../../../domain/aggregates/account/user.aggregate.js';
 import { AccountLockedError } from '../../../domain/errors/password/account-locked.error.js';
 import { PasswordTooShortError } from '../../../domain/errors/password/password-too-short.error.js';
 import type { PasswordFailure } from '../../../domain/policies/password/password-failure.policy.js';
@@ -76,6 +77,42 @@ export async function clearPasswordAttempts(
 ): Promise<void> {
   const lockout: PasswordLockout = await store.signInAttempts.lock(email);
   await store.signInAttempts.save(email, lockout.recordSuccess());
+}
+
+/**
+ * Function settlePasswordCheck
+ *
+ * @description
+ * The last transaction of a password checked outside any transaction: locks the lockout row of the
+ * address, then the account (the order of every sign-in), and clears the attempt counted in advance
+ * only when the hash checked is still the one of the account. A change, a reset or a new sign-up
+ * that committed during the check leaves the attempt counted: the password checked is no longer the
+ * password of the account, and a session opened or authenticated with it would survive the reset
+ * that closed every other one.
+ *
+ * @param {AccountsStore} store - The repositories of the transaction.
+ * @param {string} userId - The account checked.
+ * @param {EmailAddress} email - The address whose attempt was counted.
+ * @param {string | null} passwordHash - The hash the password was checked against.
+ * @returns {Promise<User | 'account-gone' | 'password-moved'>} The account, locked, or why the
+ * check no longer holds.
+ */
+export async function settlePasswordCheck(
+  store: AccountsStore,
+  userId: string,
+  email: EmailAddress,
+  passwordHash: string | null,
+): Promise<User | 'account-gone' | 'password-moved'> {
+  const lockout: PasswordLockout = await store.signInAttempts.lock(email);
+  const user: User | null = await store.users.lock(userId);
+  if (user === null) {
+    return 'account-gone';
+  }
+  if ((await store.credentials.findHash(user.id)) !== passwordHash) {
+    return 'password-moved';
+  }
+  await store.signInAttempts.save(email, lockout.recordSuccess());
+  return user;
 }
 
 /**

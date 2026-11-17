@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { User } from '../../../../../domain/aggregates/account/user.aggregate.js';
 import {
@@ -63,6 +63,27 @@ describe('Reauthenticate', () => {
       expiresAt: new Date('2026-11-09T13:22:00Z'),
     });
     await expect(sessions.check(camille.id, SESSION_ID)).resolves.toBe('recent');
+  });
+
+  it('refuses a password changed during its check, without a recent authentication', async () => {
+    const verify: FakePasswordHasher['verify'] = hasher.verify.bind(hasher);
+    vi.spyOn(hasher, 'verify').mockImplementation(
+      async (password: string, passwordHash: string | null): Promise<boolean> => {
+        const matches: boolean = await verify(password, passwordHash);
+        accounts.state.credentials.set(camille.id, 'hashed:nord-atelier-sprint-15');
+        return matches;
+      },
+    );
+
+    await expect(
+      reauthenticate.execute({
+        actorUserId: camille.id,
+        sessionId: SESSION_ID,
+        password: PASSWORD,
+      }),
+    ).rejects.toMatchObject({ refusal: { reason: 'password-incorrect', remainingAttempts: 4 } });
+    await expect(sessions.check(camille.id, SESSION_ID)).resolves.toBe('stale');
+    expect(accounts.state.lockouts.get(camille.email.value)?.snapshot.failedAttempts).toBe(1);
   });
 
   it('refuses a session of another person, or one that ended, without counting an attempt', async () => {

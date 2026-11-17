@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { User } from '../../../../../domain/aggregates/account/user.aggregate.js';
 import {
@@ -108,6 +108,23 @@ describe('SignInWithPassword', () => {
 
     expect(hasher.decoyChecks).toBe(1);
     expect(accounts.state.lockouts.get('nobody@ateliernord.fr')?.snapshot.failedAttempts).toBe(1);
+  });
+
+  it('refuses a password that a reset replaced during its check, keeping the attempt counted', async () => {
+    const verify: FakePasswordHasher['verify'] = hasher.verify.bind(hasher);
+    vi.spyOn(hasher, 'verify').mockImplementation(
+      async (password: string, passwordHash: string | null): Promise<boolean> => {
+        const matches: boolean = await verify(password, passwordHash);
+        accounts.state.credentials.set(camille.id, 'hashed:nord-atelier-sprint-15');
+        return matches;
+      },
+    );
+
+    await expect(signIn.execute(SIGN_IN)).rejects.toMatchObject({
+      refusal: { reason: 'invalid-credentials', remainingAttempts: 4 },
+    });
+    expect(sessions.opened).toEqual([]);
+    expect(accounts.state.lockouts.get(camille.email.value)?.snapshot.failedAttempts).toBe(1);
   });
 
   it('resets the count after a success', async () => {

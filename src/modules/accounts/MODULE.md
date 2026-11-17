@@ -246,20 +246,35 @@ the sessions, api-tokens and memberships modules join the transaction of the use
   together (`tests/profile.int-spec.ts` proves the rollback).
 - Password sign-in: a first transaction locks the lockout row of the address, counts the attempt as
   a failure in advance and commits; the hash is checked outside any transaction; for the right
-  password a second transaction resets the count, locks the account, opens the session, cancels a
-  scheduled deletion and appends its event. Concurrent attempts of an address are counted one after
-  the other, and the hash never holds a pooled connection. The code sign-in locks the account in its
-  one transaction and does the same.
+  password a second transaction locks the lockout row, then the account, and goes on only when the
+  hash of the account is still the one checked (`settlePasswordCheck`): it then resets the count,
+  opens the session, cancels a scheduled deletion and appends its event. A change, a reset or a new
+  sign-up that commits during the check leaves the attempt counted and answers
+  `auth.invalid-credentials`, so a session cannot be opened with a password that a reset has just
+  replaced. Concurrent attempts of an address are counted one after the other, and the hash never
+  holds a pooled connection. The code sign-in locks the account in its one transaction and does the
+  same.
 - Re-authentication and change of password: the same three steps around the hash (the change adds a
-  first read-only transaction for the account and the session, and the hash of the new password
-  outside any transaction); the last transaction ends the count, records the recent authentication
-  through the sessions module and, for a change, writes the hash, the account, the dropped change of
-  address, the end of the recent authentication of the other sessions and the event together.
-- Reset request: the throttle row of the address is locked and written, then the previous link is
-  replaced, the new one stored and its restricted event appended, in one transaction; the token is
-  drawn and the device read before it, whatever the address.
+  first transaction that reads the account and the session, and the hash of the new password
+  outside any transaction); the last transaction settles the check the same way (a password that
+  moved answers `auth.password-incorrect`), records the recent authentication through the sessions
+  module and, for a change, writes the hash, the account, the dropped change of address, the end of
+  the recent authentication of the other sessions and the event together.
+- Lock order: the rows of an address (`sign_in_attempts`, `code_requests`,
+  `password_reset_requests`) before the account of that address (a change of address locks the
+  account, then the code row of the new address, which no verified account holds), the account before
+  its sessions, and the open
+  sessions of an account all at once in the order of their ids (sessions module). The reset
+  confirmation and the completion of the deletion read the account first to learn its address, lock
+  the rows of the address, then lock the account and check it again.
+- Reset request: the throttle row of the address is locked and written, then the account of the
+  address is locked, the previous link replaced, the new one stored and its restricted event
+  appended, in one transaction; the token is drawn and the device read before it, whatever the
+  address. The lock makes a confirmation of a change of address that commits meanwhile move the
+  account away from the lookup, so no link reaches the previous mailbox.
 - Reset confirmation: a first transaction reads the link; the new password is checked and hashed
-  outside any transaction; the second locks the account, then the link, checks it again, and uses
+  outside any transaction; the second locks the lockout row of the address, then the account, then
+  the link, checks it again, and uses
   it, writes the hash and the account, ends the lockout, drops the change of address, revokes the
   sessions or ends their recent authentication, and appends the events together.
 - Change of address: the request locks the account, checks the session, the throttle and writes the
@@ -274,8 +289,13 @@ the sessions, api-tokens and memberships modules join the transaction of the use
   every 10 minutes in UTC) claims the due accounts with `for update skip locked` and enqueues one
   `account.delete` job per account through the connection of its transaction, with the occurrence key
   `<userId>:<instant it became due or was last checked>`; each job (`CompleteAccountDeletion`) locks
-  the account, checks again that its deletion is due and the ownership, and erases the account,
-  appending `user.deleted.v1`, in one transaction.
+  the rows of the address, then the account, checks again that its deletion is due and the
+  ownership, and erases the account, appending `user.deleted.v1`, in one transaction
+  (`tests/account-security.int-spec.ts` proves the rollback when that event cannot be written, and
+  that a redelivered job does nothing). The sweep claims the 100 oldest due accounts that are not
+  checked in the last hour: an account whose job is pending or dead-lettered is claimed again, its
+  key deduplicated while pg-boss keeps the job, so 100 dead-lettered accounts would hold back the
+  later ones until their jobs are purged (a day).
 
 ## Decisions
 

@@ -1,6 +1,7 @@
 import { Session } from '../../../../../domain/aggregates/session/session.aggregate.js';
 import {
   isNewDevice,
+  NEW_DEVICE_COMPARED_USER_AGENTS,
   NEW_DEVICE_LOOKBACK_MS,
 } from '../../../../../domain/policies/session/new-device.policy.js';
 import type { ActiveMembership } from '../../../../models/session/active-membership.model.js';
@@ -177,7 +178,8 @@ export class OpenSession {
    * Method isNewDevice
    *
    * @description
-   * Whether no session of the account used the device in the 90 days before the sign-in.
+   * Whether no session of the account used the device in the 90 days before the sign-in, among the
+   * 100 browsers it used last.
    *
    * @param {SessionsStore} store - The repositories of the transaction.
    * @param {string} userId - The account.
@@ -194,6 +196,7 @@ export class OpenSession {
     const userAgents: (string | null)[] = await store.sessions.findUserAgentsSince(
       userId,
       new Date(now.getTime() - NEW_DEVICE_LOOKBACK_MS),
+      NEW_DEVICE_COMPARED_USER_AGENTS,
     );
     return isNewDevice(
       device,

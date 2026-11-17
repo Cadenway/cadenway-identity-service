@@ -130,8 +130,18 @@ export class CompleteAccountDeletion {
     const now: Date = this.clock.now();
     return this.unitOfWork.run(
       async (store: AccountsStore): Promise<CompleteAccountDeletionOutput> => {
+        const due: User | null = await store.users.findById(input.userId);
+        if (due?.isDeletionDueAt(now) !== true) {
+          return { outcome: 'not-due' };
+        }
+        // The rows of the address before the account, in the order of every sign-in and every
+        // request of a code or a link, so a sign-in that cancels the deletion meanwhile waits
+        // instead of deadlocking with the job.
+        await store.codeRequests.lock(due.email);
+        await store.signInAttempts.lock(due.email);
+        await store.resetRequests.lock(due.email);
         const user: User | null = await store.users.lock(input.userId);
-        if (user?.isDeletionDueAt(now) !== true) {
+        if (user?.isDeletionDueAt(now) !== true || !user.email.equals(due.email)) {
           return { outcome: 'not-due' };
         }
         if ((await this.ownedOrganizations.find(user.id)).length > 0) {

@@ -97,7 +97,7 @@ export interface SessionRepository {
    *
    * @description
    * Reads and locks the sessions of an account that are open at an instant: neither revoked,
-   * expired nor idle for 12 hours.
+   * expired nor idle for 12 hours, in the order of their ids.
    *
    * @param {string} userId - The account.
    * @param {Date} now - The instant.
@@ -142,13 +142,14 @@ export interface SessionRepository {
    *
    * @description
    * Reads the distinct `User-Agent` of the sessions of an account active since an instant, whatever
-   * their state now.
+   * their state now, the one used last first.
    *
    * @param {string} userId - The account.
    * @param {Date} since - The instant.
+   * @param {number} limit - Headers to read at most.
    * @returns {Promise<(string | null)[]>} The headers, `null` for a browser that sent none.
    */
-  findUserAgentsSince(userId: string, since: Date): Promise<(string | null)[]>;
+  findUserAgentsSince(userId: string, since: Date, limit: number): Promise<(string | null)[]>;
 
   /**
    * Method saveAuthentication

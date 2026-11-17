@@ -98,7 +98,8 @@ answers `active: false` for a token whose user is no longer a member of its orga
 - Creation, list and revocation run in the tenant transaction of the organization of the internal
   token (`TenantApiTokensUnitOfWork`): the runner sets it, the policy of `api_tokens` keeps the
   work inside it, and every query names it again. The revocation locks the token. The check of the
-  recent authentication of the creation joins that tenant transaction.
+  recent authentication of the creation joins that tenant transaction and locks the session, so a
+  scheduling of the deletion of the account that overlaps the creation revokes the new token too.
 - `RevokeUserApiTokens` and `EraseUserApiTokens` run in `SystemApiTokensUnitOfWork` and join the
   system transaction of the accounts use case that calls them (the scheduling and the completion of
   a deletion); the tokens are locked before their revocation.

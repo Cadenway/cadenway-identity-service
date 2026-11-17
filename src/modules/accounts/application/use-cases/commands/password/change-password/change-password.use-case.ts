@@ -15,7 +15,7 @@ import type { AccountsUnitOfWork } from '../../../../ports/outbound/transactions
 import type { AccountView } from '../../../../projections/accounts/account-view.projection.js';
 import { dropPendingEmailChange } from '../../../../services/email-change/pending-email-change.service.js';
 import {
-  clearPasswordAttempts,
+  settlePasswordCheck,
   countPasswordAttempt,
   refuseNewPassword,
   wrongPasswordRefusal,
@@ -249,10 +249,17 @@ export class ChangePassword {
     passwordHash: string,
   ): Promise<AccountView | Refusal> {
     const now: Date = this.clock.now();
-    await clearPasswordAttempts(store, attempt.email);
-    const user: User | null = await store.users.lock(input.userId);
-    if (user === null) {
+    const user: User | 'account-gone' | 'password-moved' = await settlePasswordCheck(
+      store,
+      input.userId,
+      attempt.email,
+      attempt.passwordHash,
+    );
+    if (user === 'account-gone') {
       return { reason: 'user-not-found' };
+    }
+    if (user === 'password-moved') {
+      return wrongPasswordRefusal(attempt.failure);
     }
     if ((await this.sessions.authenticate(input.userId, input.sessionId)) === null) {
       return { reason: 'session-not-found' };

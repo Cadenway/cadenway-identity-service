@@ -14,6 +14,7 @@ import { findOpenSessionOf } from './open-sessions.service.js';
  * @param {string} userId - The person, the actor.
  * @param {string} sessionId - The session of the request.
  * @param {Date} now - The instant of the request.
+ * @param {boolean} forUpdate - Whether to lock the session until the end of the transaction.
  * @returns {Promise<'recent' | 'stale' | 'not-found'>} The status of the session.
  */
 export async function checkSessionAuthentication(
@@ -21,8 +22,9 @@ export async function checkSessionAuthentication(
   userId: string,
   sessionId: string,
   now: Date,
+  forUpdate: boolean,
 ): Promise<'recent' | 'stale' | 'not-found'> {
-  const session: Session | null = await findOpenSessionOf(store, userId, sessionId, now, false);
+  const session: Session | null = await findOpenSessionOf(store, userId, sessionId, now, forUpdate);
   if (session === null) {
     return 'not-found';
   }

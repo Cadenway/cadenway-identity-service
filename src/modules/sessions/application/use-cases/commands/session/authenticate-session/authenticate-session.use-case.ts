@@ -2,7 +2,7 @@ import { Session } from '../../../../../domain/aggregates/session/session.aggreg
 import type { SessionsStore } from '../../../../models/session/sessions-store.model.js';
 import type { Clock } from '../../../../ports/outbound/time/session/clock.port.js';
 import type { SessionsUnitOfWork } from '../../../../ports/outbound/transactions/session/sessions-unit-of-work.port.js';
-import { findOpenSessionOf } from '../../../../services/session/open-sessions.service.js';
+import { lockOpenSessionOf } from '../../../../services/session/open-sessions.service.js';
 import type { AuthenticateSessionInput } from './authenticate-session.input.js';
 import type { AuthenticateSessionOutput } from './authenticate-session.output.js';
 
@@ -72,12 +72,11 @@ export class AuthenticateSession {
     const now: Date = this.clock.now();
     return this.unitOfWork.run(
       async (store: SessionsStore): Promise<AuthenticateSessionOutput | null> => {
-        const session: Session | null = await findOpenSessionOf(
+        const session: Session | null = await lockOpenSessionOf(
           store,
           input.userId,
           input.sessionId,
           now,
-          true,
         );
         if (session === null) {
           return null;

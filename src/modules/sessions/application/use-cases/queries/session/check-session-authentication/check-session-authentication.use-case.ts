@@ -72,7 +72,7 @@ export class CheckSessionAuthentication {
     const now: Date = this.clock.now();
     return this.unitOfWork.run(
       async (store: SessionsStore): Promise<CheckSessionAuthenticationOutput> => ({
-        status: await checkSessionAuthentication(store, input.userId, input.sessionId, now),
+        status: await checkSessionAuthentication(store, input.userId, input.sessionId, now, false),
       }),
     );
   }

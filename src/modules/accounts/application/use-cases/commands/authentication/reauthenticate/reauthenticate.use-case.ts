@@ -10,7 +10,7 @@ import type { AccountSessions } from '../../../../ports/outbound/identity/sessio
 import type { PasswordHasher } from '../../../../ports/outbound/security/authentication/password-hasher.port.js';
 import type { AccountsUnitOfWork } from '../../../../ports/outbound/transactions/accounts/accounts-unit-of-work.port.js';
 import {
-  clearPasswordAttempts,
+  settlePasswordCheck,
   countPasswordAttempt,
   wrongPasswordRefusal,
 } from '../../../../services/password/password-attempts.service.js';
@@ -154,7 +154,18 @@ export class Reauthenticate {
     }
     const recent: RecentAuthentication | Refusal = await this.unitOfWork.run(
       async (store: AccountsStore): Promise<RecentAuthentication | Refusal> => {
-        await clearPasswordAttempts(store, attempt.email);
+        const user: User | 'account-gone' | 'password-moved' = await settlePasswordCheck(
+          store,
+          input.actorUserId,
+          attempt.email,
+          attempt.passwordHash,
+        );
+        if (user === 'account-gone') {
+          return { reason: 'session-not-found' };
+        }
+        if (user === 'password-moved') {
+          return wrongPasswordRefusal(attempt.failure);
+        }
         return (
           (await this.sessions.authenticate(input.actorUserId, input.sessionId)) ?? {
             reason: 'session-not-found',

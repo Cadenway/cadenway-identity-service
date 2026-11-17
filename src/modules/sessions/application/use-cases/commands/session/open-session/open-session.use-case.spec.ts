@@ -152,12 +152,18 @@ const DAY: number = 24 * 60 * 60_000;
  * @param {InMemorySessions} store - The fake sessions.
  * @param {string | null} userAgent - Its `User-Agent`.
  * @param {number} days - Days between its last activity and the sign-in.
+ * @param {string} id - Its id, one per earlier session.
  */
-function earlier(store: InMemorySessions, userAgent: string | null, days: number): void {
+function earlier(
+  store: InMemorySessions,
+  userAgent: string | null,
+  days: number,
+  id: string = '019a6a2e-4b1c-7d3e-8f5a-ffffffffffff',
+): void {
   const lastActiveAt: Date = new Date(OPENED_AT.getTime() - days * DAY);
-  store.sessions.set('019a6a2e-4b1c-7d3e-8f5a-ffffffffffff', {
+  store.sessions.set(id, {
     state: {
-      id: '019a6a2e-4b1c-7d3e-8f5a-ffffffffffff',
+      id,
       userId: CAMILLE_ID,
       persistent: false,
       lastActiveAt,
@@ -262,6 +268,27 @@ describe('OpenSession on a new device', () => {
 
   it('tells the person of a device last used more than 90 days ago', async () => {
     earlier(store, 'Mozilla/5.0 Firefox/132.0', 91);
+
+    await open.execute({
+      userId: CAMILLE_ID,
+      persistent: false,
+      client: CLIENT,
+      newDeviceNotice: NOTICE,
+    });
+
+    expect(store.newDevices).toHaveLength(1);
+  });
+
+  it('compares with the 100 browsers the account used last only', async () => {
+    earlier(store, 'Mozilla/5.0 Firefox/132.0', 2);
+    for (let index: number = 0; index < 100; index += 1) {
+      earlier(
+        store,
+        `Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) Mobile/${String(index)}`,
+        1,
+        `019a6a2e-4b1c-7d3e-8f5a-${String(index).padStart(12, '0')}`,
+      );
+    }
 
     await open.execute({
       userId: CAMILLE_ID,

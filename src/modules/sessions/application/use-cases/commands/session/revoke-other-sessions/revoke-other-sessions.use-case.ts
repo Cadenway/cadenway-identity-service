@@ -4,7 +4,7 @@ import type { SessionsStore } from '../../../../models/session/sessions-store.mo
 import type { Clock } from '../../../../ports/outbound/time/session/clock.port.js';
 import type { SessionsUnitOfWork } from '../../../../ports/outbound/transactions/session/sessions-unit-of-work.port.js';
 import {
-  findOpenSessionOf,
+  lockOpenSessionOf,
   revokeOpenSessions,
 } from '../../../../services/session/open-sessions.service.js';
 import type { RevokeOtherSessionsInput } from './revoke-other-sessions.input.js';
@@ -76,12 +76,11 @@ export class RevokeOtherSessions {
   public async execute(input: RevokeOtherSessionsInput): Promise<RevokeOtherSessionsOutput> {
     const now: Date = this.clock.now();
     return this.unitOfWork.run(async (store: SessionsStore): Promise<RevokeOtherSessionsOutput> => {
-      const current: Session | null = await findOpenSessionOf(
+      const current: Session | null = await lockOpenSessionOf(
         store,
         input.actorUserId,
         input.sessionId,
         now,
-        true,
       );
       if (current === null) {
         throw new SessionNotFound();

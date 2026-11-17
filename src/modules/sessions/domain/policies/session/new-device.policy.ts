@@ -12,6 +12,19 @@ import type { DeviceIdentity } from '../../value-objects/session/device-identity
 export const NEW_DEVICE_LOOKBACK_MS: number = 90 * 24 * 60 * 60_000;
 
 /**
+ * Constant NEW_DEVICE_COMPARED_USER_AGENTS
+ *
+ * @description
+ * How many browsers of the account a sign-in compares its device with at most: the 100 `User-Agent`
+ * used last in the 90 days. The `User-Agent` comes from the browser, so without a bound an account
+ * that signs in with ever new ones would make each of its sign-ins read and parse more of them while
+ * it holds a connection; a device left out by this bound is told as new.
+ *
+ * @type {number}
+ */
+export const NEW_DEVICE_COMPARED_USER_AGENTS: number = 100;
+
+/**
  * Function isNewDevice
  *
  * @description

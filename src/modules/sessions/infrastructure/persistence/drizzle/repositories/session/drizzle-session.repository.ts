@@ -1,5 +1,5 @@
 import type { TransactionDatabase } from '@cadenway/nest-common/database';
-import { and, count, desc, eq, gt, isNull, lt, or, sql } from 'drizzle-orm';
+import { and, count, desc, eq, gt, isNull, lt, max, or, sql } from 'drizzle-orm';
 import type { SQL } from 'drizzle-orm';
 
 import type { SessionOrigin } from '../../../../../application/models/session/session-origin.model.js';
@@ -335,17 +335,25 @@ export class DrizzleSessionRepository implements SessionRepository {
    *
    * @description
    * Reads the distinct `User-Agent` of the sessions of an account active since an instant, through
-   * the index on `user_id`.
+   * the index on `user_id`, the one used last first.
    *
    * @param {string} userId - The account.
    * @param {Date} since - The instant.
+   * @param {number} limit - Headers to read at most.
    * @returns {Promise<(string | null)[]>} The headers.
    */
-  public async findUserAgentsSince(userId: string, since: Date): Promise<(string | null)[]> {
+  public async findUserAgentsSince(
+    userId: string,
+    since: Date,
+    limit: number,
+  ): Promise<(string | null)[]> {
     const rows: { userAgent: string | null }[] = await this.db
-      .selectDistinct({ userAgent: sessions.userAgent })
+      .select({ userAgent: sessions.userAgent })
       .from(sessions)
-      .where(and(eq(sessions.userId, userId), gt(sessions.lastActiveAt, since)));
+      .where(and(eq(sessions.userId, userId), gt(sessions.lastActiveAt, since)))
+      .groupBy(sessions.userAgent)
+      .orderBy(desc(max(sessions.lastActiveAt)))
+      .limit(limit);
     return rows.map((row: { userAgent: string | null }) => row.userAgent);
   }
 

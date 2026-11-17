@@ -13,6 +13,7 @@ import type { PasswordHasher } from '../../../../ports/outbound/security/authent
 import type { AccountsUnitOfWork } from '../../../../ports/outbound/transactions/accounts/accounts-unit-of-work.port.js';
 import type { SessionIssuedView } from '../../../../projections/authentication/session-issued-view.projection.js';
 import { completeSignIn } from '../../../../services/authentication/sign-in-completion.service.js';
+import { settlePasswordCheck } from '../../../../services/password/password-attempts.service.js';
 import type { SignInWithPasswordInput } from './sign-in-with-password.input.js';
 
 /**
@@ -145,21 +146,21 @@ export class SignInWithPassword {
     }
     const matches: boolean = await this.hasher.verify(input.password, attempt.passwordHash);
     if (attempt.user === null || !matches) {
-      throw new AccountRefusal(
-        attempt.failure.lockedUntil === null
-          ? { reason: 'invalid-credentials', remainingAttempts: attempt.failure.remainingAttempts }
-          : { reason: 'account-locked', lockedUntil: attempt.failure.lockedUntil },
-      );
+      throw new AccountRefusal(wrongCredentials(attempt.failure));
     }
     const userId: string = attempt.user.id;
-    const remainingAttempts: number = attempt.failure.remainingAttempts;
+    const passwordHash: string | null = attempt.passwordHash;
+    const failure: PasswordFailure = attempt.failure;
     const outcome: SessionIssuedView | Refusal = await this.unitOfWork.run(
       async (store: AccountsStore): Promise<SessionIssuedView | Refusal> => {
-        const lockout: PasswordLockout = await store.signInAttempts.lock(email);
-        await store.signInAttempts.save(email, lockout.recordSuccess());
-        const user: User | null = await store.users.lock(userId);
-        if (user === null) {
-          return { reason: 'invalid-credentials', remainingAttempts };
+        const user: User | 'account-gone' | 'password-moved' = await settlePasswordCheck(
+          store,
+          userId,
+          email,
+          passwordHash,
+        );
+        if (typeof user === 'string') {
+          return wrongCredentials(failure);
         }
         if (!user.isVerified) {
           return { reason: 'email-not-verified' };
@@ -214,6 +215,22 @@ export class SignInWithPassword {
     return { failure, user, passwordHash };
   }
   // #endregion
+}
+
+/**
+ * Function wrongCredentials
+ *
+ * @description
+ * The answer to a wrong password, or to a password that stopped being the one of the account
+ * during its check: the attempt counted in advance stays.
+ *
+ * @param {PasswordFailure} failure - The attempt counted in advance.
+ * @returns {Refusal} `auth.invalid-credentials`, or `auth.account-locked` when it locks.
+ */
+function wrongCredentials(failure: PasswordFailure): Refusal {
+  return failure.lockedUntil === null
+    ? { reason: 'invalid-credentials', remainingAttempts: failure.remainingAttempts }
+    : { reason: 'account-locked', lockedUntil: failure.lockedUntil };
 }
 
 /**

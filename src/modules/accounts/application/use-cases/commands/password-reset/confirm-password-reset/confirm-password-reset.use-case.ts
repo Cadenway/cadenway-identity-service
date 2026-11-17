@@ -221,6 +221,16 @@ export class ConfirmPasswordReset {
     if (found?.worksAt(now) !== true) {
       return null;
     }
+    if (forUpdate) {
+      // The lockout row of the address before the account, in the order of every sign-in: a
+      // sign-in holding that row while it waits for the account would otherwise deadlock with
+      // the reset. A change of address since this read voids the link, which the check below sees.
+      const owner: User | null = await store.users.findById(found.snapshot.userId);
+      if (owner === null) {
+        return null;
+      }
+      await store.signInAttempts.lock(owner.email);
+    }
     const user: User | null = forUpdate
       ? await store.users.lock(found.snapshot.userId)
       : await store.users.findById(found.snapshot.userId);

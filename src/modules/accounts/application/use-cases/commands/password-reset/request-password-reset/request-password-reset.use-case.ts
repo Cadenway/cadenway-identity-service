@@ -128,7 +128,9 @@ export class RequestPasswordReset {
         now,
       );
       await store.resetRequests.save(email, accepted.throttle);
-      const user: User | null = await store.users.findByEmail(email, false);
+      // Locked: a change of address that commits meanwhile voids the current link and moves the
+      // account, which this lookup then no longer finds, so no link reaches the previous mailbox.
+      const user: User | null = await store.users.findByEmail(email, true);
       if (user?.isVerified === true) {
         await store.resetLinks.replaceCurrent(user.id, now);
         const link: PasswordResetLink = await store.resetLinks.insert(

@@ -1207,6 +1207,33 @@ describe('identity-service account security', () => {
       expect(foreign.status).toBe(404);
       expect(foreign.body).toMatchObject({ code: 'session.not-found' });
     });
+
+    it('keeps one session when two devices sign the others out at once, without a deadlock', async () => {
+      const account = await seedAccount('Camille');
+      const here = await signIn(account);
+      const there = await signIn(account, iphone);
+      const elsewhere = await signIn(account, chrome);
+      const revokedBefore = (await events('session.revoked.v1')).length;
+
+      const answers = await Promise.all(
+        [here, there].map((session) =>
+          call(
+            'post',
+            `/internal/v1/sessions/${session.sessionId}/revoke-others`,
+            user(account.userId),
+          ),
+        ),
+      );
+
+      expect(answers.map((answer) => answer.status).sort()).toEqual([200, 404]);
+      expect(answers.find((answer) => answer.status === 200)?.body).toEqual({ revokedCount: 2 });
+      const active = await Promise.all(
+        [here, there, elsewhere].map((session) => isActive(session.token)),
+      );
+      expect(active.filter(Boolean)).toHaveLength(1);
+      expect(active[2]).toBe(false);
+      expect((await events('session.revoked.v1')).length - revokedBefore).toBe(2);
+    });
   });
 
   describe('the change of address', () => {
@@ -1710,6 +1737,58 @@ describe('identity-service account security', () => {
         app.get(CompleteAccountDeletion, { strict: false }).execute({ userId: deleted.userId }),
       ).resolves.toEqual({ outcome: 'not-due' });
       expect((await events('user.deleted.v1')).length).toBe(deletedEvents);
+    });
+
+    it('keeps the account and what names it when the event of its deletion cannot be written', async () => {
+      const account = await seedAccount('Lea');
+      const session = await signIn(account);
+      expect(
+        (
+          await call(
+            'post',
+            `/internal/v1/users/${account.userId}/deletion`,
+            user(account.userId),
+            {
+              sessionId: session.sessionId,
+            },
+          )
+        ).status,
+      ).toBe(202);
+      await migrator.query(
+        `update users set delete_at = now() - interval '1 minute' where id = $1`,
+        [account.userId],
+      );
+      const outbox = app.get(OutboxWriter);
+      const append = outbox.append.bind(outbox);
+      const failing = vi
+        .spyOn(outbox, 'append')
+        .mockImplementation((...args: Parameters<OutboxWriter['append']>) =>
+          args[2] === 'user.deleted.v1'
+            ? Promise.reject(new Error('the outbox refuses the row'))
+            : append(...args),
+        );
+
+      try {
+        await expect(
+          app.get(CompleteAccountDeletion, { strict: false }).execute({ userId: account.userId }),
+        ).rejects.toThrow('the outbox refuses the row');
+      } finally {
+        failing.mockRestore();
+      }
+
+      const kept = await systemQuery<{ users: number; sessions: number; version: number }>(
+        `select (select count(*)::int from users where id = $1) as users,
+                (select count(*)::int from sessions where user_id = $1) as sessions,
+                (select version from users where id = $1) as version`,
+        [account.userId],
+      );
+      expect(kept).toEqual([{ users: 1, sessions: 1, version: 3 }]);
+      expect(
+        (await events('user.deleted.v1')).some((payload) => payload.userId === account.userId),
+      ).toBe(false);
+      await expect(
+        app.get(CompleteAccountDeletion, { strict: false }).execute({ userId: account.userId }),
+      ).resolves.toEqual({ outcome: 'deleted' });
     });
   });
 

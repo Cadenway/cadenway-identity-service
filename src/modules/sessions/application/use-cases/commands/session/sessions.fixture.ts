@@ -240,18 +240,28 @@ export class InMemorySessions implements SessionsUnitOfWork {
               userAgent: stored.origin.userAgent,
             })),
         ),
-      findUserAgentsSince: (userId: string, since: Date): Promise<(string | null)[]> =>
-        Promise.resolve([
-          ...new Set(
-            [...sessions.values()]
-              .filter(
-                (stored: StoredSession) =>
-                  stored.state.userId === userId &&
-                  stored.state.lastActiveAt.getTime() > since.getTime(),
-              )
-              .map((stored: StoredSession) => stored.origin.userAgent),
-          ),
-        ]),
+      findUserAgentsSince: (
+        userId: string,
+        since: Date,
+        limit: number,
+      ): Promise<(string | null)[]> =>
+        Promise.resolve(
+          [
+            ...new Set(
+              [...sessions.values()]
+                .filter(
+                  (stored: StoredSession) =>
+                    stored.state.userId === userId &&
+                    stored.state.lastActiveAt.getTime() > since.getTime(),
+                )
+                .sort(
+                  (left: StoredSession, right: StoredSession) =>
+                    right.state.lastActiveAt.getTime() - left.state.lastActiveAt.getTime(),
+                )
+                .map((stored: StoredSession) => stored.origin.userAgent),
+            ),
+          ].slice(0, limit),
+        ),
       saveAuthentication: (session: Session): Promise<void> => {
         const stored: StoredSession | undefined = sessions.get(session.id);
         if (stored !== undefined) {

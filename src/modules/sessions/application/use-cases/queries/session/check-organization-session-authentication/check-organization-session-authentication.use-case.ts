@@ -64,7 +64,10 @@ export class CheckOrganizationSessionAuthentication {
    * Method execute
    *
    * @description
-   * Checks the session.
+   * Checks the session and locks it until the end of the transaction it joins: the scheduling of
+   * the deletion of the account locks every open session before it revokes the API tokens, so it
+   * either waits for the token this check guards and revokes it, or revokes the session first and
+   * this check finds it ended.
    *
    * @param {CheckOrganizationSessionAuthenticationInput} input - The person and the session.
    * @returns {Promise<CheckOrganizationSessionAuthenticationOutput>} `recent`, `stale` or `not-found`.
@@ -75,7 +78,7 @@ export class CheckOrganizationSessionAuthentication {
     const now: Date = this.clock.now();
     return this.unitOfWork.run(
       async (store: SessionsStore): Promise<CheckOrganizationSessionAuthenticationOutput> => ({
-        status: await checkSessionAuthentication(store, input.userId, input.sessionId, now),
+        status: await checkSessionAuthentication(store, input.userId, input.sessionId, now, true),
       }),
     );
   }

@@ -30,6 +30,33 @@ export async function findOpenSessionOf(
 }
 
 /**
+ * Function lockOpenSessionOf
+ *
+ * @description
+ * Locks every open session of a person, in the order of their ids, and returns the one asked when
+ * it is one of them. A change that locks a session and then the others of the account would
+ * deadlock with another one that locks them in a different order ("Déconnecter les autres" from two
+ * devices, a change of password and a reset); every lock of several sessions takes them this way.
+ *
+ * @param {SessionsStore} store - The repositories of the transaction.
+ * @param {string} userId - The person, the actor.
+ * @param {string} sessionId - The session.
+ * @param {Date} now - The instant.
+ * @returns {Promise<Session | null>} The open session, locked, or `null`.
+ */
+export async function lockOpenSessionOf(
+  store: SessionsStore,
+  userId: string,
+  sessionId: string,
+  now: Date,
+): Promise<Session | null> {
+  const open: Session[] = await store.sessions.lockOpenOfUser(userId, now);
+  return (
+    open.find((session: Session) => session.id === sessionId && session.isActiveAt(now)) ?? null
+  );
+}
+
+/**
  * Function revokeOpenSessions
  *
  * @description
