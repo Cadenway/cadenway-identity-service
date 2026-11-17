@@ -59,6 +59,11 @@ None.
   `MemberEventsHandler` with the default `deliverPolicy: 'all'`: a new consumer reads every event
   the stream still holds, the events published before this service started included, as the
   contract requires of a copy. The handler has no outside effect, so reading again is harmless.
+- Grants: the `identity` NATS user may create, read, pull from and acknowledge on these three
+  consumers only, by their exact names and filters (cadenway-ops `compose/nats/nats-server.conf`,
+  copied into `compose.dev.yaml`). A renamed handler, or one that consumes another event, is a new
+  consumer: its grant reaches cadenway-ops and every environment before the release that adds it,
+  which otherwise fails at start-up.
 - Deduplication: the deduplicator of `OutboxModule` runs each delivery in the tenant transaction of
   the organization of its envelope and records `(consumer, event id)` in `processed_events` there;
   a redelivery is skipped. The copy and the processed id commit together.
@@ -66,14 +71,34 @@ None.
   membership by its `version` (`Membership.apply`): an older or equal version changes nothing, a
   removal always applies and stays applied, a late join or role change never brings it back.
   `claimVersion` of the kit cannot order them: it keys versions per consumer.
-- A failure (a membership id stored under another account or organization, the database
-  unavailable) is retried by the kit after 1 s, 5 s, 30 s and 2 min, then becomes a dead letter in
-  `EVENTS_DLQ` (`dlq.identity-service__project-member-<event>.evt.member.<event>.v1`). An operator
-  reads the dead letter, fixes the cause, and has organization-service requeue the event
-  (`requeueOutboxEvents`) or rebuild the copy (below). A dead-lettered `member.removed.v1` leaves
-  the membership active in the copy until then: the sessions keep the organization and the API
-  tokens keep working. Every dead letter of these consumers is therefore an incident to alert on;
-  the kit has no per-subscription retry schedule that would avoid giving up on them.
+- Redelivery schedule (P2b security follow-ups, decision 3): a failure (the database unavailable, a
+  membership id stored under another account or organization) is redelivered by the kit after 1 s,
+  5 s, 30 s, 2 min, 10 min, 30 min, then every hour, for 32 deliveries: the 31 failed deliveries
+  wait 92,556 s, about 25 h 43 min, before the dead letter, against 2 min 36 s for the default
+  schedule of the kit. A dead-lettered `member.removed.v1` leaves the membership active in the copy:
+  the removed member's sessions keep the organization and its API tokens keep working. The schedule
+  therefore outlasts any outage of the database shorter than a day, and the margin over 24 hours
+  covers deliveries lost to a crashed replica, which the broker redelivers after the 30 s
+  acknowledgement wait and which count as deliveries. The three consumers share the schedule: a
+  role change that lowers a role is a security projection as much as a removal, and a join given
+  up would leave a member without access until an operator steps in.
+  `memberEventsRedeliveryProvider` binds it to `MEMBER_EVENTS_REDELIVERY`; the kit sets
+  `max_deliver` 32 on each durable consumer, updating an existing one in place, keeping its
+  position and its pending messages, and refuses at start-up a schedule that would not end within
+  half the seven-day retention of `EVENTS`.
+- A long schedule has limits the kit does not check: a waiting message is among the oldest of
+  `EVENTS`, which drops its oldest messages first past its byte cap (1 GiB in cadenway-ops), and
+  each waiting message counts towards the 1000 unacknowledged messages of its consumer
+  (`max_ack_pending`), past which the consumer receives no new event until one is delivered again.
+- Rollout: a release that changes the schedule must replace every replica before it is relied on,
+  with a deployment that recreates them all. A replica still on the previous
+  limit treats its own fifth delivery as the last and asks for an immediate redelivery, which can
+  use up the remaining deliveries in seconds, and such a replica that restarts sets `max_deliver`
+  back to five. Removing the schedule brings the consumers back to five deliveries the same way.
+- After the last delivery the event becomes a dead letter in `EVENTS_DLQ`
+  (`dlq.identity-service__project-member-<event>.evt.member.<event>.v1`). An operator reads it,
+  fixes the cause, and has organization-service requeue the event (`requeueOutboxEvents`) or
+  rebuild the copy (below). Every dead letter of these consumers is an incident to alert on.
 
 **Rebuild beyond the retention of the stream.** `EVENTS` keeps 7 days. The durable consumers keep
 their position, so the copy falls behind only when this service consumes nothing for longer than
@@ -121,3 +146,10 @@ then, within 7 days of its outbox retention, organization-service publishes the 
   published to the stream reach the copy, those published before the service started included,
   in any order of versions, with a removal after a role change kept, and a redelivered event
   applied once.
+- The schedule is the value of a token, not a constant of the handler, so that
+  `tests/membership-redelivery.int-spec.ts` replaces it with delays of a fraction of a second and
+  proves on real PostgreSQL and NATS that each durable consumer gets the delivery limit of its
+  schedule, that a removal whose first five deliveries fail is applied by the sixth, each
+  redelivered after its delay, that an event is given up after its last delivery, and that the
+  broker refuses a consumer it does not grant. `member-events-handler.provider.spec.ts` pins the
+  production schedule the module subscribes the three consumers with.

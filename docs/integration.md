@@ -104,7 +104,9 @@ cite:
 3. The copy of the memberships follows `member.joined.v1`, `member.role-changed.v1` and
    `member.removed.v1` from the start of the stream, by version, a removed membership staying
    removed; beyond the seven days of `EVENTS` it is rebuilt by organization-service (see the
-   `MODULE.md` of the memberships module).
+   `MODULE.md` of the memberships module). A member event that fails is redelivered for about 25
+   hours before its dead letter (P2b security follow-ups, decision 3), so that a removal outlasts
+   an outage of the database.
 4. A personal API token belongs to its user and to the current organization of the session that
    created it; it works while neither revoked nor expired and while its user is a member of that
    organization; its last use is recorded at most once a minute.
