@@ -1,4 +1,5 @@
 import { Membership } from '../../../../../domain/aggregates/membership/membership.aggregate.js';
+import { MembershipMismatchError } from '../../../../../domain/errors/membership/membership-mismatch.error.js';
 import type { MembershipRepository } from '../../../../ports/outbound/persistence/membership/membership-repository.port.js';
 import type { MembershipsUnitOfWork } from '../../../../ports/outbound/transactions/membership/memberships-unit-of-work.port.js';
 import type { ApplyMembershipChangeInput } from './apply-membership-change.input.js';
@@ -54,7 +55,8 @@ export class ApplyMembershipChange {
    * @param {ApplyMembershipChangeInput} input - The member event.
    * @returns {Promise<void>} Resolves once applied, or at once when it changes nothing.
    * @throws {MembershipMismatchError} When the event names another organization or account than
-   * the stored membership: the kit retries it, then keeps it as a dead letter.
+   * the stored membership, or a membership id stored under another organization: the kit retries
+   * it, then keeps it as a dead letter.
    */
   public async execute(input: ApplyMembershipChangeInput): Promise<void> {
     await this.unitOfWork.run(async (memberships: MembershipRepository): Promise<void> => {
@@ -68,7 +70,8 @@ export class ApplyMembershipChange {
       const current: Membership | null =
         stored ?? (await memberships.lock(input.organizationId, input.memberId));
       if (current === null) {
-        throw new Error('The membership vanished while it was being applied.');
+        // The id exists, but row-level security hides it: it belongs to another organization.
+        throw new MembershipMismatchError();
       }
       const applied: Membership = current.apply(input);
       if (applied !== current) {

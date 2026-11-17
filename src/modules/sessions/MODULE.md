@@ -88,8 +88,8 @@ removed.
 - A session acts on at most one organization, through a membership of its account in the copy of
   the memberships. Choosing it needs that membership to be active (`organization.not-found`
   otherwise, also for the few seconds before `member.joined.v1` arrives); choosing the current one
-  again answers 200 and writes nothing; any other choice takes the next version of the session and
-  becomes the last choice of the account.
+  again answers 200 and leaves the session as it is; any other choice takes the next version of the
+  session; every choice becomes the last choice of the account.
 - The introspection answers the organization and the role of the membership the session chose
   while that very membership is active, `null` for both otherwise: a removal ends the organization
   of the member's sessions there for good, and a person invited again chooses it again. A session
@@ -118,8 +118,13 @@ later write wins; it reads the copy of the memberships in the same transaction.
 - The decisions of the walking skeleton are recorded in `docs/integration.md`.
 - The system transaction runner serves these routes, the same reviewed exception as in the accounts
   module: the kit README reserves it for "routes without an organization" and also says "never use
-  it to serve the request of a user". The exception is bounded to the `sessions` table, which has no
-  policy, and to outbox inserts with `organizationId: null`.
+  it to serve the request of a user". The exception is bounded to the rows each query names: a
+  session by id or token hash, a last choice by account (both tables carry the forced policy of
+  their `organization_id`, which the system access lifts for these rows only), the copy of the
+  memberships read by organization and account through `FindActiveMembership`, and outbox inserts
+  with `organizationId: null`. The choice of an organization takes the organization from the body,
+  as the contract states, and only after the copy of the memberships confirmed the actor belongs to
+  it.
 - The organization of a session (P2b plan, decision 2) did not move the module to the tenant
   runner, as an earlier note of this file expected: no route of the module has an organization in
   its internal token (the contract says so of the choice itself), the introspection learns the
@@ -135,8 +140,10 @@ later write wins; it reads the copy of the memberships in the same transaction.
   of it").
 - The last choice of an account lives in `organization_choices`, one row per account, rather than
   being derived from its sessions, which a future purge of ended sessions would lose.
-- The choice of the current organization again writes nothing, not even the last choice: the
-  contract says it "changes nothing".
+- Choosing the current organization again leaves the session as it is ("changes nothing") but
+  records it as the last choice of the account, since the contract also makes every choice "the one
+  the next sessions of the actor start in": a person who chose another organization in another
+  browser and comes back to this one starts there next time.
 - `session.revoked.v1` keeps `organizationId: null`, as the contract fixes it for this version.
 - The scopes of a session are the four of `ApiTokenScope`, kept in the domain
   (`SESSION_SCOPES`); a spec compares them with the installed contract.

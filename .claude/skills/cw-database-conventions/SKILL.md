@@ -70,8 +70,10 @@ Four tables carry an `organization_id` and the forced policy of the kit (migrati
 
 - `memberships` (memberships module) and `api_tokens` (api-tokens module), tenant data: written in
   the tenant transaction of their organization (the handler of a member event, the routes of a
-  session that manage tokens), read in a system transaction only by the introspections and the
-  choice of an organization, by key;
+  session that manage tokens). In a system transaction, by key only: the copy of the memberships is
+  read by organization and account (the choice of an organization, both introspections, the
+  opening of a session inside a sign-in), and the introspection of a token finds it by the hash of
+  its secret and writes its last use;
 - `sessions` (its current organization, `null` without one) and `organization_choices` (the last
   organization each account chose), of the sessions module: rows of an account that name an
   organization, read and written in system transactions only, by id, token hash or account.

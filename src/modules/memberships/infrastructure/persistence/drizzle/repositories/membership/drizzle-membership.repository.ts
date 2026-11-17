@@ -15,7 +15,7 @@ import memberships from '../../schemas/membership/membership.schema.js';
  * query names the organization: the reads by id serve the handler, in the tenant transaction of the
  * event, where row-level security also hides any other organization; the read of an active
  * membership names the organization and the account, both indexed. A membership id of another
- * organization is invisible to the handler, and its insert fails on the primary key.
+ * organization is invisible to the handler: its insert does nothing, on the primary key.
  */
 export class DrizzleMembershipRepository implements MembershipRepository {
   // #region Properties

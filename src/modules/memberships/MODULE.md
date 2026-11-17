@@ -68,8 +68,12 @@ None.
   `claimVersion` of the kit cannot order them: it keys versions per consumer.
 - A failure (a membership id stored under another account or organization, the database
   unavailable) is retried by the kit after 1 s, 5 s, 30 s and 2 min, then becomes a dead letter in
-  `EVENTS_DLQ`. An operator reads the dead letter, fixes the cause, and has organization-service
-  requeue the event (`requeueOutboxEvents`) or rebuild the copy (below).
+  `EVENTS_DLQ` (`dlq.identity-service__project-member-<event>.evt.member.<event>.v1`). An operator
+  reads the dead letter, fixes the cause, and has organization-service requeue the event
+  (`requeueOutboxEvents`) or rebuild the copy (below). A dead-lettered `member.removed.v1` leaves
+  the membership active in the copy until then: the sessions keep the organization and the API
+  tokens keep working. Every dead letter of these consumers is therefore an incident to alert on;
+  the kit has no per-subscription retry schedule that would avoid giving up on them.
 
 **Rebuild beyond the retention of the stream.** `EVENTS` keeps 7 days. The durable consumers keep
 their position, so the copy falls behind only when this service consumes nothing for longer than
@@ -90,7 +94,8 @@ then, within 7 days of its outbox retention, organization-service publishes the 
 - The role is the role of the highest version applied.
 - A membership never moves: an event that names another organization or account than the stored
   copy is refused. In the tenant transaction of the event, row-level security hides the rows of any
-  other organization, and the insert of an id that exists elsewhere fails on the primary key.
+  other organization: the insert of an id stored under another one inserts nothing, the row stays
+  invisible, and the event is refused the same way (`MembershipMismatchError`).
 - A membership organization-service created a few seconds ago may not be here yet: callers answer
   as for a non-member (`organization.not-found`, an inactive token), as the contract states.
 

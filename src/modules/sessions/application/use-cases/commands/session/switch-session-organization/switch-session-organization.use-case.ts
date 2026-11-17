@@ -22,7 +22,8 @@ import type { SwitchSessionOrganizationOutput } from './switch-session-organizat
  *   refused alike (`session.not-found`, which the gateway answers `401 auth.session-expired`).
  * - An organization the actor does not belong to, or whose `member.joined.v1` has not reached this
  *   service yet, is refused (`organization.not-found`); the web application retries.
- * - Choosing the membership the session already acts through changes nothing and writes nothing.
+ * - Choosing the membership the session already acts through leaves the session unchanged; the
+ *   choice is still the last one of the account, where its next sessions start.
  */
 export class SwitchSessionOrganization {
   // #region Properties
@@ -111,8 +112,8 @@ export class SwitchSessionOrganization {
         const chosen: Session = session.chooseOrganization(membership, now);
         if (chosen !== session) {
           await store.sessions.chooseOrganization(chosen);
-          await store.organizationChoices.remember(input.actorUserId, membership.organizationId);
         }
+        await store.organizationChoices.remember(input.actorUserId, membership.organizationId);
         return { organizationId: membership.organizationId, role: membership.role };
       },
     );

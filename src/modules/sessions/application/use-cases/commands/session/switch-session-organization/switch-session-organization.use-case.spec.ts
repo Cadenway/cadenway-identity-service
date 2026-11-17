@@ -67,17 +67,17 @@ describe('SwitchSessionOrganization', () => {
     expect(store.choices.get(CAMILLE_ID)).toBe(ATELIER_NORD);
   });
 
-  it('answers the same and writes nothing when the organization is already the current one', async () => {
+  it('leaves the session unchanged for its current organization, which stays the last choice', async () => {
     const input = { actorUserId: CAMILLE_ID, sessionId: opened.id, organizationId: ATELIER_NORD };
     await switchOrganization.execute(input);
-    store.choices.delete(CAMILLE_ID);
+    store.choices.set(CAMILLE_ID, OTHER_ORGANIZATION);
 
     await expect(switchOrganization.execute(input)).resolves.toEqual({
       organizationId: ATELIER_NORD,
       role: 'owner',
     });
     expect(store.sessions.get(opened.id)?.state.version).toBe(2);
-    expect(store.choices.has(CAMILLE_ID)).toBe(false);
+    expect(store.choices.get(CAMILLE_ID)).toBe(ATELIER_NORD);
   });
 
   it('refuses an organization the actor is not a member of, and changes nothing', async () => {

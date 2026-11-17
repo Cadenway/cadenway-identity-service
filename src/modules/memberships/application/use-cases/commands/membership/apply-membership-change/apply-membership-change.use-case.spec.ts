@@ -82,6 +82,20 @@ describe('ApplyMembershipChange', () => {
     ).resolves.toBeNull();
   });
 
+  it('refuses an event whose membership id is stored under another organization', async () => {
+    store.rows.set(MEMBER, {
+      id: MEMBER,
+      organizationId: CAMILLE,
+      userId: CAMILLE,
+      role: 'owner',
+      version: 1,
+      removedAt: null,
+    });
+
+    await expect(apply.execute(event('joined', 1))).rejects.toThrow(MembershipMismatchError);
+    expect(store.rows.get(MEMBER)).toMatchObject({ organizationId: CAMILLE, role: 'owner' });
+  });
+
   it('refuses an event that names another account than the stored membership', async () => {
     await apply.execute(event('joined', 1));
 

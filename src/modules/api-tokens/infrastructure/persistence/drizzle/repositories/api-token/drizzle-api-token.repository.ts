@@ -206,7 +206,7 @@ export class DrizzleApiTokenRepository implements ApiTokenRepository {
    * @returns {Promise<void>} Resolves once written.
    */
   public async recordUse(token: ApiToken): Promise<void> {
-    const { lastUsedAt } = token.snapshot;
+    const { organizationId, lastUsedAt } = token.snapshot;
     if (lastUsedAt === null) {
       return;
     }
@@ -215,6 +215,7 @@ export class DrizzleApiTokenRepository implements ApiTokenRepository {
       .set({ lastUsedAt })
       .where(
         and(
+          eq(apiTokens.organizationId, organizationId),
           eq(apiTokens.id, token.id),
           or(isNull(apiTokens.lastUsedAt), lt(apiTokens.lastUsedAt, lastUsedAt)),
         ),

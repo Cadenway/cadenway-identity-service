@@ -20,7 +20,10 @@ paths:
   it. A query can use a read port and return a projection without a write transaction.
 - A load of tenant data filters on the caller's organization, which comes from the request
   context, never from the payload. Accounts, credentials, codes and sessions belong to no
-  organization: a load names the verified actor or an explicit key (an address, a token hash).
+  organization (a session only names its current one): a load names the verified actor or an
+  explicit key (an address, a token hash). The one organization a payload names is the choice of
+  the current organization of a session, which the copy of the memberships checks against the
+  verified actor before anything is written.
 - Never re-implement a domain rule here; call the domain method.
 - A use case reachable from an event handler is idempotent.
 - Use a consumer-owned outbound port for cross-module calls. The accounts module calls sessions

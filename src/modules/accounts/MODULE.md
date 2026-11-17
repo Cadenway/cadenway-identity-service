@@ -162,8 +162,10 @@ Each flow runs in system transactions of `SystemAccountsUnitOfWork` (see Decisio
   user". These routes and events have no organization, the tenant runner refuses to run without
   one, and the outbox policy accepts `organizationId: null` in a system transaction only. The
   exception is bounded: the system access touches the five tables above, which carry no policy,
-  and the outbox inserts with `organizationId: null`; a future tenant table of this service is
-  never read here. The contradiction of the kit README is reported to cadenway-service-kit.
+  and the outbox inserts with `organizationId: null`. The session a sign-in opens joins the
+  transaction and reads, through the sessions module, the last organization the account chose and
+  its membership there (`organization_choices` and `memberships`, by account and organization);
+  no other tenant table is read here. The contradiction of the kit README is reported to cadenway-service-kit.
 - One module for users, credentials, codes and lockout: a sign-up writes the account, its password
   and its code atomically, and the verification reads the code and writes the account; splitting
   them would make each flow a chain of cross-module ports without another consumer.
@@ -185,7 +187,10 @@ Each flow runs in system transactions of `SystemAccountsUnitOfWork` (see Decisio
   kit's `request.if-match-invalid`.
 - The time zone is checked against `Intl.supportedValuesOf('timeZone')` of the runtime, and a link
   the runtime still resolves (`Asia/Calcutta`) is accepted as given; a UTC offset (`+01:00`), which
-  the runtime also accepts as a time zone, is refused, not being an IANA name.
+  the runtime also accepts as a time zone, is refused, not being an IANA name. That check, like the
+  four languages of the contract, runs in the HTTP adapter: the time zone database is data of the
+  runtime, kept at the edge, and the language enumeration is the contract's schema. The domain
+  checks that both are set and not too long.
 - The rows of `code_requests` and `sign_in_attempts` for addresses without an account, and expired
   codes, are not purged yet: a purge job arrives with the first durable job of the service.
 - `tests/auth-flows.int-spec.ts` proves each route, the events and their routes, the binding of the
