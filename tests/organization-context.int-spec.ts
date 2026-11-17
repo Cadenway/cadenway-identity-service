@@ -898,11 +898,19 @@ describe('identity-service organization context', () => {
         '/internal/v1/api-tokens?cursor=not-a-cursor',
         user(people.ines, atelierNord),
       );
-      // A cursor of this list, as the kit encodes it, whose position names no instant and no id.
-      const forged = await call(
-        'get',
-        `/internal/v1/api-tokens?cursor=${encodeCursor({ sort: ['yesterday'], id: 'x' }, { sort: '-createdAt' })}`,
-        user(people.ines, atelierNord),
+      // Cursors of this list, as the kit encodes them, whose position this list never writes: no
+      // instant, and an instant of a year PostgreSQL refuses.
+      const forged = await Promise.all(
+        [
+          { sort: ['yesterday'], id: 'x' },
+          { sort: ['+010000-01-01T00:00:00.000Z'], id: ines.id },
+        ].map((position) =>
+          call(
+            'get',
+            `/internal/v1/api-tokens?cursor=${encodeCursor(position, { sort: '-createdAt' })}`,
+            user(people.ines, atelierNord),
+          ),
+        ),
       );
       const limits = await Promise.all(
         ['0', '101', 'abc', '8.5'].map((limit) =>
@@ -926,7 +934,7 @@ describe('identity-service organization context', () => {
       expect(JSON.stringify([first.body, next.body])).not.toContain('"secret"');
       expect(JSON.stringify([first.body, next.body])).not.toContain(ines.secret);
       expect(elsewhereList.body).toEqual({ items: [], nextCursor: null });
-      for (const response of [invalid, forged]) {
+      for (const response of [invalid, ...forged]) {
         expect(response.status).toBe(400);
         expect(response.body).toMatchObject({
           code: 'request.invalid',

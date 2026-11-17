@@ -86,19 +86,30 @@ None.
   `max_deliver` 32 on each durable consumer, updating an existing one in place, keeping its
   position and its pending messages, and refuses at start-up a schedule that would not end within
   half the seven-day retention of `EVENTS`.
-- A long schedule has limits the kit does not check: a waiting message is among the oldest of
-  `EVENTS`, which drops its oldest messages first past its byte cap (1 GiB in cadenway-ops), and
-  each waiting message counts towards the 1000 unacknowledged messages of its consumer
-  (`max_ack_pending`), past which the consumer receives no new event until one is delivered again.
+- A long schedule has limits the kit does not check. A waiting message is among the oldest of
+  `EVENTS`, which drops its oldest messages first past its byte cap (1 GiB in cadenway-ops): a
+  removal dropped while it waits is lost without a dead letter and without an alert, and the
+  removed member keeps access until the copy is rebuilt. That window grows from minutes to about a
+  day with this schedule; cadenway-ops has no alert on it yet (an alert on the size of `EVENTS`
+  near its cap, or on the age of its first message, would close it). Each waiting message also
+  counts towards the 1000 unacknowledged messages of its consumer (`max_ack_pending`): past that,
+  the consumer receives no new event until a waiting one is acknowledged or given up.
+- A failure that cannot pass by itself (`MembershipMismatchError`) also waits the whole schedule
+  before its dead letter, about a day instead of minutes: accepted, since telling it from an outage
+  would need the handler to judge errors. The kit logs each failed delivery as a warning with its
+  `errorClass` and consumer, which an alert can follow sooner than the dead letter.
 - Rollout: a release that changes the schedule must replace every replica before it is relied on,
   with a deployment that recreates them all. A replica still on the previous
   limit treats its own fifth delivery as the last and asks for an immediate redelivery, which can
   use up the remaining deliveries in seconds, and such a replica that restarts sets `max_deliver`
-  back to five. Removing the schedule brings the consumers back to five deliveries the same way.
+  back to five. Removing the schedule, a rollback to a release without it included, brings the
+  consumers back to five deliveries the same way, and a waiting message already past its fifth
+  delivery becomes a dead letter at once: after such a rollback, read `EVENTS_DLQ` and requeue.
 - After the last delivery the event becomes a dead letter in `EVENTS_DLQ`
-  (`dlq.identity-service__project-member-<event>.evt.member.<event>.v1`). An operator reads it,
-  fixes the cause, and has organization-service requeue the event (`requeueOutboxEvents`) or
-  rebuild the copy (below). Every dead letter of these consumers is an incident to alert on.
+  (`dlq.identity-service__project-member-<event>.evt.member.<event>.v1`), copied by the dead-letter
+  worker of notification-service. An operator reads it, fixes the cause, and has
+  organization-service requeue the event (`requeueOutboxEvents`) or rebuild the copy (below). Every
+  dead letter of these consumers is an incident to alert on.
 
 **Rebuild beyond the retention of the stream.** `EVENTS` keeps 7 days. The durable consumers keep
 their position, so the copy falls behind only when this service consumes nothing for longer than
@@ -148,8 +159,10 @@ then, within 7 days of its outbox retention, organization-service publishes the 
   applied once.
 - The schedule is the value of a token, not a constant of the handler, so that
   `tests/membership-redelivery.int-spec.ts` replaces it with delays of a fraction of a second and
-  proves on real PostgreSQL and NATS that each durable consumer gets the delivery limit of its
-  schedule, that a removal whose first five deliveries fail is applied by the sixth, each
-  redelivered after its delay, that an event is given up after its last delivery, and that the
-  broker refuses a consumer it does not grant. `member-events-handler.provider.spec.ts` pins the
+  proves on real PostgreSQL and NATS, under the exact-name grant, that durable consumers left at
+  five deliveries are updated in place to the limit of the schedule with their position kept, that
+  a removal three deliveries into the previous schedule is carried past its fifth delivery, that a
+  removal whose first five deliveries fail is applied by the sixth, each redelivered after its
+  delay, that an event is given up after its last delivery, and that the broker refuses a
+  consumer it does not grant. `member-events-handler.provider.spec.ts` pins the
   production schedule the module subscribes the three consumers with.

@@ -173,9 +173,10 @@ error code of the contract; it checks that the outbox publishes the four events,
 `restricted.` only, that a revoked or idle session introspects as inactive, and that no log line
 holds a password, a code, a token or the pepper. `tests/membership-redelivery.int-spec.ts` builds
 `AppModule` with the redelivery schedule of the member event consumers shortened to a fraction of a
-second, and checks the delivery limit of each durable consumer, the delay before each redelivery of
-a failing event, the dead letter after the last delivery, and that the broker refuses a consumer it
-does not grant. They move to the fixtures of `@cadenway/nest-testing` once that package exports
+second, and checks that existing durable consumers are updated in place to its delivery limit, the
+delay before each redelivery of a failing event, a pending event carried past the previous limit,
+an event given up after its last delivery, and that the broker refuses a consumer it does not
+grant. They move to the fixtures of `@cadenway/nest-testing` once that package exports
 them.
 
 ## Minimum checks by change

@@ -26,6 +26,11 @@ import { MEMBER_EVENTS_REDELIVERY } from '../src/modules/memberships/composition
 // the test says so, as it would while its database is unavailable; the kit, the durable consumers
 // and the broker are real. Member events are published with the `admin` user of the `nats-streams`
 // container, as organization-service would publish them.
+//
+// Before the service starts, the three durable consumers exist as a release without a schedule
+// left them (five deliveries), and a removal is three deliveries into its default schedule: the
+// service must update them in place under its exact-name grant, keeping their position and the
+// pending removal, which then goes on past the previous limit.
 
 /** Compose file of the development dependencies. */
 const composeFile: string = fileURLToPath(new URL('../compose.dev.yaml', import.meta.url));
@@ -49,18 +54,34 @@ const atelierNord = '019a5f3c-8d2e-7c4a-9b1f-3e5d7a9c1b2f';
 /** The accounts of the specs, people of the mockup. */
 const people = {
   camille: '019a5f3c-8d2e-7c4a-9b1f-3e5d7a9c1b30',
+  ines: '019a5f3c-8d2e-7c4a-9b1f-3e5d7a9c1b31',
   hugo: '019a5f3c-8d2e-7c4a-9b1f-3e5d7a9c1b32',
 } as const;
 
 /** Their memberships in Atelier Nord, as organization-service ids them. */
 const members = {
   camille: '019a6b10-0000-7000-8000-0000000000a1',
+  ines: '019a6b10-0000-7000-8000-0000000000a3',
   hugo: '019a6b10-0000-7000-8000-0000000000a2',
 } as const;
+
+/** The three durable consumers and the event each filters. */
+const consumers = [
+  { handler: 'project-member-joined', event: 'member.joined.v1' },
+  { handler: 'project-member-role-changed', event: 'member.role-changed.v1' },
+  { handler: 'project-member-removed', event: 'member.removed.v1' },
+] as const;
+
+/** The delivery limit of a durable consumer the kit created without a schedule. */
+const previousLimit = 5;
+
+/** The deliveries the pending removal of Inès Robert used up before the service started. */
+const deliveredBefore = 3;
 
 /** What the durable consumer reports to the `admin` user (`nats consumer info --json`). */
 interface ConsumerInfo {
   readonly config: { readonly max_deliver: number };
+  readonly delivered: { readonly consumer_seq: number };
   readonly num_ack_pending: number;
   readonly num_pending: number;
 }
@@ -173,6 +194,62 @@ function consumerInfo(handler: string): ConsumerInfo {
 }
 
 /**
+ * Creates a durable consumer as the `admin` user, with the request and the settings
+ * `@cadenway/nest-messaging` sends for a handler without a schedule: five deliveries, 30 s to
+ * acknowledge, every event the stream holds.
+ *
+ * @param handler - The handler of the consumer, after `identity-service__`.
+ * @param event - The event it filters.
+ */
+function createPreviousConsumer(handler: string, event: string): void {
+  const name = `identity-service__${handler}`;
+  const filter = `evt.${event}`;
+  compose(
+    'exec',
+    '-T',
+    'nats-streams',
+    'nats',
+    'request',
+    `$JS.API.CONSUMER.CREATE.EVENTS.${name}.${filter}`,
+    JSON.stringify({
+      stream_name: 'EVENTS',
+      action: 'create',
+      config: {
+        name,
+        durable_name: name,
+        filter_subject: filter,
+        ack_policy: 'explicit',
+        deliver_policy: 'all',
+        max_deliver: previousLimit,
+        ack_wait: 30_000_000_000,
+      },
+    }),
+  );
+}
+
+/**
+ * Delivers the next message of a durable consumer to the `admin` user, who asks for its immediate
+ * redelivery, as a failed delivery without a delay would.
+ *
+ * @param handler - The handler of the consumer, after `identity-service__`.
+ */
+function deliverAndRefuse(handler: string): void {
+  compose(
+    'exec',
+    '-T',
+    'nats-streams',
+    'nats',
+    'consumer',
+    'next',
+    'EVENTS',
+    `identity-service__${handler}`,
+    '--nak',
+    '--count',
+    '1',
+  );
+}
+
+/**
  * The time between successive deliveries.
  *
  * @param attempts - The instants of the deliveries.
@@ -183,18 +260,33 @@ function gaps(attempts: readonly number[]): number[] {
 }
 
 /**
- * The delay the schedule of the test gives each failed delivery but the last, the last delay
- * repeating.
+ * The delay the schedule of the test gives each failed delivery, the last delay repeating.
  *
  * @param failures - The number of failed deliveries followed by another one.
+ * @param after - The deliveries that came before the first of them.
  * @returns The delays, in milliseconds.
  */
-function scheduledDelays(failures: number): number[] {
+function scheduledDelays(failures: number, after = 0): number[] {
   const { delaysMs } = testSchedule;
   return Array.from(
     { length: failures },
-    (_, index) => delaysMs[Math.min(index, delaysMs.length - 1)] ?? 0,
+    (_, index) => delaysMs[Math.min(after + index, delaysMs.length - 1)] ?? 0,
   );
+}
+
+/**
+ * Checks that each delivery came after its delay, and not much later.
+ *
+ * @param attempts - The instants of the deliveries.
+ * @param delays - The delay expected before each delivery but the first.
+ */
+function expectOnSchedule(attempts: readonly number[], delays: readonly number[]): void {
+  expect(gaps(attempts)).toHaveLength(delays.length);
+  gaps(attempts).forEach((gap, index) => {
+    const delay = delays[index] ?? 0;
+    expect(gap).toBeGreaterThanOrEqual(delay - 10);
+    expect(gap).toBeLessThan(delay + latenessMs);
+  });
 }
 
 /**
@@ -225,6 +317,13 @@ async function runMigrator(): Promise<void> {
 
 describe('identity-service redelivery of the member events', () => {
   let moduleRef: TestingModule;
+
+  /** What the broker held before the service started, and the plan of the pending removal. */
+  const before: {
+    limits: readonly number[];
+    removals: ConsumerInfo | undefined;
+    inesRemoval: FailurePlan;
+  } = { limits: [], removals: undefined, inesRemoval: { attempts: [], remaining: 0 } };
 
   /**
    * Reads the copy of a membership in a system transaction of the application role.
@@ -301,6 +400,24 @@ describe('identity-service redelivery of the member events', () => {
     );
     await runMigrator();
 
+    // The broker as a release without a schedule left it: the three consumers at five deliveries,
+    // the joins of Camille Martin and Hugo Lefèvre waiting, and the removal of Inès Robert, after
+    // her join, three deliveries into the default schedule.
+    for (const { handler, event } of consumers) {
+      createPreviousConsumer(handler, event);
+    }
+    publishMemberEvent('joined', members.camille, people.camille, 'owner', 1);
+    publishMemberEvent('joined', members.hugo, people.hugo, 'member', 1);
+    publishMemberEvent('joined', members.ines, people.ines, 'member', 1);
+    publishMemberEvent('removed', members.ines, people.ines, 'member', 2);
+    for (let delivery = 0; delivery < deliveredBefore; delivery += 1) {
+      deliverAndRefuse('project-member-removed');
+    }
+    before.limits = consumers.map(({ handler }) => consumerInfo(handler).config.max_deliver);
+    before.removals = consumerInfo('project-member-removed');
+    // Its next three deliveries fail too: the fourth and fifth would have been its last ones.
+    before.inesRemoval = failNext('removed', members.ines, 3);
+
     vi.stubEnv('PORT', '3010');
     vi.stubEnv('LOG_PRETTY', 'false');
     vi.stubEnv(
@@ -346,11 +463,6 @@ describe('identity-service redelivery of the member events', () => {
     );
 
     await moduleRef.init();
-
-    publishMemberEvent('joined', members.camille, people.camille, 'owner', 1);
-    publishMemberEvent('joined', members.hugo, people.hugo, 'member', 1);
-    await untilMembership(members.camille, { role: 'owner', version: 1, removed: false });
-    await untilMembership(members.hugo, { role: 'member', version: 1, removed: false });
   });
 
   afterAll(async () => {
@@ -362,14 +474,28 @@ describe('identity-service redelivery of the member events', () => {
     }
   });
 
-  it('gives each durable consumer the delivery limit of its schedule', () => {
-    for (const handler of [
-      'project-member-joined',
-      'project-member-role-changed',
-      'project-member-removed',
-    ]) {
+  it('updates each existing durable consumer in place to the delivery limit of its schedule', async () => {
+    expect(before.limits).toEqual([previousLimit, previousLimit, previousLimit]);
+    expect(before.removals).toMatchObject({
+      delivered: { consumer_seq: deliveredBefore },
+      num_ack_pending: 1,
+    });
+    for (const { handler } of consumers) {
       expect(consumerInfo(handler).config.max_deliver).toBe(testSchedule.maxDeliveries);
     }
+    // The position and the waiting events were kept: the joins published before the update apply.
+    await untilMembership(members.camille, { role: 'owner', version: 1, removed: false });
+    await untilMembership(members.hugo, { role: 'member', version: 1, removed: false });
+  });
+
+  it('carries a removal pending under the previous limit past it, on the new schedule', async () => {
+    const plan = before.inesRemoval;
+
+    await untilMembership(members.ines, { removed: true, version: 2 });
+    // Deliveries four to six fail, the seventh applies it: under the previous limit the fifth
+    // would have been the last. Each waits the delay of its delivery count.
+    expect(plan.attempts).toHaveLength(4);
+    expectOnSchedule(plan.attempts, scheduledDelays(3, deliveredBefore));
   });
 
   it('applies a removal whose first five deliveries fail, each redelivered after its delay', async () => {
@@ -381,12 +507,7 @@ describe('identity-service redelivery of the member events', () => {
     // Five failures, then the sixth delivery applies it: the default schedule of the kit would
     // have made it a dead letter after the fifth.
     expect(plan.attempts).toHaveLength(6);
-    const expected = scheduledDelays(5);
-    gaps(plan.attempts).forEach((gap, index) => {
-      const delay = expected[index] ?? 0;
-      expect(gap).toBeGreaterThanOrEqual(delay - 10);
-      expect(gap).toBeLessThan(delay + latenessMs);
-    });
+    expectOnSchedule(plan.attempts, scheduledDelays(5));
     expect(consumerInfo('project-member-removed')).toMatchObject({
       num_ack_pending: 0,
       num_pending: 0,
@@ -405,12 +526,7 @@ describe('identity-service redelivery of the member events', () => {
       },
       { timeout: 20_000, interval: 50 },
     );
-    const expected = scheduledDelays(deliveries - 1);
-    gaps(plan.attempts).forEach((gap, index) => {
-      const delay = expected[index] ?? 0;
-      expect(gap).toBeGreaterThanOrEqual(delay - 10);
-      expect(gap).toBeLessThan(delay + latenessMs);
-    });
+    expectOnSchedule(plan.attempts, scheduledDelays(deliveries - 1));
     // Longer than the last delay and its lateness: a ninth delivery would have come by now.
     await new Promise((resolve) => setTimeout(resolve, 3_000));
     expect(plan.attempts).toHaveLength(deliveries);
