@@ -25,6 +25,26 @@ const LIST_FILTERS: { readonly sort: '-createdAt' } = { sort: '-createdAt' };
 const UUID: RegExp = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 
 /**
+ * Function isCreationInstant
+ *
+ * @description
+ * Whether the instant of a cursor is one `toCursor` can have written: a valid instant in the form
+ * `toISOString` gives it, from 1970 to 9999. The cursor is not signed, and PostgreSQL refuses an
+ * instant of a year past 9999 that `Date` reads, which would otherwise answer a 500.
+ *
+ * @param {string} createdAt - The instant the cursor carries.
+ * @param {Date} instant - The same instant, read by `Date`.
+ * @returns {boolean} Whether the instant can start a page.
+ */
+function isCreationInstant(createdAt: string, instant: Date): boolean {
+  if (Number.isNaN(instant.getTime())) {
+    return false;
+  }
+  const year: number = instant.getUTCFullYear();
+  return year >= 1970 && year <= 9999 && instant.toISOString() === createdAt;
+}
+
+/**
  * Function toCursor
  *
  * @description
@@ -78,7 +98,7 @@ export function toPosition(cursor: string | undefined): ApiTokenPosition | null 
     throw invalid;
   }
   const instant: Date = new Date(createdAt);
-  if (Number.isNaN(instant.getTime()) || !UUID.test(position.id)) {
+  if (!isCreationInstant(createdAt, instant) || !UUID.test(position.id)) {
     throw invalid;
   }
   return { createdAt: instant, id: position.id };

@@ -108,7 +108,9 @@ answers `active: false` for a token whose user is no longer a member of its orga
 - A cursor that is not one of this list answers `400 request.invalid` with one issue on `cursor`
   (`invalid_cursor`), the code the contract declares: `decodeCursor` of `@cadenway/nest-common`
   raises it for a malformed cursor or one issued for another sort, and the mapper raises the same
-  for a decoded position without a creation instant and a token id.
+  for a decoded position this list never writes: an instant not in the form `toISOString` gives,
+  or of a year outside 1970 to 9999, which PostgreSQL would refuse with a 500, or an id that is not
+  a UUID. The cursor is not signed; it only moves the page within the caller's own tokens.
 - `tests/organization-context.int-spec.ts` proves the lifecycle on real PostgreSQL and NATS:
   creation, introspection with scopes and organization, `lastUsedAt` written once a minute,
   revocation, expiry, and a removal of the membership.
