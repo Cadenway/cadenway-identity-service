@@ -36,6 +36,17 @@ export interface UserRepository {
   findById(id: string): Promise<User | null>;
 
   /**
+   * Method lock
+   *
+   * @description
+   * Loads an account by its id and locks its row until the end of the transaction.
+   *
+   * @param {string} id - Id of the account.
+   * @returns {Promise<User | null>} The account, or `null` when the id is unknown.
+   */
+  lock(id: string): Promise<User | null>;
+
+  /**
    * Method insert
    *
    * @description
@@ -50,7 +61,8 @@ export interface UserRepository {
    * Method update
    *
    * @description
-   * Writes a changed account whose stored version is the one before `user.version`.
+   * Writes a changed account (name, profile, verification, version, sign-up count) whose stored
+   * version is the one before `user.version`.
    *
    * @param {User} user - The account after the change.
    * @returns {Promise<void>} Resolves once written.

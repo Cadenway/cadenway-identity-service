@@ -19,7 +19,7 @@
    translate and call use cases. Cross-module calls use the consumer's outbound port wired to
    the producer's documented and exported public provider.
 4. Own data only: this service reads and writes its own database; everything else goes through contracts and events.
-5. A query of tenant data is scoped by organization, from the request context only; accounts, codes and sessions have no organization and are named by the verified actor or an explicit key.
+5. A query of tenant data is scoped by organization, from the request context only; accounts, codes and sessions belong to no organization (a session only names its current one) and are named by the verified actor or an explicit key.
 6. Events go through the outbox of `@cadenway/nest-messaging`; handlers are idempotent; shape changes get a new version.
 7. Migrations are expand/contract: the running version keeps working.
 8. Strict TypeScript: explicit types, `readonly`, no `any`, no non-null assertion.

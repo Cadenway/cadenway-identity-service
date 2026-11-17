@@ -11,8 +11,10 @@ module (`src/modules/platform`) brings their tables into the migrations. The REA
 `@cadenway/nest-messaging` is the reference for every call below. The events of this service are
 those of `asyncapi/identity-service.yaml` (`eventSchemas` of
 `@cadenway/contracts/events/identity-service`): `user.signed-up.v1`, `user.email-verified.v1`,
-`session.revoked.v1` and the restricted `one-time-code.issued.v1`, all with `organizationId: null`,
-appended by the outbox adapters of the accounts and sessions modules. Another event is published or
+`user.profile-updated.v1`, `session.revoked.v1` and the restricted `one-time-code.issued.v1`, all
+with `organizationId: null`, appended by the outbox adapters of the accounts and sessions modules.
+The memberships module consumes `member.joined.v1`, `member.role-changed.v1` and
+`member.removed.v1` of `@cadenway/contracts/events/organization-service`. Another event is published or
 consumed only once its AsyncAPI spec is released (`cw-contract-first`).
 
 ## Publishing
@@ -48,12 +50,10 @@ consumed only once its AsyncAPI spec is released (`cw-contract-first`).
 
    ```ts
    await this.consumers.subscribe({
-     handler: 'close-member-sessions',
+     handler: 'project-member-removed',
      schemas: eventSchemas,
      event: 'member.removed.v1',
-     handle: async (payload, { claimVersion }) => {
-       /* call the use case */
-     },
+     handle: (payload) => this.applyMembershipChange.execute(toChange('removed', payload)),
    });
    ```
 2. The deduplicator of `OutboxModule` records `(consumer, event id)` in `processed_events` in the
@@ -77,7 +77,9 @@ consumed only once its AsyncAPI spec is released (`cw-contract-first`).
   (`{ type: 'user' | 'automation' | 'git' | 'system', id }`).
 - Delivery is at least once and order is not guaranteed: `claimVersion(aggregateKey)` in the handler
   context (a key such as `session:<id>`) resolves to `false` for a version already applied to that
-  aggregate in that organization.
+  aggregate in that organization, by that consumer. An aggregate whose events travel on several
+  subjects (the three member events of a membership) has as many consumers: order it by its stored
+  `version` instead, as the memberships module does.
 - Never derive order from arrival time.
 
 ## What the kit and the broker own

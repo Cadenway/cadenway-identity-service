@@ -3,7 +3,9 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import type { OpenSessionOutput } from '../open-session/open-session.output.js';
 import { OpenSession } from '../open-session/open-session.use-case.js';
 import { RevokeSession } from '../revoke-session/revoke-session.use-case.js';
+import { SwitchSessionOrganization } from '../switch-session-organization/switch-session-organization.use-case.js';
 import {
+  FakeActiveMemberships,
   FakeDeviceReader,
   FakeSessionTokens,
   FixedClock,
@@ -31,18 +33,30 @@ const CAMILLE_ID: string = '019a5f3c-8d2e-7c4a-9b1f-3e5d7a9c1b30';
  */
 const HOUR: number = 60 * 60_000;
 
+const ATELIER_NORD = '019a5f3c-8d2e-7c4a-9b1f-3e5d7a9c1b2f';
+const MEMBER_ID = '019a6b10-0000-7000-8000-000000000001';
+const EVERY_SCOPE = ['tasks:read', 'tasks:write', 'members:read', 'webhooks:manage'];
+
 describe('IntrospectToken', () => {
   let store: InMemorySessions;
   let clock: FixedClock;
   let introspect: IntrospectToken;
   let opened: OpenSessionOutput;
+  let memberships: FakeActiveMemberships;
 
   beforeEach(async () => {
     store = new InMemorySessions();
     clock = new FixedClock('2026-11-08T13:07:00Z');
     const tokens: FakeSessionTokens = new FakeSessionTokens();
-    introspect = new IntrospectToken(store, tokens, clock);
-    opened = await new OpenSession(store, tokens, new FakeDeviceReader(), clock).execute({
+    memberships = new FakeActiveMemberships();
+    introspect = new IntrospectToken(store, tokens, memberships, clock);
+    opened = await new OpenSession(
+      store,
+      tokens,
+      new FakeDeviceReader(),
+      memberships,
+      clock,
+    ).execute({
       userId: CAMILLE_ID,
       persistent: false,
       client: { ipAddress: '86.247.12.30', userAgent: null },
@@ -57,8 +71,64 @@ describe('IntrospectToken', () => {
       userId: CAMILLE_ID,
       organizationId: null,
       role: null,
-      scopes: [],
+      scopes: EVERY_SCOPE,
       expiresAt: new Date('2026-12-08T13:07:00Z'),
+    });
+  });
+
+  it('answers the current organization and the role of the account there', async () => {
+    memberships.join(CAMILLE_ID, {
+      memberId: MEMBER_ID,
+      organizationId: ATELIER_NORD,
+      role: 'admin',
+    });
+    await new SwitchSessionOrganization(store, memberships, clock).execute({
+      actorUserId: CAMILLE_ID,
+      sessionId: opened.id,
+      organizationId: ATELIER_NORD,
+    });
+    memberships.join(CAMILLE_ID, {
+      memberId: MEMBER_ID,
+      organizationId: ATELIER_NORD,
+      role: 'guest',
+    });
+
+    await expect(introspect.execute({ token: opened.token })).resolves.toMatchObject({
+      active: true,
+      organizationId: ATELIER_NORD,
+      role: 'guest',
+      scopes: EVERY_SCOPE,
+    });
+  });
+
+  it('answers no organization once the account was removed from it, even if it joined again', async () => {
+    memberships.join(CAMILLE_ID, {
+      memberId: MEMBER_ID,
+      organizationId: ATELIER_NORD,
+      role: 'member',
+    });
+    await new SwitchSessionOrganization(store, memberships, clock).execute({
+      actorUserId: CAMILLE_ID,
+      sessionId: opened.id,
+      organizationId: ATELIER_NORD,
+    });
+
+    memberships.remove(CAMILLE_ID, ATELIER_NORD);
+    await expect(introspect.execute({ token: opened.token })).resolves.toMatchObject({
+      active: true,
+      organizationId: null,
+      role: null,
+    });
+
+    memberships.join(CAMILLE_ID, {
+      memberId: '019a6b10-0000-7000-8000-000000000002',
+      organizationId: ATELIER_NORD,
+      role: 'member',
+    });
+    await expect(introspect.execute({ token: opened.token })).resolves.toMatchObject({
+      active: true,
+      organizationId: null,
+      role: null,
     });
   });
 

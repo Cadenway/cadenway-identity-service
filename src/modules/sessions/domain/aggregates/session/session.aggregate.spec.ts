@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { InvalidSessionStateError } from '../../errors/session/invalid-session-state.error.js';
 import { SessionEndedError } from '../../errors/session/session-ended.error.js';
+import type { SessionMembership } from '../../value-objects/session/session-membership.value-object.js';
 import type { SessionStart } from '../../value-objects/session/session-start.value-object.js';
 import { Session } from './session.aggregate.js';
 
@@ -24,6 +25,12 @@ const SIGNED_IN_AT: Date = new Date('2026-11-08T13:07:00Z');
  * @type {number}
  */
 const HOUR: number = 60 * 60_000;
+
+/** The membership of Camille Martin in Atelier Nord. */
+const ATELIER_NORD_MEMBERSHIP: SessionMembership = {
+  organizationId: '019a5f3c-8d2e-7c4a-9b1f-3e5d7a9c1b2f',
+  memberId: '019a6b10-0000-7000-8000-000000000001',
+};
 
 /**
  * Function at
@@ -121,5 +128,50 @@ describe('Session', () => {
     expect(() => Session.restore({ ...opened(true).snapshot, version: 0 })).toThrow(
       InvalidSessionStateError,
     );
+  });
+
+  it('starts in no organization, or in the membership the sign-in found', () => {
+    expect(Session.start('user', false, SIGNED_IN_AT)).toMatchObject({
+      organizationId: null,
+      memberId: null,
+    });
+    expect(Session.start('user', false, SIGNED_IN_AT, ATELIER_NORD_MEMBERSHIP)).toMatchObject({
+      organizationId: ATELIER_NORD_MEMBERSHIP.organizationId,
+      memberId: ATELIER_NORD_MEMBERSHIP.memberId,
+      version: 1,
+    });
+  });
+
+  it('chooses an organization with the next version, and the same membership changes nothing', () => {
+    const chosen: Session = opened(false).chooseOrganization(ATELIER_NORD_MEMBERSHIP, at(HOUR));
+
+    expect(chosen.organizationId).toBe(ATELIER_NORD_MEMBERSHIP.organizationId);
+    expect(chosen.snapshot.version).toBe(2);
+    expect(chosen.isActingThrough(ATELIER_NORD_MEMBERSHIP.memberId)).toBe(true);
+    expect(chosen.chooseOrganization(ATELIER_NORD_MEMBERSHIP, at(HOUR))).toBe(chosen);
+    expect(chosen.revoke(at(2 * HOUR)).snapshot.version).toBe(3);
+  });
+
+  it('acts on its organization only through the membership it chose', () => {
+    const chosen: Session = opened(false).chooseOrganization(ATELIER_NORD_MEMBERSHIP, at(HOUR));
+
+    expect(opened(false).isActingThrough(null)).toBe(false);
+    expect(chosen.isActingThrough(null)).toBe(false);
+    expect(chosen.isActingThrough('019a6b10-0000-7000-8000-000000000099')).toBe(false);
+  });
+
+  it('refuses to choose an organization for a session that ended', () => {
+    expect(() =>
+      opened(false).revoke(at(HOUR)).chooseOrganization(ATELIER_NORD_MEMBERSHIP, at(HOUR)),
+    ).toThrow(SessionEndedError);
+  });
+
+  it('refuses a stored organization without its membership', () => {
+    expect(() =>
+      Session.restore({
+        ...opened(true).snapshot,
+        organizationId: ATELIER_NORD_MEMBERSHIP.organizationId,
+      }),
+    ).toThrow(InvalidSessionStateError);
   });
 });

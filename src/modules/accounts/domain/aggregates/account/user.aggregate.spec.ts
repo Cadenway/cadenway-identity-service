@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { EmailAlreadyVerifiedError } from '../../errors/accounts/email-already-verified.error.js';
 import { InvalidUserNameError } from '../../errors/accounts/invalid-user-name.error.js';
+import { InvalidProfileError } from '../../errors/accounts/invalid-profile.error.js';
 import { InvalidUserStateError } from '../../errors/accounts/invalid-user-state.error.js';
 import { SignUpReplacedError } from '../../errors/accounts/sign-up-replaced.error.js';
 import { EmailAddress } from '../../value-objects/email/email-address.value-object.js';
@@ -33,6 +34,9 @@ function unverified(): User {
     email: CAMILLE,
     name: 'Camille Martin',
     language: 'fr',
+    displayName: null,
+    jobTitle: null,
+    timeZone: 'Europe/Paris',
     emailVerifiedAt: null,
     version: 1,
     signUpCount: 1,
@@ -47,6 +51,9 @@ describe('User', () => {
       email: CAMILLE,
       name: 'Camille Martin',
       language: 'fr',
+      displayName: null,
+      jobTitle: null,
+      timeZone: 'Europe/Paris',
       version: 1,
       signUpCount: 1,
     });
@@ -120,6 +127,9 @@ describe('User', () => {
       email: CAMILLE,
       name: 'Camille Martin',
       language: 'fr',
+      displayName: null,
+      jobTitle: null,
+      timeZone: 'Europe/Paris',
       emailVerifiedAt: null,
       version: 1,
       signUpCount: 1,
@@ -130,5 +140,66 @@ describe('User', () => {
     expect(() => User.restore({ ...stored, signUpCount: 0 })).toThrow(InvalidUserStateError);
     expect(() => User.restore({ ...stored, signUpCount: 1.5 })).toThrow(InvalidUserStateError);
     expect(() => User.restore({ ...stored, language: '' })).toThrow(InvalidUserStateError);
+    expect(() => User.restore({ ...stored, timeZone: '' })).toThrow(InvalidUserStateError);
+  });
+
+  it('registers an account without display name nor job title, in the time zone of Paris', () => {
+    expect(User.register(CAMILLE, 'Camille Martin')).toMatchObject({
+      displayName: null,
+      jobTitle: null,
+      timeZone: 'Europe/Paris',
+    });
+  });
+
+  it('updates the members of the profile a patch gives, trimmed, with the next version', () => {
+    const update = unverified().updateProfile({
+      displayName: ' camille ',
+      jobTitle: 'Responsable produit',
+      timeZone: 'America/Montreal',
+    });
+
+    expect(update.changed).toEqual(['displayName', 'jobTitle', 'timeZone']);
+    expect(update.user).toMatchObject({
+      name: 'Camille Martin',
+      displayName: 'camille',
+      jobTitle: 'Responsable produit',
+      timeZone: 'America/Montreal',
+      language: 'fr',
+      version: 2,
+    });
+  });
+
+  it('clears the display name and the job title with null, and keeps what the patch leaves out', () => {
+    const named: User = unverified().updateProfile({
+      displayName: 'camille',
+      jobTitle: 'CTO',
+    }).user;
+    const cleared = named.updateProfile({ displayName: null, jobTitle: null, language: 'en' });
+
+    expect(cleared.changed).toEqual(['displayName', 'jobTitle', 'language']);
+    expect(cleared.user).toMatchObject({ displayName: null, jobTitle: null, language: 'en' });
+    expect(cleared.user.timeZone).toBe('Europe/Paris');
+    expect(cleared.user.version).toBe(3);
+  });
+
+  it('changes nothing, and keeps the version, for a patch that moves nothing', () => {
+    const account: User = unverified();
+    const update = account.updateProfile({ name: ' Camille Martin ', language: 'fr' });
+
+    expect(update.changed).toEqual([]);
+    expect(update.user).toBe(account);
+    expect(account.updateProfile({}).user).toBe(account);
+  });
+
+  it('refuses a blank or too long name, display name or job title', () => {
+    const account: User = unverified();
+
+    expect(() => account.updateProfile({ name: '  ' })).toThrow(InvalidUserNameError);
+    expect(() => account.updateProfile({ displayName: '   ' })).toThrow(InvalidProfileError);
+    expect(() => account.updateProfile({ displayName: 'x'.repeat(61) })).toThrow(
+      InvalidProfileError,
+    );
+    expect(() => account.updateProfile({ jobTitle: 'x'.repeat(121) })).toThrow(InvalidProfileError);
+    expect(() => account.updateProfile({ timeZone: '' })).toThrow(InvalidProfileError);
   });
 });

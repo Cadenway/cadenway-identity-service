@@ -1,5 +1,6 @@
 import { InvalidSessionStateError } from '../../errors/session/invalid-session-state.error.js';
 import { SessionEndedError } from '../../errors/session/session-ended.error.js';
+import type { SessionMembership } from '../../value-objects/session/session-membership.value-object.js';
 import type { SessionStart } from '../../value-objects/session/session-start.value-object.js';
 import type { SessionState } from '../../value-objects/session/session-state.value-object.js';
 
@@ -20,7 +21,12 @@ import type { SessionState } from '../../value-objects/session/session-state.val
  *   count from the last recorded minute;
  * - a revoked session never becomes active again; revoking a session that already ended changes
  *   nothing;
- * - a session belongs to no organization yet.
+ * - a session acts on at most one organization, through a membership of its account (P2b plan,
+ *   decision 2, `PUT /internal/v1/sessions/{sessionId}/organization`): chosen while the session is
+ *   active, with the next version; choosing the same membership again changes nothing. A new
+ *   session starts in the membership its sign-in found, or in none. The session acts on its
+ *   organization only while that very membership is active: a removal ends it for good, since a
+ *   person who joins again gets a new membership (`asyncapi/organization-service.yaml`).
  */
 export class Session {
   // #region Properties
@@ -96,6 +102,19 @@ export class Session {
   }
 
   /**
+   * Property organizationId
+   *
+   * @description
+   * Current organization of the session, or `null`.
+   *
+   * @type {string | null}
+   * @readonly
+   */
+  public get organizationId(): string | null {
+    return this.state.organizationId;
+  }
+
+  /**
    * Property snapshot
    *
    * @description
@@ -129,17 +148,26 @@ export class Session {
    * Method start
    *
    * @description
-   * The session a sign-in opens at `now`, active from then, at version 1.
+   * The session a sign-in opens at `now`, active from then, at version 1, in the membership of the
+   * last organization the account chose when it is still active there, else in none.
    *
    * @param {string} userId - Account the session signs in.
    * @param {boolean} persistent - Whether the cookie outlives the browser.
    * @param {Date} now - When the sign-in succeeded.
+   * @param {SessionMembership | null} membership - The membership the session starts in.
    * @returns {SessionStart} The session to store.
    */
-  public static start(userId: string, persistent: boolean, now: Date): SessionStart {
+  public static start(
+    userId: string,
+    persistent: boolean,
+    now: Date,
+    membership: SessionMembership | null = null,
+  ): SessionStart {
     return {
       userId,
       persistent,
+      organizationId: membership?.organizationId ?? null,
+      memberId: membership?.memberId ?? null,
       lastActiveAt: now,
       expiresAt: new Date(now.getTime() + Session.ABSOLUTE_LIFETIME_MS),
       version: 1,
@@ -159,6 +187,9 @@ export class Session {
   public static restore(state: SessionState): Session {
     if (!Number.isInteger(state.version) || state.version < 1) {
       throw new InvalidSessionStateError('the version is a positive integer');
+    }
+    if ((state.organizationId === null) !== (state.memberId === null)) {
+      throw new InvalidSessionStateError('an organization comes with its membership');
     }
     return new Session(state);
   }
@@ -201,6 +232,49 @@ export class Session {
       return this;
     }
     return new Session({ ...this.state, lastActiveAt: now });
+  }
+
+  /**
+   * Method isActingThrough
+   *
+   * @description
+   * Whether the session acts on its organization through this membership, the active one of its
+   * account in that organization: `false` without an organization, and once the membership it
+   * chose was removed, even if the person joined again.
+   *
+   * @param {string | null} activeMemberId - The active membership of the account in the
+   * organization of the session, or `null` when it has none.
+   * @returns {boolean} Whether the session acts on its organization.
+   */
+  public isActingThrough(activeMemberId: string | null): boolean {
+    return this.state.memberId !== null && this.state.memberId === activeMemberId;
+  }
+
+  /**
+   * Method chooseOrganization
+   *
+   * @description
+   * Makes an organization the current one of the session, through the active membership of its
+   * account there, with the next version. The same membership again returns this session.
+   *
+   * @param {SessionMembership} membership - The membership the session acts through from now.
+   * @param {Date} now - When the organization is chosen.
+   * @returns {Session} The session to store, or this one when nothing changes.
+   * @throws {SessionEndedError} When the session is no longer active.
+   */
+  public chooseOrganization(membership: SessionMembership, now: Date): Session {
+    if (!this.isActiveAt(now)) {
+      throw new SessionEndedError();
+    }
+    if (this.isActingThrough(membership.memberId)) {
+      return this;
+    }
+    return new Session({
+      ...this.state,
+      organizationId: membership.organizationId,
+      memberId: membership.memberId,
+      version: this.state.version + 1,
+    });
   }
 
   /**

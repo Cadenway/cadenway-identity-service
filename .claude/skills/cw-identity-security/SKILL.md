@@ -20,8 +20,15 @@ verified. A value below is changed here first, then in code.
 - **Lifetime**: 30 days after the sign-in at the latest. With "Rester connecté pendant 30 jours" the
   cookie has `Max-Age` up to then; without it the cookie ends with the browser and the session keeps
   the same 30-day bound.
-- **API token**: `cw_pat_`, then 30 base62 characters, then 6 characters of CRC32 check. Stored as a
-  SHA-256 hash, with an expiry, shown once.
+- **API token**: `cw_pat_`, then 30 base62 characters drawn one by one with `crypto.randomInt`
+  (no modulo bias), then 6 base62 characters of the CRC32 (`zlib.crc32`) of those 30, zeros first.
+  Shown once, by its creation; only its SHA-256 hash and its first 11 characters (`prefix`) are
+  stored. The check characters let a malformed or truncated token be refused without a query; they
+  are no security. Bound to its user and to the current organization of the session that created
+  it, with an expiry of 30 days (default), 90 days, 1 year or none; active while neither revoked nor
+  expired and while its user is a member of its organization in the copy of the memberships.
+  `POST /internal/v1/api-tokens/introspect` is checked at every request, without a cache; its last
+  use is recorded at most once a minute.
 - **Internal token**: a JWT signed with `alg: Ed25519`, valid 60 seconds, with `aud` set to the
   called service and a `kid`. It carries the user, the organization, the role, the scopes and the
   trace. Signing and verification live in `@cadenway/nest-common`.

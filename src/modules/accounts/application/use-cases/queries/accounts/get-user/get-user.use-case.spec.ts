@@ -21,6 +21,9 @@ describe('GetUser', () => {
       name: 'Camille Martin',
       email: 'camille.martin@ateliernord.fr',
       language: 'fr',
+      displayName: null,
+      jobTitle: null,
+      timeZone: 'Europe/Paris',
       version: 2,
     });
   });

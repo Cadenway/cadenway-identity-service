@@ -69,6 +69,8 @@ export class DrizzleSessionRepository implements SessionRepository {
         browser: origin.device.browser,
         operatingSystem: origin.device.operatingSystem,
         deviceType: origin.device.deviceType,
+        organizationId: start.organizationId,
+        memberId: start.memberId,
         lastActiveAt: start.lastActiveAt,
         expiresAt: start.expiresAt,
         version: start.version,
@@ -136,6 +138,33 @@ export class DrizzleSessionRepository implements SessionRepository {
       .where(
         and(eq(sessions.id, session.id), lt(sessions.lastActiveAt, session.snapshot.lastActiveAt)),
       );
+  }
+
+  /**
+   * Method chooseOrganization
+   *
+   * @description
+   * Writes the current organization, its membership and the version of a session locked by
+   * `findForUpdate`.
+   *
+   * @param {Session} session - The session after the choice.
+   * @returns {Promise<void>} Resolves once written.
+   * @throws {Error} When no row has the previous version.
+   */
+  public async chooseOrganization(session: Session): Promise<void> {
+    const updated: { id: string }[] = await this.db
+      .update(sessions)
+      .set({
+        organizationId: session.snapshot.organizationId,
+        memberId: session.snapshot.memberId,
+        version: session.snapshot.version,
+        updatedAt: sql`now()`,
+      })
+      .where(and(eq(sessions.id, session.id), eq(sessions.version, session.snapshot.version - 1)))
+      .returning({ id: sessions.id });
+    if (updated.length !== 1) {
+      throw new Error('The session changed since it was loaded.');
+    }
   }
 
   /**

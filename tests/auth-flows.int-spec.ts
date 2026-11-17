@@ -28,7 +28,9 @@ import { OpenSession } from '../src/modules/sessions/public/session/open-session
 // disposable PostgreSQL and NATS started from compose.dev.yaml (see service-wiring.int-spec.ts for
 // why Compose rather than containers of @cadenway/nest-testing). Time-dependent rules (the 30 s
 // throttle, the expiry of a code, the inactivity of a session) are reached by moving the stored
-// instants back as the migrator role, never by waiting. A code is read from its message in
+// instants back, never by waiting: as the migrator role for the tables of the accounts module, in a
+// system transaction of the application role for `sessions`, whose policy is forced since its rows
+// carry the current organization of the session (migration 0003). A code is read from its message in
 // EVENTS_RESTRICTED, as notification-service receives it: once the relay publishes it, the outbox row
 // keeps a redacted envelope only (@cadenway/nest-messaging 0.1.2).
 
@@ -866,6 +868,9 @@ describe('identity-service authentication flows', () => {
         name: 'Camille Martin',
         email: camille.email,
         language: 'fr',
+        displayName: null,
+        jobTitle: null,
+        timeZone: 'Europe/Paris',
         version: 3,
       });
       const verified = await systemQuery<{ payload: Record<string, unknown> }>(
@@ -880,12 +885,12 @@ describe('identity-service authentication flows', () => {
           email: camille.email,
         }),
       ]);
-      const sessions = await migrator.query<Record<string, unknown>>(
+      const sessions = await systemQuery<Record<string, unknown>>(
         `select token_hash, ip_address, user_agent, browser, operating_system, device_type, persistent
            from sessions where id = $1`,
         [body.session.id],
       );
-      expect(sessions.rows).toEqual([
+      expect(sessions).toEqual([
         {
           token_hash: matching(/^[0-9a-f]{64}$/u),
           ip_address: client.ipAddress,
@@ -896,7 +901,7 @@ describe('identity-service authentication flows', () => {
           persistent: false,
         },
       ]);
-      expect(JSON.stringify(sessions.rows)).not.toContain(body.token);
+      expect(JSON.stringify(sessions)).not.toContain(body.token);
     });
 
     it('refuses the code once used, and a verified address awaits no code', async () => {
@@ -1342,7 +1347,7 @@ describe('identity-service authentication flows', () => {
         userId: camilleId,
         organizationId: null,
         role: null,
-        scopes: [],
+        scopes: ['tasks:read', 'tasks:write', 'members:read', 'webhooks:manage'],
         expiresAt: anyString,
       });
     });
@@ -1388,20 +1393,20 @@ describe('identity-service authentication flows', () => {
         session: { id },
       } = session.body as { token: string; session: { id: string } };
 
-      await migrator.query(
+      await systemQuery(
         `update sessions set last_active_at = last_active_at - interval '11 hours' where id = $1`,
         [id],
       );
       expect((await post('/internal/v1/tokens/introspect', { token }, system)).body).toMatchObject({
         active: true,
       });
-      const touched = await migrator.query<{ idle: number }>(
+      const touched = await systemQuery<{ idle: number }>(
         `select extract(epoch from now() - last_active_at)::int as idle from sessions where id = $1`,
         [id],
       );
-      expect(touched.rows[0]?.idle).toBeLessThan(60);
+      expect(touched[0]?.idle).toBeLessThan(60);
 
-      await migrator.query(
+      await systemQuery(
         `update sessions set last_active_at = last_active_at - interval '12 hours 1 second' where id = $1`,
         [id],
       );
@@ -1481,6 +1486,9 @@ describe('identity-service authentication flows', () => {
         name: 'Camille Martin',
         email: camille.email,
         language: 'fr',
+        displayName: null,
+        jobTitle: null,
+        timeZone: 'Europe/Paris',
         version: 3,
       });
     });
@@ -1594,7 +1602,7 @@ describe('identity-service authentication flows', () => {
       );
       const openSession = app.get(OpenSession, { strict: false });
       const email = EmailAddress.of('rollback@ateliernord.fr');
-      const sessionsBefore = await migrator.query<{ count: number }>(
+      const sessionsBefore = await systemQuery<{ count: number }>(
         'select count(*)::int as count from sessions',
       );
       const signedUpBefore = await eventCount('user.signed-up.v1');
@@ -1609,11 +1617,11 @@ describe('identity-service authentication flows', () => {
       ).rejects.toThrow('the work fails after its writes');
 
       const users = await migrator.query('select id from users where email = $1', [email.value]);
-      const sessionsAfter = await migrator.query<{ count: number }>(
+      const sessionsAfter = await systemQuery<{ count: number }>(
         'select count(*)::int as count from sessions',
       );
       expect(users.rows).toEqual([]);
-      expect(sessionsAfter.rows).toEqual(sessionsBefore.rows);
+      expect(sessionsAfter).toEqual(sessionsBefore);
       expect(await eventCount('user.signed-up.v1')).toBe(signedUpBefore);
     });
   });

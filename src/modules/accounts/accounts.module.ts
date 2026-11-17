@@ -14,6 +14,7 @@ import { resendSignUpCodeProvider } from './composition/providers/use-cases/acco
 import { signInWithCodeProvider } from './composition/providers/use-cases/accounts/sign-in-with-code.provider.js';
 import { signInWithPasswordProvider } from './composition/providers/use-cases/accounts/sign-in-with-password.provider.js';
 import { signUpProvider } from './composition/providers/use-cases/accounts/sign-up.provider.js';
+import { updateUserProfileProvider } from './composition/providers/use-cases/accounts/update-user-profile.provider.js';
 import { verifySignUpProvider } from './composition/providers/use-cases/accounts/verify-sign-up.provider.js';
 import { UsersController } from './presentation/http/controllers/accounts/users.controller.js';
 import { AuthController } from './presentation/http/controllers/authentication/auth.controller.js';
@@ -24,7 +25,7 @@ import { AuthController } from './presentation/http/controllers/authentication/a
  * @description
  * Composition root of the accounts module: users, password credentials, one-time codes, the
  * throttle of the code requests and the password lockout, with the seven authentication flows and
- * `GET /internal/v1/users/{userId}` (see its `MODULE.md`). Use cases are plain classes built by the registered factories
+ * `GET` and `PATCH /internal/v1/users/{userId}` (see its `MODULE.md`). Use cases are plain classes built by the registered factories
  * from their ports. The pepper comes from the validated configuration (`CONFIG`); the session of a
  * sign-in is opened by `OpenSession`, the entry point `SessionsModule` exports, behind the
  * `SessionOpener` port.
@@ -47,6 +48,7 @@ import { AuthController } from './presentation/http/controllers/authentication/a
     requestSignInCodeProvider,
     signInWithCodeProvider,
     getUserProvider,
+    updateUserProfileProvider,
   ],
 })
 export class AccountsModule {}

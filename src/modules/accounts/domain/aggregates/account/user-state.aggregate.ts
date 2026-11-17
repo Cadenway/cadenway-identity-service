@@ -53,6 +53,39 @@ export interface UserState {
   readonly language: string;
 
   /**
+   * Property displayName
+   *
+   * @description
+   * "Nom affiché", used for the mentions; `null` until the person chooses one.
+   *
+   * @type {string | null}
+   * @readonly
+   */
+  readonly displayName: string | null;
+
+  /**
+   * Property jobTitle
+   *
+   * @description
+   * "Poste (facultatif)"; `null` when there is none.
+   *
+   * @type {string | null}
+   * @readonly
+   */
+  readonly jobTitle: string | null;
+
+  /**
+   * Property timeZone
+   *
+   * @description
+   * IANA time zone name, `Europe/Paris` until the person chooses another.
+   *
+   * @type {string}
+   * @readonly
+   */
+  readonly timeZone: string;
+
+  /**
    * Property emailVerifiedAt
    *
    * @description

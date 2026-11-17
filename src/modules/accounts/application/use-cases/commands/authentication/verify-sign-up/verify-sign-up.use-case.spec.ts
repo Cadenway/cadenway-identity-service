@@ -197,6 +197,9 @@ describe('VerifySignUp', () => {
       name: 'Camille Martin',
       email: 'camille.martin@ateliernord.fr',
       language: 'fr',
+      displayName: null,
+      jobTitle: null,
+      timeZone: 'Europe/Paris',
       version: 2,
     });
     expect(issued.session.token).toBe('token-1');

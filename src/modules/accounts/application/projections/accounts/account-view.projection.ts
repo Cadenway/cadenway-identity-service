@@ -51,6 +51,39 @@ export interface AccountView {
   readonly language: string;
 
   /**
+   * Property displayName
+   *
+   * @description
+   * "Nom affiché", or `null`.
+   *
+   * @type {string | null}
+   * @readonly
+   */
+  readonly displayName: string | null;
+
+  /**
+   * Property jobTitle
+   *
+   * @description
+   * "Poste (facultatif)", or `null`.
+   *
+   * @type {string | null}
+   * @readonly
+   */
+  readonly jobTitle: string | null;
+
+  /**
+   * Property timeZone
+   *
+   * @description
+   * IANA time zone name.
+   *
+   * @type {string}
+   * @readonly
+   */
+  readonly timeZone: string;
+
+  /**
    * Property version
    *
    * @description

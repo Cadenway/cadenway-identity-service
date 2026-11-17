@@ -4,6 +4,7 @@ import { SessionNotFound } from '../../../../models/session/session-not-found.mo
 import type { OpenSessionOutput } from '../open-session/open-session.output.js';
 import { OpenSession } from '../open-session/open-session.use-case.js';
 import {
+  FakeActiveMemberships,
   FakeDeviceReader,
   FakeSessionTokens,
   FixedClock,
@@ -35,6 +36,7 @@ describe('RevokeSession', () => {
       store,
       new FakeSessionTokens(),
       new FakeDeviceReader(),
+      new FakeActiveMemberships(),
       clock,
     ).execute({
       userId: CAMILLE_ID,

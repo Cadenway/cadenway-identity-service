@@ -62,12 +62,16 @@ const platformTables = [
 ] as const;
 
 /**
- * The tables of the business modules: accounts (users, credentials, codes, throttle, lockout) and
- * sessions. None carries an organization, so none has a policy.
+ * The tables of the business modules: accounts (users, credentials, codes, throttle, lockout),
+ * sessions (sessions and the last organization each account chose), memberships (the copy of the
+ * memberships) and api-tokens. Those with an `organization_id` carry the forced policy of the kit.
  */
 const businessTables = [
+  'api_tokens',
   'code_requests',
+  'memberships',
   'one_time_codes',
+  'organization_choices',
   'password_credentials',
   'sessions',
   'sign_in_attempts',
@@ -78,7 +82,7 @@ const businessTables = [
 const allTables = [...platformTables, ...businessTables].sort();
 
 /** Migrations of `migrations/meta/_journal.json`. */
-const migrationCount = 3;
+const migrationCount = 4;
 
 /**
  * Runs `docker compose` on the throwaway project.
@@ -370,7 +374,15 @@ describe('identity-service wiring', () => {
     );
 
     const withPolicy: readonly string[] = withOrganization.rows.map(({ table_name }) => table_name);
-    expect(withPolicy).toEqual(['event_versions', 'idempotency_keys', 'outbox_events']);
+    expect(withPolicy).toEqual([
+      'api_tokens',
+      'event_versions',
+      'idempotency_keys',
+      'memberships',
+      'organization_choices',
+      'outbox_events',
+      'sessions',
+    ]);
     expect(tables.rows).toEqual(
       allTables.map((relname) => ({
         relname,
@@ -379,9 +391,16 @@ describe('identity-service wiring', () => {
       })),
     );
     expect(policies.rows).toEqual([
+      { tablename: 'api_tokens', policyname: 'api_tokens_organization_isolation' },
       { tablename: 'event_versions', policyname: 'event_versions_organization_isolation' },
       { tablename: 'idempotency_keys', policyname: 'idempotency_keys_organization_isolation' },
+      { tablename: 'memberships', policyname: 'memberships_organization_isolation' },
+      {
+        tablename: 'organization_choices',
+        policyname: 'organization_choices_organization_isolation',
+      },
       { tablename: 'outbox_events', policyname: 'outbox_events_organization_isolation' },
+      { tablename: 'sessions', policyname: 'sessions_organization_isolation' },
     ]);
   });
 
