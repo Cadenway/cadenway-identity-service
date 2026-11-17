@@ -3,6 +3,6 @@ name: cw-perf-review
 description: Review queries, indexes and pagination.
 ---
 
-Use the **cw-identity-performance-reviewer** specialist for this task when delegation is available and authorized; otherwise read `.codex/agents/cw-identity-performance-reviewer.toml` and follow its instructions directly: the user-provided arguments
-
-The agent carries its own procedure and rules; do not restate them.
+Delegate the user's arguments to **cw-identity-performance-reviewer** if delegation is available and authorized.
+Otherwise read and follow `.codex/agents/cw-identity-performance-reviewer.toml` directly with those arguments.
+Do not restate its rules or procedure.

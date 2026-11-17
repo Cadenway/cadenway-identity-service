@@ -7,13 +7,11 @@ paths:
 
 # Presentation layer
 
-- In V2, group HTTP controllers, input and output DTO mapping, validation, errors and guards
-  by resource under `presentation/http/`. Place webhooks in `presentation/http/webhooks/<provider>/`.
-- Use the existing `api/` paths for modules awaiting migration. These rules apply to both layouts.
-
-- A route exists only if it is in the installed `@cadenway/contracts`; its paths, fields, status
-  codes and error codes match the spec exactly.
-- Controllers validate, map to a use case input, call it, map the output. No logic, no repository.
+- Use the [V2 module layout](../skills/cw-hexagonal-module-layout/SKILL.md) for HTTP files and webhooks. Apply these rules to existing `api/` paths until migration.
+- Expose only routes and fields defined in installed `@cadenway/contracts`. Match paths, statuses
+  and error codes.
+- Controllers validate and map inputs and outputs around a use case call. Keep logic and repository
+  access outside controllers.
 - Errors use the common format of `@cadenway/nest-common` with a stable machine `code`.
 - Every route requires the internal token (guard of nest-common) and declares with
   `@InternalAccess` the issuers, actors and organization requirement its contract states.

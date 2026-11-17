@@ -1,70 +1,14 @@
 # cadenway-identity-service: Claude Code instructions
 
-> **Source of truth.** This file is the entry point for Claude Code. The normative rules live in
-> [AGENTS.md](AGENTS.md), imported below: read it, do not paraphrase it from memory.
-
 @AGENTS.md
 
-> **Read on demand, deliberately not `@`-imported**: the module `MODULE.md` files, `../cadenway-api-contracts` (`openapi/internal/identity-service.yaml`, `asyncapi/identity-service.yaml`), the [repositories document](https://claude.ai/artifact/BPinmYxoF3mbK8w9BMB43N). Importing them would
-> cost context in every session. The path-scoped rules in `.claude/rules/` load automatically when
-> you open a matching file and carry the few things that must never be got wrong there.
+Open this checkout as the session root to activate the [Claude Code tooling](.claude/README.md).
+Rules without `paths` load at startup. Scoped rules load when a matching file is read.
+Hooks run for the configured tool events. Follow the repo rules across tools and resolve
+hook refusals without bypassing them.
 
-## TL;DR for every task
-
-1. Read before writing: the touched module's `MODULE.md`, the matching contract in `@cadenway/contracts`, the `cw-identity-domain` skill.
-2. Contract first: a route or an event that is not in the installed `@cadenway/contracts` is not written; the change starts in cadenway-api-contracts.
-3. Layering: follow the V2 layout in `cw-hexagonal-module-layout` for new modules and explicit
-   migrations. Follow the checked-out layout for existing modules awaiting migration. Keep
-   domain and application pure. Write use cases own their transaction; presentation adapters
-   translate and call use cases. Cross-module calls use the consumer's outbound port wired to
-   the producer's documented and exported public provider.
-4. Own data only: this service reads and writes its own database; everything else goes through contracts and events.
-5. A query of tenant data is scoped by organization, from the request context only; accounts, codes and sessions belong to no organization (a session only names its current one) and are named by the verified actor or an explicit key.
-6. Events go through the outbox of `@cadenway/nest-messaging`; handlers are idempotent; shape changes get a new version.
-7. Migrations are expand/contract: the running version keeps working.
-8. Strict TypeScript: explicit types, `readonly`, no `any`, no non-null assertion.
-
-## Boundaries (hard rules)
-
-- No access to another service's database or internal code; cross-service needs use `@cadenway/contracts` routes or events.
-- NATS only through `@cadenway/nest-messaging`; config, logs, errors, health and auth guards through `@cadenway/nest-common`.
-- Routes and event payloads come from the installed `@cadenway/contracts`; never redefine them locally.
-- The service is internal: no Traefik label, no public route. Its HTTP callers are the API gateway and the realtime gateway (ticket redemption).
-- No sibling sources imported, no `file:` or `link:` dependency on a sibling.
-
-## Target quality gate
-
-Use the [minimum checks by change](docs/development.md#minimum-checks-by-change) first.
-Run `/cw-quality` without arguments for the full local gate when applicable. Report unavailable
-checks during bootstrap.
-
-```bash
-pnpm format:check
-pnpm lint
-pnpm typecheck
-pnpm test:architecture
-pnpm test:coverage
-pnpm test:integration                    # PostgreSQL and NATS in Docker
-pnpm build
-docker compose -f compose.dev.yaml config -q
-```
-
-While the repository is being bootstrapped, a missing script is reported as not available, never replaced by an ad-hoc command.
-
-## Tooling: this repository ships its own `.claude/`
-
-Open `cadenway-identity-service/` as the workspace root to activate it. The `cw-identity-*` agents, the `/cw-*`
-commands, the skills and the hooks are described in [.claude/README.md](.claude/README.md). Two things
-the session listing does not tell you:
-
-- **Rules** in `.claude/rules/` load at session start unless they declare `paths`. Scoped rules
-  load when Claude reads a matching file.
-- **Hooks** cover the edit and shell tool events matched in `.claude/settings.json`.
-  `guard.mjs` refuses edits that break a hard rule
-  (generated trees, lockfiles, secrets, sibling checkouts, direct NATS clients, `export *` barrels and sibling-source imports, unpinned third-party actions and `pull_request_target` in workflows), `guard-git.mjs`
-  refuses pushes to `main`, tag pushes, force-pushes, rewrites of pushed commits, hook bypasses and
-  registry publishing, and `format.mjs` formats supported files when its formatter is available.
-  Apply the repository rules across tools. Resolve a refusal without bypassing the hook.
+Use `/cw-quality` with the shared [quality gate](docs/development.md#full-local-quality-gate).
+Read module docs, contracts and task-specific skills as directed by `AGENTS.md`.
 
 The sibling repositories (`../cadenway-api-contracts`, `../cadenway-service-kit`, `../cadenway-ops`, `../cadenway-api-gateway`) are read-only references
 from here; add them to the session (`--add-dir`) when a task needs to read them.

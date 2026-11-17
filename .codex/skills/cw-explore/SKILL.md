@@ -3,6 +3,6 @@ name: cw-explore
 description: Map an existing module before changing it.
 ---
 
-Use the **cw-identity-module-explorer** specialist for this task when delegation is available and authorized; otherwise read `.codex/agents/cw-identity-module-explorer.toml` and follow its instructions directly: the user-provided arguments
-
-The agent carries its own procedure and rules; do not restate them.
+Delegate the user's arguments to **cw-identity-module-explorer** if delegation is available and authorized.
+Otherwise read and follow `.codex/agents/cw-identity-module-explorer.toml` directly with those arguments.
+Do not restate its rules or procedure.

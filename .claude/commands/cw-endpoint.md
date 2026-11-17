@@ -3,8 +3,4 @@ description: "Implement an internal route exactly as the contract defines it."
 argument-hint: "<METHOD /path>"
 ---
 
-Delegate to the **cw-identity-endpoint-builder** subagent: $ARGUMENTS
-
-The agent carries its own procedure and rules; do not restate them.
-
-If the route is not in the installed contract, stop: the change starts in cadenway-api-contracts.
+Delegate to subagent **cw-identity-endpoint-builder** without restating its rules or procedure: $ARGUMENTS

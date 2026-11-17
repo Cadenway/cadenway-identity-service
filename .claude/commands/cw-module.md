@@ -3,12 +3,7 @@ description: "Create a new module skeleton with its MODULE.md."
 argument-hint: "<module name and purpose>"
 ---
 
-Delegate to the **cw-identity-module-builder** subagent: $ARGUMENTS
+Delegate to subagent **cw-identity-module-builder** without restating its rules or procedure: $ARGUMENTS
 
-The agent carries its own procedure and rules; do not restate them.
-
-Require its report to state:
-
-- The module boundary and why.
-- Files created (absolute paths).
-- Checks run and results.
+Require the report to give the module boundary and rationale, absolute paths of created files,
+and checks run with results.

@@ -197,13 +197,14 @@ narrowest check that covers the change first, then widen:
 Report the commands you actually ran and their results; a check you did not run is reported as not
 run.
 
-## Planned full check list
+## Full local quality gate
 
-The following commands match the planned local gate. Run `/cw-quality` in Claude Code or
-`$cw-quality` in Codex without arguments. Verify CI coverage once workflows exist.
+Run the commands below from this repository, in order, and stop at the first failure.
+`pnpm quality` runs the package checks other than the integration suite and Compose validation.
 
 ```bash
 pnpm format:check
+pnpm test:lint
 pnpm lint
 pnpm typecheck
 pnpm test:architecture
@@ -212,6 +213,14 @@ pnpm test:integration                    # PostgreSQL and NATS in Docker
 pnpm build
 docker compose -f compose.dev.yaml config -q
 ```
+
+For a focused check, use `pnpm test "<path>"` for unit specs and
+`pnpm test:integration "<path>"` for integration specs. Run both only when the path covers both
+suites. Pass the path as one argument.
+
+Report each command as passed, failed, not run or unavailable. When a test command runs,
+include the executed count. Report `0 tests executed` as unverified even if the process exits
+successfully. If a required dependency is unavailable, state what it prevented you from checking.
 
 ## Collaboration and release
 
