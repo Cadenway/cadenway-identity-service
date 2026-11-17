@@ -61,7 +61,11 @@ Requirements: Node.js LTS and pnpm (versions in `package.json`), and Docker.
 
    Its NATS has the authorization of the broker of cadenway-ops (`docs/messaging.md` there): a
    connection without a user is refused, and the `identity` user may publish the subjects of the
-   entities this service owns and subscribe to `_INBOX.identity.>` and `rebuild.identity.>` only.
+   entities this service owns, subscribe to `_INBOX.identity.>` and `rebuild.identity.>` only, and
+   use its three durable consumers of the member events only, each by its exact name and filter. A
+   new or renamed handler fails at start-up until its four subjects are granted, here and in
+   `compose/nats/nats-server.conf` of cadenway-ops first (`docs/messaging.md#adding-a-consumer`
+   there).
    `nats-streams` runs the stream script of cadenway-ops with the `admin` user: it creates
    `EVENTS`, `EVENTS_RESTRICTED` and `EVENTS_DLQ` once NATS is healthy, checks them every minute
    and is healthy while they exist. The service never creates a stream and refuses to start
@@ -167,8 +171,12 @@ internal token. `tests/auth-flows.int-spec.ts` starts its own throwaway project 
 route of `openapi/internal/identity-service.yaml` as the API gateway would, for each success and
 error code of the contract; it checks that the outbox publishes the four events, the code on
 `restricted.` only, that a revoked or idle session introspects as inactive, and that no log line
-holds a password, a code, a token or the pepper. Both move to the fixtures of
-`@cadenway/nest-testing` once that package exports them.
+holds a password, a code, a token or the pepper. `tests/membership-redelivery.int-spec.ts` builds
+`AppModule` with the redelivery schedule of the member event consumers shortened to a fraction of a
+second, and checks the delivery limit of each durable consumer, the delay before each redelivery of
+a failing event, the dead letter after the last delivery, and that the broker refuses a consumer it
+does not grant. They move to the fixtures of `@cadenway/nest-testing` once that package exports
+them.
 
 ## Minimum checks by change
 
