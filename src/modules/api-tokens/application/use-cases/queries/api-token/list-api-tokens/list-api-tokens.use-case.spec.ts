@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 
 import {
   FakeApiTokenSecrets,
+  FakeRecentAuthentications,
   FixedClock,
   InMemoryApiTokens,
 } from '../../../commands/api-token/api-tokens.fixture.js';
@@ -13,6 +14,7 @@ import { ListApiTokens } from './list-api-tokens.use-case.js';
 const ATELIER_NORD = '019a5f3c-8d2e-7c4a-9b1f-3e5d7a9c1b2f';
 const OTHER_ORGANIZATION = '019a5f3c-8d2e-7c4a-9b1f-3e5d7a9c1b2e';
 const CAMILLE_ID = '019a5f3c-8d2e-7c4a-9b1f-3e5d7a9c1b30';
+const SESSION_ID = '019a6a2e-4b1c-7d3e-8f5a-2c9b7e1d4a60';
 const LEA_ID = '019a5f3c-8d2e-7c4a-9b1f-3e5d7a9c1b31';
 const DAY = 24 * 60 * 60_000;
 
@@ -38,6 +40,7 @@ describe('ListApiTokens', () => {
     const created = await create.execute({
       actorUserId: userId,
       organizationId,
+      sessionId: SESSION_ID,
       name,
       scopes: ['tasks:read'],
       expiration: '30-days',
@@ -49,7 +52,12 @@ describe('ListApiTokens', () => {
   beforeEach(() => {
     store = new InMemoryApiTokens();
     clock = new FixedClock('2026-11-08T14:02:00Z');
-    create = new CreateApiToken(store, new FakeApiTokenSecrets(), clock);
+    create = new CreateApiToken(
+      store,
+      new FakeApiTokenSecrets(),
+      new FakeRecentAuthentications('recent'),
+      clock,
+    );
     list = new ListApiTokens(store, clock);
   });
 

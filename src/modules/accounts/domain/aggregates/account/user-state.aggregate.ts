@@ -119,5 +119,29 @@ export interface UserState {
    * @readonly
    */
   readonly signUpCount: number;
+
+  /**
+   * Property passwordChangedAt
+   *
+   * @description
+   * When the password was last set: by the sign-up, a change or a reset (`passwordChangedAt` of
+   * `User` in `openapi/internal/identity-service.yaml`).
+   *
+   * @type {Date}
+   * @readonly
+   */
+  readonly passwordChangedAt: Date;
+
+  /**
+   * Property deleteAt
+   *
+   * @description
+   * When the scheduled deletion of the account takes effect (`POST /v1/me/deletion`), `null` while
+   * none is scheduled.
+   *
+   * @type {Date | null}
+   * @readonly
+   */
+  readonly deleteAt: Date | null;
   // #endregion
 }

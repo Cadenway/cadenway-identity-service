@@ -5,6 +5,8 @@ import type { ActiveMembership } from '../../../models/session/active-membership
 import type { DeviceDescription } from '../../../models/session/device-description.model.js';
 import type { IssuedToken } from '../../../models/session/issued-token.model.js';
 import type { SessionOrigin } from '../../../models/session/session-origin.model.js';
+import type { SessionPosition } from '../../../models/session/session-position.model.js';
+import type { SessionRecord } from '../../../models/session/session-record.model.js';
 import type { SessionsStore } from '../../../models/session/sessions-store.model.js';
 import type { DeviceReader } from '../../../ports/outbound/device/session/device-reader.port.js';
 import type { ActiveMemberships } from '../../../ports/outbound/memberships/session/active-memberships.port.js';
@@ -86,6 +88,20 @@ export class InMemorySessions implements SessionsUnitOfWork {
   public activityWrites: number = 0;
 
   /**
+   * Property newDevices
+   *
+   * @description
+   * The `session.opened-on-new-device.v1` appended, with the address they go to.
+   *
+   * @type {{ readonly session: Session; readonly email: string; readonly device: DeviceDescription }[]}
+   */
+  public newDevices: {
+    readonly session: Session;
+    readonly email: string;
+    readonly device: DeviceDescription;
+  }[] = [];
+
+  /**
    * Property choices
    *
    * @description
@@ -122,6 +138,13 @@ export class InMemorySessions implements SessionsUnitOfWork {
       ...this.revoked,
     ];
     const writes: { count: number } = { count: this.activityWrites };
+    const newDevices: {
+      readonly session: Session;
+      readonly email: string;
+      readonly device: DeviceDescription;
+    }[] = [...this.newDevices];
+    const openAt = (state: SessionState, now: Date): boolean =>
+      Session.restore(state).isActiveAt(now);
     const choices: Map<string, string> = new Map<string, string>(this.choices);
     const repository: SessionRepository = {
       insert: (start: SessionStart, origin: SessionOrigin): Promise<Session> => {
@@ -167,10 +190,98 @@ export class InMemorySessions implements SessionsUnitOfWork {
         }
         return Promise.resolve();
       },
+      findById: (id: string): Promise<Session | null> => {
+        const stored: StoredSession | undefined = sessions.get(id);
+        return Promise.resolve(stored === undefined ? null : Session.restore(stored.state));
+      },
+      lockOpenOfUser: (userId: string, now: Date): Promise<Session[]> =>
+        Promise.resolve(
+          [...sessions.values()]
+            .filter(
+              (stored: StoredSession) =>
+                stored.state.userId === userId && openAt(stored.state, now),
+            )
+            .map((stored: StoredSession) => Session.restore(stored.state)),
+        ),
+      countOpen: (userId: string, now: Date): Promise<number> =>
+        Promise.resolve(
+          [...sessions.values()].filter(
+            (stored: StoredSession) => stored.state.userId === userId && openAt(stored.state, now),
+          ).length,
+        ),
+      listOpen: (
+        userId: string,
+        now: Date,
+        after: SessionPosition | null,
+        count: number,
+      ): Promise<SessionRecord[]> =>
+        Promise.resolve(
+          [...sessions.values()]
+            .filter(
+              (stored: StoredSession) =>
+                stored.state.userId === userId && openAt(stored.state, now),
+            )
+            .sort(
+              (left: StoredSession, right: StoredSession) =>
+                right.state.signedInAt.getTime() - left.state.signedInAt.getTime() ||
+                right.state.id.localeCompare(left.state.id),
+            )
+            .filter(
+              (stored: StoredSession) =>
+                after === null ||
+                stored.state.signedInAt.getTime() < after.signedInAt.getTime() ||
+                (stored.state.signedInAt.getTime() === after.signedInAt.getTime() &&
+                  stored.state.id < after.id),
+            )
+            .slice(0, count)
+            .map((stored: StoredSession) => ({
+              session: Session.restore(stored.state),
+              ipAddress: stored.origin.ipAddress,
+              userAgent: stored.origin.userAgent,
+            })),
+        ),
+      findUserAgentsSince: (userId: string, since: Date): Promise<(string | null)[]> =>
+        Promise.resolve([
+          ...new Set(
+            [...sessions.values()]
+              .filter(
+                (stored: StoredSession) =>
+                  stored.state.userId === userId &&
+                  stored.state.lastActiveAt.getTime() > since.getTime(),
+              )
+              .map((stored: StoredSession) => stored.origin.userAgent),
+          ),
+        ]),
+      saveAuthentication: (session: Session): Promise<void> => {
+        const stored: StoredSession | undefined = sessions.get(session.id);
+        if (stored !== undefined) {
+          sessions.set(session.id, {
+            ...stored,
+            state: { ...stored.state, authenticatedAt: session.snapshot.authenticatedAt },
+          });
+        }
+        return Promise.resolve();
+      },
+      eraseOfUser: (userId: string): Promise<void> => {
+        for (const [id, stored] of sessions) {
+          if (stored.state.userId === userId) {
+            sessions.delete(id);
+          }
+        }
+        return Promise.resolve();
+      },
     };
     const events: SessionEvents = {
       sessionRevoked: (session: Session, actorUserId: string): Promise<void> => {
         revoked.push({ session, actorUserId });
+        return Promise.resolve();
+      },
+      sessionOpenedOnNewDevice: (
+        session: Session,
+        client: { readonly device: DeviceDescription; readonly ipAddress: string },
+        notice: { readonly email: string },
+      ): Promise<void> => {
+        newDevices.push({ session, email: notice.email, device: client.device });
         return Promise.resolve();
       },
     };
@@ -181,12 +292,17 @@ export class InMemorySessions implements SessionsUnitOfWork {
         choices.set(userId, organizationId);
         return Promise.resolve();
       },
+      erase: (userId: string): Promise<void> => {
+        choices.delete(userId);
+        return Promise.resolve();
+      },
     };
     const result: TResult = await work({ sessions: repository, organizationChoices, events });
     this.sessions = sessions;
     this.choices = choices;
     this.revoked = revoked;
     this.activityWrites = writes.count;
+    this.newDevices = newDevices;
     return result;
   }
   // #endregion
@@ -321,9 +437,25 @@ export class FakeDeviceReader implements DeviceReader {
    * @returns {DeviceDescription} The description.
    */
   public read(userAgent: string | null): DeviceDescription {
-    return userAgent === null
-      ? { browser: null, operatingSystem: null, deviceType: null }
-      : { browser: 'Firefox 145', operatingSystem: 'Windows 10', deviceType: 'desktop' };
+    if (userAgent === null) {
+      return { type: 'unknown', browser: null, browserVersion: null, os: null, osVersion: null };
+    }
+    if (userAgent.includes('iPhone')) {
+      return {
+        type: 'mobile',
+        browser: 'Safari',
+        browserVersion: '18',
+        os: 'iOS',
+        osVersion: '18.1',
+      };
+    }
+    return {
+      type: 'desktop',
+      browser: 'Firefox',
+      browserVersion: '145',
+      os: 'Windows',
+      osVersion: null,
+    };
   }
   // #endregion
 }

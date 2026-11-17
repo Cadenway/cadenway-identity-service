@@ -1,7 +1,11 @@
+import type { AccountDeletionQueue } from '../../ports/outbound/jobs/accounts/account-deletion-queue.port.js';
 import type { AccountEvents } from '../../ports/outbound/messaging/accounts/account-events.port.js';
 import type { CodeRequestRepository } from '../../ports/outbound/persistence/accounts/code-request-repository.port.js';
+import type { EmailChangeRepository } from '../../ports/outbound/persistence/accounts/email-change-repository.port.js';
 import type { OneTimeCodeRepository } from '../../ports/outbound/persistence/accounts/one-time-code-repository.port.js';
 import type { PasswordCredentialRepository } from '../../ports/outbound/persistence/accounts/password-credential-repository.port.js';
+import type { PasswordResetLinkRepository } from '../../ports/outbound/persistence/accounts/password-reset-link-repository.port.js';
+import type { PasswordResetRequestRepository } from '../../ports/outbound/persistence/accounts/password-reset-request-repository.port.js';
 import type { SignInAttemptRepository } from '../../ports/outbound/persistence/accounts/sign-in-attempt-repository.port.js';
 import type { UserRepository } from '../../ports/outbound/persistence/accounts/user-repository.port.js';
 
@@ -9,7 +13,7 @@ import type { UserRepository } from '../../ports/outbound/persistence/accounts/u
  * Interface AccountsStore
  *
  * @description
- * The repositories and the outbox of one transaction.
+ * The repositories, the outbox and the job queue of one transaction.
  */
 export interface AccountsStore {
   // #region Properties
@@ -50,7 +54,7 @@ export interface AccountsStore {
    * Property codeRequests
    *
    * @description
-   * The throttle of the code requests.
+   * The throttle of the code requests, per address.
    *
    * @type {CodeRequestRepository}
    * @readonly
@@ -61,12 +65,45 @@ export interface AccountsStore {
    * Property signInAttempts
    *
    * @description
-   * The password lockouts.
+   * The lockout of the password sign-in, per address.
    *
    * @type {SignInAttemptRepository}
    * @readonly
    */
   readonly signInAttempts: SignInAttemptRepository;
+
+  /**
+   * Property resetLinks
+   *
+   * @description
+   * The password reset links.
+   *
+   * @type {PasswordResetLinkRepository}
+   * @readonly
+   */
+  readonly resetLinks: PasswordResetLinkRepository;
+
+  /**
+   * Property resetRequests
+   *
+   * @description
+   * The throttle of the password reset requests, per address.
+   *
+   * @type {PasswordResetRequestRepository}
+   * @readonly
+   */
+  readonly resetRequests: PasswordResetRequestRepository;
+
+  /**
+   * Property emailChanges
+   *
+   * @description
+   * The pending changes of address.
+   *
+   * @type {EmailChangeRepository}
+   * @readonly
+   */
+  readonly emailChanges: EmailChangeRepository;
 
   /**
    * Property events
@@ -78,5 +115,16 @@ export interface AccountsStore {
    * @readonly
    */
   readonly events: AccountEvents;
+
+  /**
+   * Property deletionQueue
+   *
+   * @description
+   * The jobs that delete accounts, enqueued in the transaction.
+   *
+   * @type {AccountDeletionQueue}
+   * @readonly
+   */
+  readonly deletionQueue: AccountDeletionQueue;
   // #endregion
 }

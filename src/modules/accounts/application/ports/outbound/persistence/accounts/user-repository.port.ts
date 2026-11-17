@@ -1,6 +1,7 @@
 import type { UserRegistration } from '../../../../../domain/aggregates/account/user-registration.aggregate.js';
 import type { User } from '../../../../../domain/aggregates/account/user.aggregate.js';
 import type { EmailAddress } from '../../../../../domain/value-objects/email/email-address.value-object.js';
+import type { DueAccountDeletion } from '../../../../models/deletion/due-account-deletion.model.js';
 
 /**
  * Interface UserRepository
@@ -69,5 +70,44 @@ export interface UserRepository {
    * @throws {Error} When the stored version moved meanwhile: a defect, since the row is locked.
    */
   update(user: User): Promise<void>;
+
+  /**
+   * Method findDueDeletions
+   *
+   * @description
+   * Claims the accounts whose scheduled deletion is due at `now` and that were not checked since
+   * `checkedBefore`, the oldest first, skipping the rows another transaction holds.
+   *
+   * @param {Date} now - The instant of the sweep.
+   * @param {Date} checkedBefore - Accounts checked since then are left for a later sweep.
+   * @param {number} limit - Accounts claimed at most.
+   * @returns {Promise<DueAccountDeletion[]>} The claimed accounts.
+   */
+  findDueDeletions(now: Date, checkedBefore: Date, limit: number): Promise<DueAccountDeletion[]>;
+
+  /**
+   * Method markDeletionChecked
+   *
+   * @description
+   * Records that a due deletion was checked and kept, so that the sweep claims it again later.
+   *
+   * @param {string} userId - The account.
+   * @param {Date} now - When it was checked.
+   * @returns {Promise<void>} Resolves once written.
+   */
+  markDeletionChecked(userId: string, now: Date): Promise<void>;
+
+  /**
+   * Method delete
+   *
+   * @description
+   * Deletes an account at the version it was locked at; its password, codes, reset links and
+   * pending change of address go with it.
+   *
+   * @param {User} user - The locked account.
+   * @returns {Promise<void>} Resolves once deleted.
+   * @throws {Error} When the stored version moved meanwhile: a defect, since the row is locked.
+   */
+  delete(user: User): Promise<void>;
   // #endregion
 }

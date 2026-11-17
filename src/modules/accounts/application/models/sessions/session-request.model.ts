@@ -1,3 +1,4 @@
+import type { NewDeviceNotice } from './new-device-notice.model.js';
 import type { SessionClient } from './session-client.model.js';
 
 /**
@@ -40,5 +41,18 @@ export interface SessionRequest {
    * @readonly
    */
   readonly client: SessionClient;
+
+  /**
+   * Property newDeviceNotice
+   *
+   * @description
+   * Whom to tell when the session opens on a device the account did not use in the last 90 days
+   * (`session.opened-on-new-device.v1`); `null` for the first session of the account, opened by
+   * the sign-up verification, which tells nobody.
+   *
+   * @type {NewDeviceNotice | null}
+   * @readonly
+   */
+  readonly newDeviceNotice: NewDeviceNotice | null;
   // #endregion
 }

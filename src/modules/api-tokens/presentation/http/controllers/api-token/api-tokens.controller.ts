@@ -8,6 +8,8 @@ import { Body, Controller, Delete, Get, HttpCode, Param, Post, Query, Res } from
 import type { Response } from 'express';
 
 import { ApiTokenNotFound } from '../../../../application/models/api-token/api-token-not-found.model.js';
+import { ReauthenticationRequired } from '../../../../application/models/api-token/reauthentication-required.model.js';
+import { SessionNotFound } from '../../../../application/models/api-token/session-not-found.model.js';
 import type { CreateApiTokenOutput } from '../../../../application/use-cases/commands/api-token/create-api-token/create-api-token.output.js';
 import { CreateApiToken } from '../../../../application/use-cases/commands/api-token/create-api-token/create-api-token.use-case.js';
 import { RevokeApiToken } from '../../../../application/use-cases/commands/api-token/revoke-api-token/revoke-api-token.use-case.js';
@@ -149,11 +151,15 @@ export class ApiTokensController {
    * Method create
    *
    * @description
-   * `POST /internal/v1/api-tokens`: `201` with the token and its secret, once, and `Location`.
+   * `POST /internal/v1/api-tokens`: `201` with the token and its secret, once, and `Location`. The
+   * session of the request needs a recent authentication: without one, or without `sessionId`,
+   * `403 auth.reauthentication-required` with `details.methods`; a session that is not an open
+   * session of the actor, `404 session.not-found`.
    *
-   * @param {CreateApiTokenBody} body - The name, the scopes and the lifetime.
+   * @param {CreateApiTokenBody} body - The session, the name, the scopes and the lifetime.
    * @param {Response} response - The response, for `Location`.
    * @returns {Promise<ApiTokenCreated>} The token and its secret.
+   * @throws {ProblemException} `403 auth.reauthentication-required` or `404 session.not-found`.
    */
   @Post()
   @HttpCode(201)
@@ -162,13 +168,29 @@ export class ApiTokensController {
     @Res({ passthrough: true }) response: Response,
   ): Promise<ApiTokenCreated> {
     const { userId, organizationId } = caller();
-    const created: CreateApiTokenOutput = await this.createApiToken.execute({
-      actorUserId: userId,
-      organizationId,
-      name: body.name,
-      scopes: body.scopes,
-      expiration: body.expiration,
-    });
+    let created: CreateApiTokenOutput;
+    try {
+      created = await this.createApiToken.execute({
+        actorUserId: userId,
+        organizationId,
+        sessionId: body.sessionId ?? null,
+        name: body.name,
+        scopes: body.scopes,
+        expiration: body.expiration,
+      });
+    } catch (error) {
+      if (error instanceof ReauthenticationRequired) {
+        throw new ProblemException({
+          status: 403,
+          code: 'auth.reauthentication-required',
+          details: { methods: ['password'] },
+        });
+      }
+      if (error instanceof SessionNotFound) {
+        throw new ProblemException({ status: 404, code: 'session.not-found' });
+      }
+      throw error;
+    }
     response.setHeader('Location', `/internal/v1/api-tokens/${created.apiToken.id}`);
     return { apiToken: toApiToken(created.apiToken), secret: created.secret };
   }

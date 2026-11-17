@@ -21,6 +21,7 @@ export function toUser(view: AccountView): User {
     displayName: view.displayName,
     jobTitle: view.jobTitle,
     timeZone: view.timeZone,
+    passwordChangedAt: view.passwordChangedAt.toISOString(),
     version: view.version,
   };
 }

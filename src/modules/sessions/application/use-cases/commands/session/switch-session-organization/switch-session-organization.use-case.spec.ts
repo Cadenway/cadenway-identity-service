@@ -42,6 +42,7 @@ describe('SwitchSessionOrganization', () => {
       userId: CAMILLE_ID,
       persistent: false,
       client: { ipAddress: '86.247.12.30', userAgent: null },
+      newDeviceNotice: null,
     });
     memberships.join(CAMILLE_ID, {
       memberId: MEMBER_ID,

@@ -34,5 +34,16 @@ export interface CodeRequestRepository {
    * @returns {Promise<void>} Resolves once written.
    */
   save(email: EmailAddress, throttle: CodeRequestThrottle): Promise<void>;
+
+  /**
+   * Method erase
+   *
+   * @description
+   * Removes the throttle of an address, when its account is deleted.
+   *
+   * @param {EmailAddress} email - The normalized address.
+   * @returns {Promise<void>} Resolves once removed.
+   */
+  erase(email: EmailAddress): Promise<void>;
   // #endregion
 }

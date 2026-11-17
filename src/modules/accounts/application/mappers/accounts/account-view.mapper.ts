@@ -20,5 +20,6 @@ export function toAccountView(user: User): AccountView {
     jobTitle: user.jobTitle,
     timeZone: user.timeZone,
     version: user.version,
+    passwordChangedAt: user.passwordChangedAt,
   };
 }

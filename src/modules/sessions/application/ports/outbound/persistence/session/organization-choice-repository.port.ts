@@ -29,5 +29,16 @@ export interface OrganizationChoiceRepository {
    * @returns {Promise<void>} Resolves once written.
    */
   remember(userId: string, organizationId: string): Promise<void>;
+
+  /**
+   * Method erase
+   *
+   * @description
+   * Deletes the last choice of a deleted account.
+   *
+   * @param {string} userId - The account.
+   * @returns {Promise<void>} Resolves once deleted.
+   */
+  erase(userId: string): Promise<void>;
   // #endregion
 }

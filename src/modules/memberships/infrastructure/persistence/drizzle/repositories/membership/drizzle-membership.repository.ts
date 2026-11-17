@@ -136,5 +136,30 @@ export class DrizzleMembershipRepository implements MembershipRepository {
     const row: MembershipRow | undefined = rows[0];
     return row === undefined ? null : toMembership(row);
   }
+
+  /**
+   * Method findOwnedOrganizationIds
+   *
+   * @description
+   * Reads the organizations an account owns, through the index on `user_id`, in a system
+   * transaction: the one read of the copy by account across organizations.
+   *
+   * @param {string} userId - The account.
+   * @returns {Promise<string[]>} Their ids, in order.
+   */
+  public async findOwnedOrganizationIds(userId: string): Promise<string[]> {
+    const rows: { organizationId: string }[] = await this.db
+      .selectDistinct({ organizationId: memberships.organizationId })
+      .from(memberships)
+      .where(
+        and(
+          eq(memberships.userId, userId),
+          eq(memberships.role, 'owner'),
+          isNull(memberships.removedAt),
+        ),
+      )
+      .orderBy(memberships.organizationId);
+    return rows.map((row: { organizationId: string }) => row.organizationId);
+  }
   // #endregion
 }

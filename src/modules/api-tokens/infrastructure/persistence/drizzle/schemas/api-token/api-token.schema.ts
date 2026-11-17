@@ -46,6 +46,7 @@ export default pgTable(
       table.createdAt,
       table.id,
     ),
+    index('api_tokens_user_id_index').on(table.userId),
     check(
       'api_tokens_scopes_check',
       sql`cardinality(${table.scopes}) >= 1 and ${table.scopes} <@ array['tasks:read', 'tasks:write', 'members:read', 'webhooks:manage']::text[]`,

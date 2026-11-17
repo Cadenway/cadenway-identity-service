@@ -38,5 +38,24 @@ export interface OpenSessionInput {
    * @readonly
    */
   readonly client: { readonly ipAddress: string; readonly userAgent: string | null };
+
+  /**
+   * Property newDeviceNotice
+   *
+   * @description
+   * Whom the "Nouvelle connexion" e-mail addresses when the device was not used by the account in
+   * the last 90 days (`session.opened-on-new-device.v1`): the address, name, language and time zone
+   * of the account. `null` for the session of the sign-up verification, the first of the account,
+   * which tells nobody.
+   *
+   * @type {{ readonly email: string; readonly name: string; readonly language: string; readonly timeZone: string } | null}
+   * @readonly
+   */
+  readonly newDeviceNotice: {
+    readonly email: string;
+    readonly name: string;
+    readonly language: string;
+    readonly timeZone: string;
+  } | null;
   // #endregion
 }

@@ -3,8 +3,11 @@ import type { TransactionScope } from '@cadenway/nest-common/database';
 import type { OutboxWriter } from '@cadenway/nest-messaging/outbox';
 
 import type { IssuedCode } from '../../../../application/models/authentication/issued-code.model.js';
+import type { IssuedResetLink } from '../../../../application/models/password-reset/issued-reset-link.model.js';
+import type { ClientDescription } from '../../../../application/models/sessions/client-description.model.js';
 import type { AccountEvents } from '../../../../application/ports/outbound/messaging/accounts/account-events.port.js';
 import type { User } from '../../../../domain/aggregates/account/user.aggregate.js';
+import type { EmailAddress } from '../../../../domain/value-objects/email/email-address.value-object.js';
 
 /**
  * Constant SERVICE_ACTOR
@@ -169,15 +172,184 @@ export class OutboxAccountEvents implements AccountEvents {
   public async oneTimeCodeIssued(issued: IssuedCode): Promise<void> {
     await this.outbox.append(this.transaction, eventSchemas, 'one-time-code.issued.v1', {
       organizationId: null,
-      actor: SERVICE_ACTOR,
+      actor: issued.requestedByUser ? { type: 'user', id: issued.user.id } : SERVICE_ACTOR,
       version: 1,
       codeId: issued.codeId,
       userId: issued.user.id,
       purpose: issued.purpose,
       code: issued.code,
       expiresAt: issued.expiresAt.toISOString(),
+      recipient: { email: issued.recipient.value, name: issued.user.name },
+      language: issued.user.language,
+    });
+    this.onAppend();
+  }
+
+  /**
+   * Method passwordResetLinkIssued
+   *
+   * @description
+   * Appends the restricted `password-reset-link.issued.v1`, credited to identity-service: anyone
+   * can ask a link for any address. The token is in this payload and in the outbox row until the
+   * relay publishes it on `restricted.`, which then keeps a redacted envelope only.
+   *
+   * @param {IssuedResetLink} issued - The link and its recipient.
+   * @returns {Promise<void>} Resolves once appended.
+   */
+  public async passwordResetLinkIssued(issued: IssuedResetLink): Promise<void> {
+    await this.outbox.append(this.transaction, eventSchemas, 'password-reset-link.issued.v1', {
+      organizationId: null,
+      actor: SERVICE_ACTOR,
+      version: 1,
+      linkId: issued.linkId,
+      userId: issued.user.id,
+      token: issued.token,
+      expiresAt: issued.expiresAt.toISOString(),
+      client: { device: { ...issued.client.device }, ipAddress: issued.client.ipAddress },
       recipient: { email: issued.user.email.value, name: issued.user.name },
       language: issued.user.language,
+      timeZone: issued.user.timeZone,
+    });
+    this.onAppend();
+  }
+
+  /**
+   * Method userPasswordChanged
+   *
+   * @description
+   * Appends `user.password-changed.v1`, credited to the user: the reset link proves the account.
+   *
+   * @param {User} user - The account after the change.
+   * @param {'change' | 'reset'} method - From a session, or with a reset link.
+   * @param {number} closedSessionCount - The sessions the change closed.
+   * @param {ClientDescription} client - The browser the password was set in.
+   * @returns {Promise<void>} Resolves once appended.
+   */
+  public async userPasswordChanged(
+    user: User,
+    method: 'change' | 'reset',
+    closedSessionCount: number,
+    client: ClientDescription,
+  ): Promise<void> {
+    await this.outbox.append(this.transaction, eventSchemas, 'user.password-changed.v1', {
+      organizationId: null,
+      actor: { type: 'user', id: user.id },
+      version: user.version,
+      userId: user.id,
+      method,
+      closedSessionCount,
+      client: { device: { ...client.device }, ipAddress: client.ipAddress },
+      recipient: { email: user.email.value, name: user.name },
+      language: user.language,
+      timeZone: user.timeZone,
+    });
+    this.onAppend();
+  }
+
+  /**
+   * Method userEmailChanged
+   *
+   * @description
+   * Appends `user.email-changed.v1`.
+   *
+   * @param {User} user - The account with its new address.
+   * @param {EmailAddress} previousEmail - The address before the change.
+   * @param {ClientDescription} client - The browser the address was confirmed in.
+   * @returns {Promise<void>} Resolves once appended.
+   */
+  public async userEmailChanged(
+    user: User,
+    previousEmail: EmailAddress,
+    client: ClientDescription,
+  ): Promise<void> {
+    await this.outbox.append(this.transaction, eventSchemas, 'user.email-changed.v1', {
+      organizationId: null,
+      actor: { type: 'user', id: user.id },
+      version: user.version,
+      userId: user.id,
+      email: user.email.value,
+      previousEmail: previousEmail.value,
+      name: user.name,
+      client: { device: { ...client.device }, ipAddress: client.ipAddress },
+      language: user.language,
+      timeZone: user.timeZone,
+    });
+    this.onAppend();
+  }
+
+  /**
+   * Method userDeletionScheduled
+   *
+   * @description
+   * Appends `user.deletion-scheduled.v1`.
+   *
+   * @param {User} user - The account, its deletion scheduled.
+   * @returns {Promise<void>} Resolves once appended.
+   * @throws {Error} When the account has no scheduled deletion: a defect of the caller.
+   */
+  public async userDeletionScheduled(user: User): Promise<void> {
+    if (user.deleteAt === null) {
+      throw new Error('The scheduled deletion of the account is missing.');
+    }
+    await this.outbox.append(this.transaction, eventSchemas, 'user.deletion-scheduled.v1', {
+      organizationId: null,
+      actor: { type: 'user', id: user.id },
+      version: user.version,
+      userId: user.id,
+      deleteAt: user.deleteAt.toISOString(),
+      recipient: { email: user.email.value, name: user.name },
+      language: user.language,
+      timeZone: user.timeZone,
+    });
+    this.onAppend();
+  }
+
+  /**
+   * Method userDeletionCancelled
+   *
+   * @description
+   * Appends `user.deletion-cancelled.v1`.
+   *
+   * @param {User} user - The account, its deletion cancelled.
+   * @param {string} sessionId - The session the sign-in opened.
+   * @param {ClientDescription} client - The browser that signed in.
+   * @returns {Promise<void>} Resolves once appended.
+   */
+  public async userDeletionCancelled(
+    user: User,
+    sessionId: string,
+    client: ClientDescription,
+  ): Promise<void> {
+    await this.outbox.append(this.transaction, eventSchemas, 'user.deletion-cancelled.v1', {
+      organizationId: null,
+      actor: { type: 'user', id: user.id },
+      version: user.version,
+      userId: user.id,
+      sessionId,
+      client: { device: { ...client.device }, ipAddress: client.ipAddress },
+      recipient: { email: user.email.value, name: user.name },
+      language: user.language,
+      timeZone: user.timeZone,
+    });
+    this.onAppend();
+  }
+
+  /**
+   * Method userDeleted
+   *
+   * @description
+   * Appends `user.deleted.v1`, credited to identity-service, with the ids only.
+   *
+   * @param {string} userId - The deleted account.
+   * @param {number} version - The version of the account after the deletion.
+   * @returns {Promise<void>} Resolves once appended.
+   */
+  public async userDeleted(userId: string, version: number): Promise<void> {
+    await this.outbox.append(this.transaction, eventSchemas, 'user.deleted.v1', {
+      organizationId: null,
+      actor: SERVICE_ACTOR,
+      version,
+      userId,
     });
     this.onAppend();
   }

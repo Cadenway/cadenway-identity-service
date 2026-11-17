@@ -33,5 +33,7 @@ export function toUser(row: UserRow): User {
     emailVerifiedAt: row.emailVerifiedAt,
     version: row.version,
     signUpCount: row.signUpCount,
+    passwordChangedAt: row.passwordChangedAt,
+    deleteAt: row.deleteAt,
   });
 }

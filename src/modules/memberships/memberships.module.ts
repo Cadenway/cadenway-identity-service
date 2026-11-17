@@ -6,7 +6,9 @@ import { systemUnitOfWorkProvider } from './composition/providers/adapters/membe
 import { tenantUnitOfWorkProvider } from './composition/providers/adapters/membership/tenant-unit-of-work.provider.js';
 import { applyMembershipChangeProvider } from './composition/providers/use-cases/membership/apply-membership-change.provider.js';
 import { findActiveMembershipProvider } from './composition/providers/use-cases/membership/find-active-membership.provider.js';
+import { findOwnedOrganizationsProvider } from './composition/providers/use-cases/membership/find-owned-organizations.provider.js';
 import { FindActiveMembership } from './public/membership/find-active-membership.js';
+import { FindOwnedOrganizations } from './public/membership/find-owned-organizations.js';
 
 /**
  * Class MembershipsModule
@@ -22,9 +24,10 @@ import { FindActiveMembership } from './public/membership/find-active-membership
     systemUnitOfWorkProvider,
     applyMembershipChangeProvider,
     findActiveMembershipProvider,
+    findOwnedOrganizationsProvider,
     memberEventsRedeliveryProvider,
     memberEventsHandlerProvider,
   ],
-  exports: [FindActiveMembership],
+  exports: [FindActiveMembership, FindOwnedOrganizations],
 })
 export class MembershipsModule {}

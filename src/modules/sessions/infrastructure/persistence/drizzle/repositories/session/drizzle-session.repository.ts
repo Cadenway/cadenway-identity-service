@@ -1,13 +1,51 @@
 import type { TransactionDatabase } from '@cadenway/nest-common/database';
-import { and, eq, lt, sql } from 'drizzle-orm';
+import { and, count, desc, eq, gt, isNull, lt, or, sql } from 'drizzle-orm';
+import type { SQL } from 'drizzle-orm';
 
 import type { SessionOrigin } from '../../../../../application/models/session/session-origin.model.js';
+import type { SessionPosition } from '../../../../../application/models/session/session-position.model.js';
+import type { SessionRecord } from '../../../../../application/models/session/session-record.model.js';
 import type { SessionRepository } from '../../../../../application/ports/outbound/persistence/session/session-repository.port.js';
-import type { Session } from '../../../../../domain/aggregates/session/session.aggregate.js';
+import { Session } from '../../../../../domain/aggregates/session/session.aggregate.js';
 import type { SessionStart } from '../../../../../domain/value-objects/session/session-start.value-object.js';
 import { toSession } from '../../mappers/session/session.mapper.js';
 import type { SessionRow } from '../../mappers/session/session.mapper.js';
 import sessions from '../../schemas/session/session.schema.js';
+
+/**
+ * Function label
+ *
+ * @description
+ * The label a column of the device keeps for the record ("Firefox 132"), or `null`.
+ *
+ * @param {string | null} name - The name.
+ * @param {string | null} version - The version, or `null`.
+ * @returns {string | null} The label.
+ */
+function label(name: string | null, version: string | null): string | null {
+  if (name === null) {
+    return null;
+  }
+  return version === null ? name : `${name} ${version}`;
+}
+
+/**
+ * Function openAt
+ *
+ * @description
+ * The condition of a session open at an instant: neither revoked, expired nor idle for 12 hours,
+ * the same rule as `Session.isActiveAt`.
+ *
+ * @param {Date} now - The instant.
+ * @returns {SQL | undefined} The condition.
+ */
+function openAt(now: Date): SQL | undefined {
+  return and(
+    isNull(sessions.revokedAt),
+    gt(sessions.expiresAt, now),
+    gt(sessions.lastActiveAt, new Date(now.getTime() - Session.INACTIVITY_TIMEOUT_MS)),
+  );
+}
 
 /**
  * Class DrizzleSessionRepository
@@ -66,13 +104,15 @@ export class DrizzleSessionRepository implements SessionRepository {
         persistent: start.persistent,
         ipAddress: origin.ipAddress,
         userAgent: origin.userAgent,
-        browser: origin.device.browser,
-        operatingSystem: origin.device.operatingSystem,
-        deviceType: origin.device.deviceType,
+        browser: label(origin.device.browser, origin.device.browserVersion),
+        operatingSystem: label(origin.device.os, origin.device.osVersion),
+        deviceType: origin.device.type === 'unknown' ? null : origin.device.type,
         organizationId: start.organizationId,
         memberId: start.memberId,
         lastActiveAt: start.lastActiveAt,
         expiresAt: start.expiresAt,
+        signedInAt: start.signedInAt,
+        authenticatedAt: start.authenticatedAt,
         version: start.version,
       })
       .returning();
@@ -190,6 +230,152 @@ export class DrizzleSessionRepository implements SessionRepository {
     if (updated.length !== 1) {
       throw new Error('The session changed since it was loaded.');
     }
+  }
+
+  /**
+   * Method findById
+   *
+   * @description
+   * Reads a session by its id, without a lock.
+   *
+   * @param {string} id - Id of the session.
+   * @returns {Promise<Session | null>} The session, or `null`.
+   */
+  public async findById(id: string): Promise<Session | null> {
+    const rows: SessionRow[] = await this.db
+      .select()
+      .from(sessions)
+      .where(eq(sessions.id, id))
+      .limit(1);
+    const row: SessionRow | undefined = rows[0];
+    return row === undefined ? null : toSession(row);
+  }
+
+  /**
+   * Method lockOpenOfUser
+   *
+   * @description
+   * Reads and locks the open sessions of an account, through the index on `user_id`.
+   *
+   * @param {string} userId - The account.
+   * @param {Date} now - The instant.
+   * @returns {Promise<Session[]>} The open sessions.
+   */
+  public async lockOpenOfUser(userId: string, now: Date): Promise<Session[]> {
+    const rows: SessionRow[] = await this.db
+      .select()
+      .from(sessions)
+      .where(and(eq(sessions.userId, userId), openAt(now)))
+      .orderBy(sessions.id)
+      .for('update');
+    return rows.map(toSession);
+  }
+
+  /**
+   * Method countOpen
+   *
+   * @description
+   * Counts the open sessions of an account, through the index on `user_id`.
+   *
+   * @param {string} userId - The account.
+   * @param {Date} now - The instant.
+   * @returns {Promise<number>} The open sessions.
+   */
+  public async countOpen(userId: string, now: Date): Promise<number> {
+    const rows: { count: number }[] = await this.db
+      .select({ count: count() })
+      .from(sessions)
+      .where(and(eq(sessions.userId, userId), openAt(now)));
+    return rows[0]?.count ?? 0;
+  }
+
+  /**
+   * Method listOpen
+   *
+   * @description
+   * Reads one page of the open sessions of an account through the index on `user_id`, the most
+   * recent sign-in first (`signed_in_at`, then `id`).
+   *
+   * @param {string} userId - The account.
+   * @param {Date} now - The instant.
+   * @param {SessionPosition | null} after - The end of the previous page, or `null`.
+   * @param {number} limit - Sessions to read at most.
+   * @returns {Promise<SessionRecord[]>} The sessions with their browser.
+   */
+  public async listOpen(
+    userId: string,
+    now: Date,
+    after: SessionPosition | null,
+    limit: number,
+  ): Promise<SessionRecord[]> {
+    const conditions: (SQL | undefined)[] = [eq(sessions.userId, userId), openAt(now)];
+    if (after !== null) {
+      conditions.push(
+        or(
+          lt(sessions.signedInAt, after.signedInAt),
+          and(eq(sessions.signedInAt, after.signedInAt), lt(sessions.id, after.id)),
+        ),
+      );
+    }
+    const rows: SessionRow[] = await this.db
+      .select()
+      .from(sessions)
+      .where(and(...conditions))
+      .orderBy(desc(sessions.signedInAt), desc(sessions.id))
+      .limit(limit);
+    return rows.map((row: SessionRow): SessionRecord => ({
+      session: toSession(row),
+      ipAddress: row.ipAddress,
+      userAgent: row.userAgent,
+    }));
+  }
+
+  /**
+   * Method findUserAgentsSince
+   *
+   * @description
+   * Reads the distinct `User-Agent` of the sessions of an account active since an instant, through
+   * the index on `user_id`.
+   *
+   * @param {string} userId - The account.
+   * @param {Date} since - The instant.
+   * @returns {Promise<(string | null)[]>} The headers.
+   */
+  public async findUserAgentsSince(userId: string, since: Date): Promise<(string | null)[]> {
+    const rows: { userAgent: string | null }[] = await this.db
+      .selectDistinct({ userAgent: sessions.userAgent })
+      .from(sessions)
+      .where(and(eq(sessions.userId, userId), gt(sessions.lastActiveAt, since)));
+    return rows.map((row: { userAgent: string | null }) => row.userAgent);
+  }
+
+  /**
+   * Method saveAuthentication
+   *
+   * @description
+   * Writes the recent authentication of a session, or its end. It is not a change of version.
+   *
+   * @param {Session} session - The session after the change.
+   * @returns {Promise<void>} Resolves once written.
+   */
+  public async saveAuthentication(session: Session): Promise<void> {
+    await this.db
+      .update(sessions)
+      .set({ authenticatedAt: session.snapshot.authenticatedAt })
+      .where(eq(sessions.id, session.id));
+  }
+
+  /**
+   * Method eraseOfUser
+   *
+   * @description
+   * Deletes every session of an account, through the index on `user_id`.
+   *
+   * @param {string} userId - The account.
+   * @returns {Promise<void>} Resolves once deleted.
+   */
+  public async eraseOfUser(userId: string): Promise<void> {
+    await this.db.delete(sessions).where(eq(sessions.userId, userId));
   }
   // #endregion
 }

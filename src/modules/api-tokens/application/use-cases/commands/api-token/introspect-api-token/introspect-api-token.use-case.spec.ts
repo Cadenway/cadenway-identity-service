@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import {
   FakeActiveMemberships,
   FakeApiTokenSecrets,
+  FakeRecentAuthentications,
   FixedClock,
   InMemoryApiTokens,
 } from '../api-tokens.fixture.js';
@@ -13,6 +14,7 @@ import { IntrospectApiToken } from './introspect-api-token.use-case.js';
 
 const ATELIER_NORD = '019a5f3c-8d2e-7c4a-9b1f-3e5d7a9c1b2f';
 const CAMILLE_ID = '019a5f3c-8d2e-7c4a-9b1f-3e5d7a9c1b30';
+const SESSION_ID = '019a6a2e-4b1c-7d3e-8f5a-2c9b7e1d4a60';
 const DAY = 24 * 60 * 60_000;
 
 describe('IntrospectApiToken', () => {
@@ -28,9 +30,15 @@ describe('IntrospectApiToken', () => {
     clock = new FixedClock('2026-11-08T14:02:00Z');
     const secrets: FakeApiTokenSecrets = new FakeApiTokenSecrets();
     introspect = new IntrospectApiToken(store, secrets, memberships, clock);
-    created = await new CreateApiToken(store, secrets, clock).execute({
+    created = await new CreateApiToken(
+      store,
+      secrets,
+      new FakeRecentAuthentications('recent'),
+      clock,
+    ).execute({
       actorUserId: CAMILLE_ID,
       organizationId: ATELIER_NORD,
+      sessionId: SESSION_ID,
       name: 'Synchronisation GitLab',
       scopes: ['tasks:read', 'members:read'],
       expiration: '30-days',

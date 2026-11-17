@@ -90,5 +90,28 @@ export interface ApiTokenRepository {
    * @returns {Promise<void>} Resolves once written.
    */
   recordUse(token: ApiToken): Promise<void>;
+
+  /**
+   * Method lockUnrevokedOfUser
+   *
+   * @description
+   * Reads and locks the tokens of a person that are not revoked, in every organization, in a
+   * system transaction.
+   *
+   * @param {string} userId - The person.
+   * @returns {Promise<ApiToken[]>} The tokens.
+   */
+  lockUnrevokedOfUser(userId: string): Promise<ApiToken[]>;
+
+  /**
+   * Method eraseOfUser
+   *
+   * @description
+   * Deletes every token of a deleted account, in every organization, in a system transaction.
+   *
+   * @param {string} userId - The account.
+   * @returns {Promise<void>} Resolves once deleted.
+   */
+  eraseOfUser(userId: string): Promise<void>;
   // #endregion
 }

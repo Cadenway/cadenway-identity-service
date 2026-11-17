@@ -10,7 +10,10 @@ the organizations, the members and the invitations; this module only follows the
 - the sessions module checks the choice of an organization and fills the `organizationId` and the
   `role` of a session introspection;
 - the api-tokens module refuses a token whose user no longer belongs to its organization and fills
-  the `role` of its introspection.
+  the `role` of its introspection;
+- the accounts module refuses to schedule the deletion of an account that owns an organization
+  (`409 account.organization-owner`), and checks again before the deletion
+  ("Ownership" of `openapi/internal/identity-service.yaml`).
 
 It owns no route and emits no event. A module of its own rather than a part of sessions: two
 modules read it, and its tenant transactions (one per event) differ from the system transactions of
@@ -18,15 +21,17 @@ the sessions.
 
 ## Public entry points
 
-| Entry point                                | Consumers            |
-| ------------------------------------------ | -------------------- |
-| `memberships.module`                       | sessions, api-tokens |
-| `public/membership/find-active-membership` | sessions, api-tokens |
+| Entry point                                  | Consumers                      |
+| -------------------------------------------- | ------------------------------ |
+| `memberships.module`                         | sessions, api-tokens, accounts |
+| `public/membership/find-active-membership`   | sessions, api-tokens           |
+| `public/membership/find-owned-organizations` | accounts                       |
 
-`MembershipsModule` exports the `FindActiveMembership` provider. Its signature exposes
-`FindActiveMembershipInput` and `FindActiveMembershipOutput`. It runs in the system transaction of
-its caller and joins it; it must not be called from a tenant transaction (the kit refuses to open a
-system transaction inside a tenant one).
+`MembershipsModule` exports the `FindActiveMembership` and `FindOwnedOrganizations` providers. Their
+signatures expose `FindActiveMembershipInput` and `FindActiveMembershipOutput`, and
+`FindOwnedOrganizationsInput` and `FindOwnedOrganizationsOutput`. Both run in the system transaction
+of their caller and join it; they must not be called from a tenant transaction (the kit refuses to
+open a system transaction inside a tenant one).
 
 ## Owned tables
 
@@ -37,7 +42,8 @@ system transaction inside a tenant one).
 Created by `migrations/0003_organization_context_and_api_tokens.sql`, which forces its policy by
 hand. `id` is the id organization-service gave the membership, not one PostgreSQL generates: a
 projection keeps the id of its owner. `user_id` names an account of the accounts module without a
-foreign key. Index `(organization_id, user_id)`.
+foreign key. Index `(organization_id, user_id)`, and `(user_id)` for the organizations an account
+owns (migration 0004).
 
 ## API
 
@@ -144,6 +150,8 @@ then, within 7 days of its outbox retention, organization-service publishes the 
 - `FindActiveMembership` runs in the system transaction of its caller (`SystemMembershipsUnitOfWork`
   joins it): the choice of an organization, the opening and the introspection of a session, the
   introspection of an API token.
+- `FindOwnedOrganizations` runs in the system transaction of its caller and joins it: the scheduling
+  of the deletion of an account and its completion by its durable job.
 
 ## Decisions
 
@@ -153,6 +161,12 @@ then, within 7 days of its outbox retention, organization-service publishes the 
   The exception is bounded to reading this table, each read naming the organization and the
   account; every write goes through the tenant runner of the organization of its event.
 - No outbox: the module emits nothing.
+- `FindOwnedOrganizations` reads the copy by account across organizations, the one such read: the
+  owner role of a membership that is not removed, which `member.joined.v1` gives the creator of an
+  organization. It never calls organization-service. An organization created in the seconds before
+  a scheduling may not be in the copy yet; the completion of the deletion checks again. When the
+  account is deleted, the copy keeps its memberships (ids and role, no personal data) until the
+  `member.removed.v1` organization-service emits for them reaches it.
 - `tests/organization-context.int-spec.ts` proves, on real PostgreSQL and NATS, that member events
   published to the stream reach the copy, those published before the service started included,
   in any order of versions, with a removal after a role change kept, and a redelivered event

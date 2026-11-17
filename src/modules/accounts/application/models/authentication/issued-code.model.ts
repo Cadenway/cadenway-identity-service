@@ -1,4 +1,5 @@
 import type { User } from '../../../domain/aggregates/account/user.aggregate.js';
+import type { EmailAddress } from '../../../domain/value-objects/email/email-address.value-object.js';
 import type { OneTimeCodePurpose } from '../../../domain/value-objects/one-time-code-purpose/one-time-code-purpose.value-object.js';
 
 /**
@@ -63,5 +64,29 @@ export interface IssuedCode {
    * @readonly
    */
   readonly expiresAt: Date;
+
+  /**
+   * Property recipient
+   *
+   * @description
+   * Address the email goes to: the address of the account, or the new address of a change of
+   * address (`email-change`).
+   *
+   * @type {EmailAddress}
+   * @readonly
+   */
+  readonly recipient: EmailAddress;
+
+  /**
+   * Property requestedByUser
+   *
+   * @description
+   * Whether a signed-in person asked for the code (`email-change`): the event then credits the
+   * user, otherwise identity-service (`one-time-code.issued.v1`).
+   *
+   * @type {boolean}
+   * @readonly
+   */
+  readonly requestedByUser: boolean;
   // #endregion
 }

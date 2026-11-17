@@ -184,5 +184,29 @@ export class DrizzleOneTimeCodeRepository implements OneTimeCodeRepository {
       .limit(1);
     return rows.length > 0;
   }
+
+  /**
+   * Method replaceAllCurrent
+   *
+   * @description
+   * Marks every current code of the account replaced, whatever its purpose, through the index on
+   * the account and the purpose.
+   *
+   * @param {string} userId - Id of the account.
+   * @param {Date} now - When they were replaced.
+   * @returns {Promise<void>} Resolves once written.
+   */
+  public async replaceAllCurrent(userId: string, now: Date): Promise<void> {
+    await this.db
+      .update(oneTimeCodes)
+      .set({ replacedAt: now, updatedAt: sql`now()` })
+      .where(
+        and(
+          eq(oneTimeCodes.userId, userId),
+          isNull(oneTimeCodes.consumedAt),
+          isNull(oneTimeCodes.replacedAt),
+        ),
+      );
+  }
   // #endregion
 }

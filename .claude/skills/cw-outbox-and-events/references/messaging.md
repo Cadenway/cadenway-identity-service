@@ -89,8 +89,8 @@ An identity event that carries a single-use code or link for a security e-mail i
 event: listed in `restrictedEvents` of `MessagingModule`, it is published on `restricted.<name>`
 into `EVENTS_RESTRICTED`, which notification-service alone reads. `src/app.module.ts` passes
 `RESTRICTED_EVENT_NAMES` of `@cadenway/contracts/events/identity-service` (`one-time-code.issued.v1`
-today), never a list of its own; listing an event later does not move the outbox rows already
-written. The outbox row of a restricted event holds its payload, the code included, until the relay
+and `password-reset-link.issued.v1` today), never a list of its own; listing an event later does not
+move the outbox rows already written. The outbox row of a restricted event holds its payload, the code included, until the relay
 publishes it: since `@cadenway/nest-messaging` 0.1.2 the statement that marks the row sent replaces
 the payload with a redacted envelope (`id`, `occurredAt`, `organizationId`, `actor`, `version`,
 `"$redacted": true`). A redacted row is never requeued: a code lost with NATS is replaced by a new

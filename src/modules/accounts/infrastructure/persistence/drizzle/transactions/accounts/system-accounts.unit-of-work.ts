@@ -1,15 +1,20 @@
 import type { SystemTransactionRunner, TransactionScope } from '@cadenway/nest-common/database';
 import type { OutboxRelay, OutboxWriter } from '@cadenway/nest-messaging/outbox';
+import type { JobProducer } from '@cadenway/nest-jobs/runtime';
 
 import type { AccountsStore } from '../../../../../application/models/transactions/accounts-store.model.js';
 import type { UnitOfWorkOptions } from '../../../../../application/models/transactions/unit-of-work-options.model.js';
 import type { AccountsUnitOfWork } from '../../../../../application/ports/outbound/transactions/accounts/accounts-unit-of-work.port.js';
+import { JobsAccountDeletionQueue } from '../../../../jobs/pg-boss/accounts/jobs-account-deletion-queue.adapter.js';
 import { OutboxAccountEvents } from '../../../../messaging/outbox/accounts/outbox-account-events.adapter.js';
 import { DrizzlePasswordCredentialRepository } from '../../repositories/accounts/drizzle-password-credential.repository.js';
 import { DrizzleSignInAttemptRepository } from '../../repositories/accounts/drizzle-sign-in-attempt.repository.js';
 import { DrizzleUserRepository } from '../../repositories/accounts/drizzle-user.repository.js';
 import { DrizzleCodeRequestRepository } from '../../repositories/authentication/drizzle-code-request.repository.js';
 import { DrizzleOneTimeCodeRepository } from '../../repositories/authentication/drizzle-one-time-code.repository.js';
+import { DrizzleEmailChangeRepository } from '../../repositories/email-change/drizzle-email-change.repository.js';
+import { DrizzlePasswordResetLinkRepository } from '../../repositories/password-reset/drizzle-password-reset-link.repository.js';
+import { DrizzlePasswordResetRequestRepository } from '../../repositories/password-reset/drizzle-password-reset-request.repository.js';
 
 /**
  * Class SystemAccountsUnitOfWork
@@ -22,6 +27,9 @@ import { DrizzleOneTimeCodeRepository } from '../../repositories/authentication/
  * `organizationId: null`, which the policy of `outbox_events` accepts in a system transaction only.
  * The tables of the module carry no organization and no policy, so the system access widens
  * nothing for them: every query names its account, address or code explicitly.
+ *
+ * The jobs that delete accounts are enqueued through the connection of the same transaction, so a
+ * job exists if and only if the transaction commits.
  *
  * Once a run that appended events resolves, the relay is woken so they leave now instead of at its
  * next poll. A run joined to an outer transaction resolves before that one commits: the pass it
@@ -61,6 +69,17 @@ export class SystemAccountsUnitOfWork implements AccountsUnitOfWork {
    * @readonly
    */
   private readonly relay: OutboxRelay;
+
+  /**
+   * Property jobs
+   *
+   * @description
+   * The producer of `@cadenway/nest-jobs`, which enqueues through the transaction.
+   *
+   * @type {JobProducer}
+   * @readonly
+   */
+  private readonly jobs: JobProducer;
   // #endregion
 
   // #region Constructor
@@ -68,17 +87,24 @@ export class SystemAccountsUnitOfWork implements AccountsUnitOfWork {
    * Constructor
    *
    * @description
-   * Takes the runner and the outbox of the kit.
+   * Takes the runner, the outbox and the job producer of the kit.
    *
    * @param {SystemTransactionRunner} runner - The system transaction runner.
    * @param {OutboxWriter} outbox - The outbox writer.
    * @param {OutboxRelay} relay - The outbox relay.
+   * @param {JobProducer} jobs - The job producer.
    * @constructor
    */
-  public constructor(runner: SystemTransactionRunner, outbox: OutboxWriter, relay: OutboxRelay) {
+  public constructor(
+    runner: SystemTransactionRunner,
+    outbox: OutboxWriter,
+    relay: OutboxRelay,
+    jobs: JobProducer,
+  ) {
     this.runner = runner;
     this.outbox = outbox;
     this.relay = relay;
+    this.jobs = jobs;
   }
   // #endregion
 
@@ -106,6 +132,10 @@ export class SystemAccountsUnitOfWork implements AccountsUnitOfWork {
           codes: new DrizzleOneTimeCodeRepository(transaction.db),
           codeRequests: new DrizzleCodeRequestRepository(transaction.db),
           signInAttempts: new DrizzleSignInAttemptRepository(transaction.db),
+          resetLinks: new DrizzlePasswordResetLinkRepository(transaction.db),
+          resetRequests: new DrizzlePasswordResetRequestRepository(transaction.db),
+          emailChanges: new DrizzleEmailChangeRepository(transaction.db),
+          deletionQueue: new JobsAccountDeletionQueue(transaction, this.jobs),
           events: new OutboxAccountEvents(transaction, this.outbox, (): void => {
             appends.count += 1;
           }),

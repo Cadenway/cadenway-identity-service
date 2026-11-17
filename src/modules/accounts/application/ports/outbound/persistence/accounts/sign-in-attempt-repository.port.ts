@@ -33,5 +33,16 @@ export interface SignInAttemptRepository {
    * @returns {Promise<void>} Resolves once written.
    */
   save(email: EmailAddress, lockout: PasswordLockout): Promise<void>;
+
+  /**
+   * Method erase
+   *
+   * @description
+   * Removes the lockout of an address, when its account is deleted.
+   *
+   * @param {EmailAddress} email - The normalized address.
+   * @returns {Promise<void>} Resolves once removed.
+   */
+  erase(email: EmailAddress): Promise<void>;
   // #endregion
 }

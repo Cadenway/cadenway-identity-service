@@ -58,5 +58,16 @@ export interface MembershipRepository {
    * @returns {Promise<Membership | null>} The membership, or `null` when the account is not a member.
    */
   findActive(organizationId: string, userId: string): Promise<Membership | null>;
+
+  /**
+   * Method findOwnedOrganizationIds
+   *
+   * @description
+   * The organizations whose active membership of an account has the role `owner`.
+   *
+   * @param {string} userId - The account.
+   * @returns {Promise<string[]>} Their ids.
+   */
+  findOwnedOrganizationIds(userId: string): Promise<string[]>;
   // #endregion
 }

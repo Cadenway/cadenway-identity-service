@@ -30,5 +30,16 @@ export interface SessionIssuedView {
    * @readonly
    */
   readonly user: AccountView;
+
+  /**
+   * Property deletionCancelled
+   *
+   * @description
+   * Whether this sign-in cancelled the scheduled deletion of the account.
+   *
+   * @type {boolean}
+   * @readonly
+   */
+  readonly deletionCancelled: boolean;
   // #endregion
 }

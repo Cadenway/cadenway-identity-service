@@ -93,5 +93,16 @@ export interface AccountView {
    * @readonly
    */
   readonly version: number;
+
+  /**
+   * Property passwordChangedAt
+   *
+   * @description
+   * When the password was last set ("Modifié le 12 août 2026.").
+   *
+   * @type {Date}
+   * @readonly
+   */
+  readonly passwordChangedAt: Date;
   // #endregion
 }

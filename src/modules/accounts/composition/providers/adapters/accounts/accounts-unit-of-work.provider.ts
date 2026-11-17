@@ -1,4 +1,5 @@
 import { SystemTransactionRunner } from '@cadenway/nest-common/database';
+import { JobProducer } from '@cadenway/nest-jobs/runtime';
 import { OutboxRelay, OutboxWriter } from '@cadenway/nest-messaging/outbox';
 import type { FactoryProvider } from '@nestjs/common';
 
@@ -16,10 +17,11 @@ import { UNIT_OF_WORK } from '../../../tokens/accounts/accounts-unit-of-work.tok
  */
 export const accountsUnitOfWorkProvider: FactoryProvider<AccountsUnitOfWork> = {
   provide: UNIT_OF_WORK,
-  inject: [SystemTransactionRunner, OutboxWriter, OutboxRelay],
+  inject: [SystemTransactionRunner, OutboxWriter, OutboxRelay, JobProducer],
   useFactory: (
     runner: SystemTransactionRunner,
     outbox: OutboxWriter,
     relay: OutboxRelay,
-  ): AccountsUnitOfWork => new SystemAccountsUnitOfWork(runner, outbox, relay),
+    jobs: JobProducer,
+  ): AccountsUnitOfWork => new SystemAccountsUnitOfWork(runner, outbox, relay, jobs),
 };

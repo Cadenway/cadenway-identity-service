@@ -7,6 +7,7 @@ import type { IssuedApiToken } from '../../../models/api-token/issued-api-token.
 import type { ActiveMemberships } from '../../../ports/outbound/memberships/api-token/active-memberships.port.js';
 import type { ApiTokenRepository } from '../../../ports/outbound/persistence/api-token/api-token-repository.port.js';
 import type { ApiTokenSecrets } from '../../../ports/outbound/security/api-token/api-token-secrets.port.js';
+import type { RecentAuthentications } from '../../../ports/outbound/sessions/api-token/recent-authentications.port.js';
 import type { Clock } from '../../../ports/outbound/time/api-token/clock.port.js';
 import type { ApiTokensUnitOfWork } from '../../../ports/outbound/transactions/api-token/api-tokens-unit-of-work.port.js';
 
@@ -156,6 +157,23 @@ export class InMemoryApiTokens implements ApiTokensUnitOfWork {
       recordUse: (token: ApiToken): Promise<void> => {
         write(token);
         writes.count += 1;
+        return Promise.resolve();
+      },
+      lockUnrevokedOfUser: (userId: string): Promise<ApiToken[]> =>
+        Promise.resolve(
+          [...rows.values()]
+            .filter(
+              (stored: StoredApiToken) =>
+                stored.state.userId === userId && stored.state.revokedAt === null,
+            )
+            .map((stored: StoredApiToken) => ApiToken.restore(stored.state)),
+        ),
+      eraseOfUser: (userId: string): Promise<void> => {
+        for (const [id, stored] of rows) {
+          if (stored.state.userId === userId) {
+            rows.delete(id);
+          }
+        }
         return Promise.resolve();
       },
     };
@@ -322,6 +340,93 @@ export class FixedClock implements Clock {
    */
   public advance(milliseconds: number): void {
     this.instant += milliseconds;
+  }
+  // #endregion
+}
+
+/**
+ * Class FakeRecentAuthentications
+ *
+ * @description
+ * The status of the sessions of the requests, set by the spec, or a fallback for the others.
+ */
+export class FakeRecentAuthentications implements RecentAuthentications {
+  // #region Properties
+  /**
+   * Property statuses
+   *
+   * @description
+   * Status by person and session (`<userId>/<sessionId>`).
+   *
+   * @type {Map<string, 'recent' | 'stale'>}
+   */
+  public readonly statuses = new Map<string, 'recent' | 'stale'>();
+
+  /**
+   * Property checks
+   *
+   * @description
+   * How many checks ran.
+   *
+   * @type {number}
+   */
+  public checks: number = 0;
+
+  /**
+   * Property fallback
+   *
+   * @description
+   * The status of a session the spec did not set.
+   *
+   * @type {'recent' | 'stale' | 'not-found'}
+   * @readonly
+   */
+  private readonly fallback: 'recent' | 'stale' | 'not-found';
+  // #endregion
+
+  // #region Constructor
+  /**
+   * Constructor
+   *
+   * @description
+   * Takes the status of the sessions the spec does not set.
+   *
+   * @param {'recent' | 'stale' | 'not-found'} fallback - That status, `not-found` by default.
+   * @constructor
+   */
+  public constructor(fallback: 'recent' | 'stale' | 'not-found' = 'not-found') {
+    this.fallback = fallback;
+  }
+  // #endregion
+
+  // #region Methods
+  /**
+   * Method set
+   *
+   * @description
+   * Sets the status of a session.
+   *
+   * @param {string} userId - The person.
+   * @param {string} sessionId - The session.
+   * @param {'recent' | 'stale'} status - Its status.
+   */
+  public set(userId: string, sessionId: string, status: 'recent' | 'stale'): void {
+    this.statuses.set(`${userId}/${sessionId}`, status);
+  }
+
+  /**
+   * Method check
+   *
+   * @description
+   * The status of a session.
+   *
+   * @param {string} userId - The person.
+   * @param {string} sessionId - The session.
+   * @returns {Promise<'recent' | 'stale' | 'not-found'>} Its status.
+   */
+  public check(userId: string, sessionId: string): Promise<'recent' | 'stale' | 'not-found'> {
+    this.checks += 1;
+    return Promise.resolve(this.statuses.get(`${userId}/${sessionId}`) ?? this.fallback);
   }
   // #endregion
 }

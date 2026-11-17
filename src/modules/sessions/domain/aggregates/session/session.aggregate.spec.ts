@@ -175,3 +175,52 @@ describe('Session', () => {
     ).toThrow(InvalidSessionStateError);
   });
 });
+
+/**
+ * Constant MINUTE
+ *
+ * @description
+ * One minute, in milliseconds.
+ *
+ * @type {number}
+ */
+const MINUTE: number = 60_000;
+
+describe('Session recent authentication', () => {
+  it('starts recently authenticated by its sign-in, which it records', () => {
+    const start: SessionStart = Session.start('user', false, SIGNED_IN_AT);
+
+    expect(start.signedInAt).toEqual(SIGNED_IN_AT);
+    expect(start.authenticatedAt).toEqual(SIGNED_IN_AT);
+  });
+
+  it('counts a proof as recent for 10 minutes', () => {
+    const session: Session = opened(false);
+
+    expect(session.isRecentlyAuthenticatedAt(at(10 * MINUTE - 1))).toBe(true);
+    expect(session.isRecentlyAuthenticatedAt(at(10 * MINUTE))).toBe(false);
+  });
+
+  it('opens the window again from a new proof, without a new version', () => {
+    const session: Session = opened(false);
+    const confirmed: Session = session.authenticate(at(3 * HOUR));
+
+    expect(confirmed.snapshot.authenticatedAt).toEqual(at(3 * HOUR));
+    expect(confirmed.snapshot.version).toBe(session.snapshot.version);
+    expect(confirmed.isRecentlyAuthenticatedAt(at(3 * HOUR + 9 * MINUTE))).toBe(true);
+  });
+
+  it('refuses a proof in a session that ended', () => {
+    expect(() => opened(false).authenticate(at(12 * HOUR))).toThrow(SessionEndedError);
+    const revoked: Session = opened(false).revoke(at(MINUTE));
+    expect(() => revoked.authenticate(at(2 * MINUTE))).toThrow(SessionEndedError);
+  });
+
+  it('ends the recent authentication, and returns a session without one as it is', () => {
+    const ended: Session = opened(false).endRecentAuthentication();
+
+    expect(ended.snapshot.authenticatedAt).toBeNull();
+    expect(ended.isRecentlyAuthenticatedAt(at(MINUTE))).toBe(false);
+    expect(ended.endRecentAuthentication()).toBe(ended);
+  });
+});

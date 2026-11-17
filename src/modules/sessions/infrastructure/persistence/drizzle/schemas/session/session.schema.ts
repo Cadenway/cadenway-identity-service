@@ -21,7 +21,14 @@ import {
  * acts through (a `memberId` of the memberships module), both `null` without one (migration
  * 0003). The column carries the policy of the kit, enabled and forced, as every `organization_id`
  * does; every query of the module runs in a system transaction and names its session by id or token
- * hash.
+ * hash, but the check of the recent authentication of a request that carries an organization, which
+ * joins its tenant transaction. `signed_in_at` is the sign-in that opened the session, set by the
+ * service to the millisecond so the cursor of the list is exact, and `authenticated_at` the last time
+ * its person proved who they are (migration 0004, which backfills `signed_in_at` from `created_at`
+ * for the sessions not revoked or expired and leaves `authenticated_at` empty, so a session opened
+ * before asks for the password again).
+ * `browser`, `operating_system` and `device_type` are written for the record only: the list reads the
+ * device from `user_agent`.
  */
 export default pgTable(
   'sessions',
@@ -42,6 +49,10 @@ export default pgTable(
     lastActiveAt: timestamp('last_active_at', { withTimezone: true }).notNull(),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
     revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    signedInAt: timestamp('signed_in_at', { withTimezone: true })
+      .notNull()
+      .default(sql`date_trunc('milliseconds', now())`),
+    authenticatedAt: timestamp('authenticated_at', { withTimezone: true }),
     version: integer('version').notNull().default(1),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),

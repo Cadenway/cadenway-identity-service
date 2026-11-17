@@ -1,8 +1,10 @@
 import { EmailAlreadyVerifiedError } from '../../errors/accounts/email-already-verified.error.js';
+import { EmailUnchangedError } from '../../errors/accounts/email-unchanged.error.js';
 import { InvalidProfileError } from '../../errors/accounts/invalid-profile.error.js';
 import { InvalidUserNameError } from '../../errors/accounts/invalid-user-name.error.js';
 import { InvalidUserStateError } from '../../errors/accounts/invalid-user-state.error.js';
 import { SignUpReplacedError } from '../../errors/accounts/sign-up-replaced.error.js';
+import { DeletionAlreadyScheduledError } from '../../errors/deletion/deletion-already-scheduled.error.js';
 import type { EmailAddress } from '../../value-objects/email/email-address.value-object.js';
 import type { SignUpPasswordCheck } from '../../value-objects/password/sign-up-password-check.value-object.js';
 import type { ProfilePatch } from '../../value-objects/profile/profile-patch.value-object.js';
@@ -35,7 +37,14 @@ import type { UserState } from './user-state.aggregate.js';
  *   a merge patch: a member left out is kept, `null` clears the display name or the job title; the
  *   display name is trimmed, 1 to 60 characters, the job title 1 to 120; the time zone is an IANA
  *   name, `Europe/Paris` until the person chooses another; a patch that changes something takes
- *   the next version (`user.profile-updated.v1`), one that changes nothing keeps it.
+ *   the next version (`user.profile-updated.v1`), one that changes nothing keeps it;
+ * - a password set by the sign-up, a change or a reset records when (`passwordChangedAt`); a change
+ *   or a reset takes the next version (`user.password-changed.v1`);
+ * - a change of address moves to a new address, never the current one (`auth.email-unchanged`),
+ *   verified by its code, with the next version (`user.email-changed.v1`);
+ * - the deletion of the account is scheduled 30 days ahead (`POST /v1/me/deletion`), with the next
+ *   version (`user.deletion-scheduled.v1`); a sign-in cancels it, with the next version
+ *   (`user.deletion-cancelled.v1`), until the account is deleted.
  */
 export class User {
   // #region Properties
@@ -115,6 +124,18 @@ export class User {
    * @readonly
    */
   public static readonly DEFAULT_TIME_ZONE: string = 'Europe/Paris';
+
+  /**
+   * Property DELETION_DELAY_MS
+   *
+   * @description
+   * Delay between the scheduling of a deletion and the deletion: 30 days (decision 9 of P2c, "La
+   * suppression de votre compte est programmée" of the mockup).
+   *
+   * @type {number}
+   * @readonly
+   */
+  public static readonly DELETION_DELAY_MS: number = 30 * 24 * 60 * 60_000;
 
   /**
    * Property state
@@ -269,6 +290,32 @@ export class User {
   public get isVerified(): boolean {
     return this.state.emailVerifiedAt !== null;
   }
+
+  /**
+   * Property passwordChangedAt
+   *
+   * @description
+   * When the password was last set.
+   *
+   * @type {Date}
+   * @readonly
+   */
+  public get passwordChangedAt(): Date {
+    return this.state.passwordChangedAt;
+  }
+
+  /**
+   * Property deleteAt
+   *
+   * @description
+   * When the scheduled deletion takes effect, or `null`.
+   *
+   * @type {Date | null}
+   * @readonly
+   */
+  public get deleteAt(): Date | null {
+    return this.state.deleteAt;
+  }
   // #endregion
 
   // #region Constructor
@@ -292,15 +339,17 @@ export class User {
    *
    * @description
    * The account a first sign-up creates, not verified, at version 1, signed up once, with no
-   * display name nor job title, in the default time zone.
+   * display name nor job title, in the default time zone, its password set now.
    *
    * @param {EmailAddress} email - The address signed up.
    * @param {string} name - The full name as typed.
+   * @param {Date} now - When the sign-up sets the password.
    * @returns {UserRegistration} The account to store.
    * @throws {InvalidUserNameError} When the trimmed name is empty or too long.
    */
-  public static register(email: EmailAddress, name: string): UserRegistration {
+  public static register(email: EmailAddress, name: string, now: Date): UserRegistration {
     return {
+      passwordChangedAt: now,
       email,
       name: User.normalizeName(name),
       language: User.DEFAULT_LANGUAGE,
@@ -335,6 +384,9 @@ export class User {
     }
     if (state.timeZone.length === 0) {
       throw new InvalidUserStateError('the time zone is set');
+    }
+    if (state.deleteAt !== null && state.emailVerifiedAt === null) {
+      throw new InvalidUserStateError('only a verified account has a scheduled deletion');
     }
     return new User(state);
   }
@@ -464,17 +516,19 @@ export class User {
    * sign-up.
    *
    * @param {string} name - The full name of the new sign-up.
+   * @param {Date} now - When the new sign-up sets the password.
    * @returns {User} The account after the sign-up.
    * @throws {EmailAlreadyVerifiedError} When the address is verified: the sign-up is refused.
    * @throws {InvalidUserNameError} When the trimmed name is empty or too long.
    */
-  public replaceRegistration(name: string): User {
+  public replaceRegistration(name: string, now: Date): User {
     if (this.isVerified) {
       throw new EmailAlreadyVerifiedError();
     }
     return new User({
       ...this.state,
       name: User.normalizeName(name),
+      passwordChangedAt: now,
       version: this.state.version + 1,
       signUpCount: this.state.signUpCount + 1,
     });
@@ -517,6 +571,109 @@ export class User {
     }
     this.assertProvesSignUp(password);
     return new User({ ...this.state, emailVerifiedAt: now, version: this.state.version + 1 });
+  }
+
+  /**
+   * Method changePassword
+   *
+   * @description
+   * Records a new password, set by a change from a session or by a reset link, with the next
+   * version (`user.password-changed.v1`). The hash itself is a credential, kept apart.
+   *
+   * @param {Date} now - When the new password was set.
+   * @returns {User} The account after the change.
+   */
+  public changePassword(now: Date): User {
+    return new User({ ...this.state, passwordChangedAt: now, version: this.state.version + 1 });
+  }
+
+  /**
+   * Method assertNewEmail
+   *
+   * @description
+   * Checks that a change of address names another address than the current one
+   * (`POST /v1/me/email-change`).
+   *
+   * @param {EmailAddress} email - The new address.
+   * @throws {EmailUnchangedError} When it is the current address.
+   */
+  public assertNewEmail(email: EmailAddress): void {
+    if (email.equals(this.state.email)) {
+      throw new EmailUnchangedError();
+    }
+  }
+
+  /**
+   * Method changeEmail
+   *
+   * @description
+   * Makes a new address, proven by the code sent to it, the verified address of the account, with
+   * the next version (`user.email-changed.v1`).
+   *
+   * @param {EmailAddress} email - The new address.
+   * @param {Date} now - When the code proved it.
+   * @returns {User} The account after the change.
+   * @throws {EmailUnchangedError} When it is the current address.
+   */
+  public changeEmail(email: EmailAddress, now: Date): User {
+    this.assertNewEmail(email);
+    return new User({
+      ...this.state,
+      email,
+      emailVerifiedAt: now,
+      version: this.state.version + 1,
+    });
+  }
+
+  /**
+   * Method scheduleDeletion
+   *
+   * @description
+   * Schedules the deletion of the account 30 days ahead, with the next version
+   * (`user.deletion-scheduled.v1`).
+   *
+   * @param {Date} now - When the deletion was asked.
+   * @returns {User} The account, its deletion scheduled.
+   * @throws {DeletionAlreadyScheduledError} When a deletion is already scheduled.
+   */
+  public scheduleDeletion(now: Date): User {
+    if (this.state.deleteAt !== null) {
+      throw new DeletionAlreadyScheduledError();
+    }
+    return new User({
+      ...this.state,
+      deleteAt: new Date(now.getTime() + User.DELETION_DELAY_MS),
+      version: this.state.version + 1,
+    });
+  }
+
+  /**
+   * Method cancelDeletion
+   *
+   * @description
+   * Cancels the scheduled deletion, as a sign-in does ("une connexion suffit pour annuler"), with
+   * the next version (`user.deletion-cancelled.v1`); an account without one is returned as it is.
+   *
+   * @returns {User} The account without a scheduled deletion.
+   */
+  public cancelDeletion(): User {
+    if (this.state.deleteAt === null) {
+      return this;
+    }
+    return new User({ ...this.state, deleteAt: null, version: this.state.version + 1 });
+  }
+
+  /**
+   * Method isDeletionDueAt
+   *
+   * @description
+   * Whether the scheduled deletion of the account takes effect at an instant: from `deleteAt` on.
+   *
+   * @param {Date} now - The instant.
+   * @returns {boolean} `true` when a deletion is scheduled and due.
+   */
+  public isDeletionDueAt(now: Date): boolean {
+    return this.state.deleteAt !== null && now.getTime() >= this.state.deleteAt.getTime();
   }
   // #endregion
 }

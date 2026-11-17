@@ -2,16 +2,29 @@
  * Interface DeviceDescription
  *
  * @description
- * What a `User-Agent` tells about the device of a session, to show it later on the Sécurité screen
- * of the account. A `User-Agent` cannot tell Windows 11 from Windows 10 (`cw-identity-security`).
+ * What a `User-Agent` tells about the device of a session, in the shape of `Device` of the
+ * contracts: shown on the "Sessions actives" of the account ("Firefox 132 · Windows 11"), in the
+ * "Nouvelle connexion" e-mail, and compared to tell a new device. A `User-Agent` cannot tell
+ * Windows 11 from Windows 10 (`cw-identity-security`): the version of Windows and macOS is `null`.
  */
 export interface DeviceDescription {
   // #region Properties
   /**
+   * Property type
+   *
+   * @description
+   * `desktop`, `mobile`, `tablet` or `unknown`.
+   *
+   * @type {string}
+   * @readonly
+   */
+  readonly type: string;
+
+  /**
    * Property browser
    *
    * @description
-   * Browser name and major version (`Firefox 145`), or `null` when unknown.
+   * Name of the browser, or `null`.
    *
    * @type {string | null}
    * @readonly
@@ -19,25 +32,36 @@ export interface DeviceDescription {
   readonly browser: string | null;
 
   /**
-   * Property operatingSystem
+   * Property browserVersion
    *
    * @description
-   * Operating system and its version name when known (`Windows 10`), or `null`.
+   * Major version of the browser, or `null`.
    *
    * @type {string | null}
    * @readonly
    */
-  readonly operatingSystem: string | null;
+  readonly browserVersion: string | null;
 
   /**
-   * Property deviceType
+   * Property os
    *
    * @description
-   * Kind of device (`desktop`, `mobile`, `tablet`, `tv`), or `null`.
+   * Name of the operating system, or `null`.
    *
    * @type {string | null}
    * @readonly
    */
-  readonly deviceType: string | null;
+  readonly os: string | null;
+
+  /**
+   * Property osVersion
+   *
+   * @description
+   * Version of the operating system, or `null` when the `User-Agent` does not tell it reliably.
+   *
+   * @type {string | null}
+   * @readonly
+   */
+  readonly osVersion: string | null;
   // #endregion
 }

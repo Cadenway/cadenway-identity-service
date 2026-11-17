@@ -1,6 +1,7 @@
 import type { TransactionDatabase } from '@cadenway/nest-common/database';
-import { and, eq, sql } from 'drizzle-orm';
+import { and, asc, eq, isNull, lte, or, sql } from 'drizzle-orm';
 
+import type { DueAccountDeletion } from '../../../../../application/models/deletion/due-account-deletion.model.js';
 import type { UserRepository } from '../../../../../application/ports/outbound/persistence/accounts/user-repository.port.js';
 import type { UserRegistration } from '../../../../../domain/aggregates/account/user-registration.aggregate.js';
 import type { User } from '../../../../../domain/aggregates/account/user.aggregate.js';
@@ -126,6 +127,7 @@ export class DrizzleUserRepository implements UserRepository {
         timeZone: registration.timeZone,
         version: registration.version,
         signUpCount: registration.signUpCount,
+        passwordChangedAt: registration.passwordChangedAt,
       })
       .returning();
     const row: UserRow | undefined = rows[0];
@@ -158,11 +160,95 @@ export class DrizzleUserRepository implements UserRepository {
         emailVerifiedAt: user.emailVerifiedAt,
         version: user.version,
         signUpCount: user.signUpCount,
+        email: user.email.value,
+        passwordChangedAt: user.passwordChangedAt,
+        deleteAt: user.deleteAt,
+        ...(user.deleteAt === null ? { deletionCheckedAt: null } : {}),
         updatedAt: sql`now()`,
       })
       .where(and(eq(users.id, user.id), eq(users.version, user.version - 1)))
       .returning({ id: users.id });
     if (updated.length !== 1) {
+      throw new Error('The account changed since it was loaded.');
+    }
+  }
+
+  /**
+   * Method findDueDeletions
+   *
+   * @description
+   * Claims the due deletions with `for update skip locked`, through the partial index on
+   * `delete_at`.
+   *
+   * @param {Date} now - The instant of the sweep.
+   * @param {Date} checkedBefore - Accounts checked since then are left out.
+   * @param {number} limit - Accounts claimed at most.
+   * @returns {Promise<DueAccountDeletion[]>} The claimed accounts, the oldest deletion first.
+   */
+  public async findDueDeletions(
+    now: Date,
+    checkedBefore: Date,
+    limit: number,
+  ): Promise<DueAccountDeletion[]> {
+    const rows: { id: string; deleteAt: Date | null; deletionCheckedAt: Date | null }[] =
+      await this.db
+        .select({
+          id: users.id,
+          deleteAt: users.deleteAt,
+          deletionCheckedAt: users.deletionCheckedAt,
+        })
+        .from(users)
+        .where(
+          and(
+            lte(users.deleteAt, now),
+            or(isNull(users.deletionCheckedAt), lte(users.deletionCheckedAt, checkedBefore)),
+          ),
+        )
+        .orderBy(asc(users.deleteAt), asc(users.id))
+        .limit(limit)
+        .for('update', { skipLocked: true });
+    return rows.flatMap(
+      (row: { id: string; deleteAt: Date | null; deletionCheckedAt: Date | null }) => {
+        const dueSince: Date | null = row.deletionCheckedAt ?? row.deleteAt;
+        return dueSince === null ? [] : [{ userId: row.id, dueSince }];
+      },
+    );
+  }
+
+  /**
+   * Method markDeletionChecked
+   *
+   * @description
+   * Records the check that kept a due deletion.
+   *
+   * @param {string} userId - The account.
+   * @param {Date} now - When it was checked.
+   * @returns {Promise<void>} Resolves once written.
+   */
+  public async markDeletionChecked(userId: string, now: Date): Promise<void> {
+    await this.db
+      .update(users)
+      .set({ deletionCheckedAt: now, updatedAt: sql`now()` })
+      .where(eq(users.id, userId));
+  }
+
+  /**
+   * Method delete
+   *
+   * @description
+   * Deletes the account at the version it was locked at; its credential, codes, reset links and
+   * pending change of address are deleted by their foreign keys (`on delete cascade`).
+   *
+   * @param {User} user - The locked account.
+   * @returns {Promise<void>} Resolves once deleted.
+   * @throws {Error} When the stored version moved meanwhile.
+   */
+  public async delete(user: User): Promise<void> {
+    const deleted: { id: string }[] = await this.db
+      .delete(users)
+      .where(and(eq(users.id, user.id), eq(users.version, user.version)))
+      .returning({ id: users.id });
+    if (deleted.length !== 1) {
       throw new Error('The account changed since it was loaded.');
     }
   }

@@ -71,6 +71,9 @@ a single-use code does not stay readable in `outbox_events`, and such a row is n
 
 ## Decisions
 
+- The `pgboss` schema of `@cadenway/nest-jobs` is not one of these tables: `src/migrate.ts` provisions
+  it with `provisionJobs` after the migrations, as the migrator role, and grants the application role
+  its runtime access (see the accounts module for its queues). drizzle-kit never sees it.
 - Named `platform` because it holds the plumbing every Cadenway backend shares, not one capability:
   `outbox` or `messaging` would leave out `idempotency_keys`, and `kit` would suggest that the code
   of the kit lives here, when only its tables do.
