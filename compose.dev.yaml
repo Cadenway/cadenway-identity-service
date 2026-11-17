@@ -13,10 +13,15 @@
 # NATS runs with the authorization of the broker of cadenway-ops (docs/messaging.md and
 # compose/nats/nats-server.conf there): a connection without a user is refused, and the `identity`
 # user has the same permissions as there. It publishes the subjects of the entities this service
-# owns and the restricted subjects of EVENTS_RESTRICTED, uses the JetStream API of a consumer of
-# EVENTS, and subscribes to its own inbox prefix `_INBOX.identity.>` and to `rebuild.identity.>`
-# only. When cadenway-ops changes those permissions, change them here too. `admin` stands for the
-# user of the `nats-streams` container of cadenway-ops.
+# owns and the restricted subjects of EVENTS_RESTRICTED, and subscribes to its own inbox prefix
+# `_INBOX.identity.>` and to `rebuild.identity.>` only. It reads events through its own durable
+# consumers only, each granted by its exact name and filter with the four subjects
+# @cadenway/nest-messaging uses on it (create or align, read, pull, acknowledge), and nothing by
+# wildcard: no other consumer, no `$JS.API.CONSUMER.DURABLE.CREATE`, no deletion. A handler whose
+# consumer is not granted here fails at start-up, in the integration tests as in the environments:
+# a new handler first gets its grant in cadenway-ops (docs/messaging.md#adding-a-consumer there),
+# then the same four subjects here. When cadenway-ops changes those permissions, change them here
+# too. `admin` stands for the user of the `nats-streams` container of cadenway-ops.
 #
 # The streams: `nats-streams` runs compose/nats/ensure-streams.sh of cadenway-ops, copied below, as
 # `admin`, the way the `nats-streams` container of cadenway-ops does. It creates EVENTS,
@@ -133,9 +138,21 @@ configs:
                   "restricted.>",
                   "$$JS.API.INFO", "$$JS.API.STREAM.NAMES",
                   "$$JS.API.STREAM.INFO.EVENTS", "$$JS.API.STREAM.INFO.EVENTS_RESTRICTED",
-                  "$$JS.API.CONSUMER.CREATE.EVENTS.>", "$$JS.API.CONSUMER.DURABLE.CREATE.EVENTS.*",
-                  "$$JS.API.CONSUMER.INFO.EVENTS.*", "$$JS.API.CONSUMER.MSG.NEXT.EVENTS.*",
-                  "$$JS.ACK.EVENTS.>"
+
+                  "$$JS.API.CONSUMER.CREATE.EVENTS.identity-service__project-member-joined.evt.member.joined.v1",
+                  "$$JS.API.CONSUMER.INFO.EVENTS.identity-service__project-member-joined",
+                  "$$JS.API.CONSUMER.MSG.NEXT.EVENTS.identity-service__project-member-joined",
+                  "$$JS.ACK.EVENTS.identity-service__project-member-joined.>",
+
+                  "$$JS.API.CONSUMER.CREATE.EVENTS.identity-service__project-member-role-changed.evt.member.role-changed.v1",
+                  "$$JS.API.CONSUMER.INFO.EVENTS.identity-service__project-member-role-changed",
+                  "$$JS.API.CONSUMER.MSG.NEXT.EVENTS.identity-service__project-member-role-changed",
+                  "$$JS.ACK.EVENTS.identity-service__project-member-role-changed.>",
+
+                  "$$JS.API.CONSUMER.CREATE.EVENTS.identity-service__project-member-removed.evt.member.removed.v1",
+                  "$$JS.API.CONSUMER.INFO.EVENTS.identity-service__project-member-removed",
+                  "$$JS.API.CONSUMER.MSG.NEXT.EVENTS.identity-service__project-member-removed",
+                  "$$JS.ACK.EVENTS.identity-service__project-member-removed.>"
                 ]
               }
               subscribe: { allow: ["_INBOX.identity.>", "rebuild.identity.>"] }
@@ -178,7 +195,7 @@ configs:
       ensure_streams() {
         ensure_stream EVENTS 'evt.>' 7d 1GiB \
           'Every Cadenway event.' &&
-          ensure_stream EVENTS_RESTRICTED 'restricted.>' 7d 64MiB \
+          ensure_stream EVENTS_RESTRICTED 'restricted.>' 1h 64MiB \
             'Identity events carrying a single-use code or link; read by notification-service only.' &&
           ensure_stream EVENTS_DLQ 'dlq.>' 30d 256MiB \
             'Messages a consumer gave up on, copied by the dead-letter worker.'

@@ -624,6 +624,32 @@ describe('identity-service wiring', () => {
       brokerAccepts(identity, '--inbox-prefix', '_INBOX.identity', 'stream', 'info', 'EVENTS_DLQ'),
     ).toBe(false);
     expect(brokerAccepts(identity, 'stream', 'info', 'EVENTS')).toBe(false);
+    // Its own durable consumers, granted by name: it reads them, and may not delete them.
+    const ownConsumer = 'identity-service__project-member-joined';
+    expect(
+      brokerAccepts(
+        identity,
+        '--inbox-prefix',
+        '_INBOX.identity',
+        'consumer',
+        'info',
+        'EVENTS',
+        ownConsumer,
+      ),
+    ).toBe(true);
+    expect(
+      brokerAccepts(
+        identity,
+        '--inbox-prefix',
+        '_INBOX.identity',
+        'consumer',
+        'rm',
+        'EVENTS',
+        ownConsumer,
+        '--force',
+      ),
+    ).toBe(false);
+    expect(brokerAccepts({}, 'consumer', 'info', 'EVENTS', ownConsumer)).toBe(true);
     expect(brokerAccepts(identity, 'pub', 'evt.task.wiring-probe', 'refused')).toBe(false);
     expect(brokerAccepts({ NATS_USER: '', NATS_PASSWORD: '' }, 'pub', 'evt.user.x', 'x')).toBe(
       false,

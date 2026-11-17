@@ -351,7 +351,10 @@ describe('identity-service profile', () => {
     expect(stale.status).toBe(412);
     expect(stale.body).toMatchObject({ code: 'request.version-mismatch', details: { version: 4 } });
     expect(malformed.status).toBe(400);
-    expect(malformed.body).toMatchObject({ code: 'request.invalid' });
+    expect(malformed.body).toMatchObject({
+      code: 'request.invalid',
+      details: { issues: [{ in: 'header', path: 'If-Match', code: 'invalid_format' }] },
+    });
     expect(await profileEvents()).toHaveLength(2);
   });
 

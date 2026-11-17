@@ -2,7 +2,12 @@ import { execFileSync } from 'node:child_process';
 import { createHash, generateKeyPairSync, randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
-import { createApplication, InternalTokenSigner, loadConfig } from '@cadenway/nest-common';
+import {
+  createApplication,
+  encodeCursor,
+  InternalTokenSigner,
+  loadConfig,
+} from '@cadenway/nest-common';
 import type {
   Ed25519PrivateJwk,
   Ed25519PublicJwk,
@@ -893,6 +898,25 @@ describe('identity-service organization context', () => {
         '/internal/v1/api-tokens?cursor=not-a-cursor',
         user(people.ines, atelierNord),
       );
+      // Cursors of this list, as the kit encodes them, whose position this list never writes: no
+      // instant, and an instant of a year PostgreSQL refuses.
+      const forged = await Promise.all(
+        [
+          { sort: ['yesterday'], id: 'x' },
+          { sort: ['+010000-01-01T00:00:00.000Z'], id: ines.id },
+        ].map((position) =>
+          call(
+            'get',
+            `/internal/v1/api-tokens?cursor=${encodeCursor(position, { sort: '-createdAt' })}`,
+            user(people.ines, atelierNord),
+          ),
+        ),
+      );
+      const limits = await Promise.all(
+        ['0', '101', 'abc', '8.5'].map((limit) =>
+          call('get', `/internal/v1/api-tokens?limit=${limit}`, user(people.ines, atelierNord)),
+        ),
+      );
 
       expect(first.status).toBe(200);
       expect(first.body).toEqual({
@@ -910,8 +934,20 @@ describe('identity-service organization context', () => {
       expect(JSON.stringify([first.body, next.body])).not.toContain('"secret"');
       expect(JSON.stringify([first.body, next.body])).not.toContain(ines.secret);
       expect(elsewhereList.body).toEqual({ items: [], nextCursor: null });
-      expect(invalid.status).toBe(400);
-      expect(invalid.body).toMatchObject({ code: 'request.invalid' });
+      for (const response of [invalid, ...forged]) {
+        expect(response.status).toBe(400);
+        expect(response.body).toMatchObject({
+          code: 'request.invalid',
+          details: { issues: [{ in: 'query', path: 'cursor', code: 'invalid_cursor' }] },
+        });
+      }
+      for (const response of limits) {
+        expect(response.status).toBe(400);
+        expect(response.body).toMatchObject({
+          code: 'request.invalid',
+          details: { issues: [expect.objectContaining({ in: 'query', path: 'limit' })] },
+        });
+      }
     });
 
     it('revokes a token: inactive from the next introspection, 204 again, 404 for another user', async () => {

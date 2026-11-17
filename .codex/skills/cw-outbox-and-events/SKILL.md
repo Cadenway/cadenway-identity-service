@@ -45,7 +45,7 @@ consumed only once its AsyncAPI spec is released (`cw-contract-first`).
 
 1. Register the handler from `onApplicationBootstrap` of a provider under
    `presentation/messaging/handlers/<family>/` in V2 (`api/messaging/` before migration),
-   with the injected `EventConsumers`. It gets the durable consumer `identity-service__<handler>`,
+   with the `EventConsumers` of the kit. It gets the durable consumer `identity-service__<handler>`,
    filtered on the one subject of its event:
 
    ```ts
@@ -53,16 +53,25 @@ consumed only once its AsyncAPI spec is released (`cw-contract-first`).
      handler: 'project-member-removed',
      schemas: eventSchemas,
      event: 'member.removed.v1',
+     redelivery: this.redelivery,
      handle: (payload) => this.applyMembershipChange.execute(toChange('removed', payload)),
    });
    ```
+
+   The `identity` NATS user may use a consumer only once cadenway-ops grants it by its exact name
+   and filter (`compose/nats/nats-server.conf`, `docs/messaging.md#adding-a-consumer`): a new or
+   renamed handler gets its grant there, deployed before the release that adds it, and the same
+   four subjects in `compose.dev.yaml`; without it the service fails at start-up.
 2. The deduplicator of `OutboxModule` records `(consumer, event id)` in `processed_events` in the
    handler's transaction (tenant runner for an event with an organization): a redelivery of a
    handled event is skipped. A `run` of the same runner inside the handler joins that transaction.
 3. Call a use case; it is idempotent for anything outside the database (an e-mail, a call).
-4. A rejection is retried after 1 s, 5 s, 30 s and 2 min; the fifth failure, or a payload that does
-   not match its schema, becomes a dead letter in `EVENTS_DLQ`, copied by notification-service.
-   Document in MODULE.md what an operator does with it.
+4. A rejection is retried after 1 s, 5 s, 30 s and 2 min by default; the fifth failure, or a
+   payload that does not match its schema, becomes a dead letter in `EVENTS_DLQ`, copied by
+   notification-service. A handler whose effects must not be given up after minutes, such as a
+   security projection, sets its own `redelivery: { delaysMs, maxDeliveries }` (the member event
+   consumers retry about 25 hours, see the memberships `MODULE.md`), and its release replaces every
+   replica. Document in MODULE.md the schedule and what an operator does with a dead letter.
 5. A handler with outside effects registers with `deliverPolicy: 'new'`; the default `all` delivers
    up to seven days of events to a new consumer.
 
