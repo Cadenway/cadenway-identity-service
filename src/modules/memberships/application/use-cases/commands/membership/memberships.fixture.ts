@@ -77,6 +77,19 @@ export class InMemoryMemberships implements MembershipsUnitOfWork {
         );
         return Promise.resolve(state === undefined ? null : Membership.restore(state));
       },
+      findOwnedOrganizationIds: (userId: string): Promise<string[]> =>
+        Promise.resolve(
+          [
+            ...new Set(
+              [...rows.values()]
+                .filter(
+                  (row: MembershipState) =>
+                    row.userId === userId && row.role === 'owner' && row.removedAt === null,
+                )
+                .map((row: MembershipState) => row.organizationId),
+            ),
+          ].sort(),
+        ),
     };
     const result: TResult = await work(repository);
     this.rows = rows;

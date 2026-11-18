@@ -62,17 +62,21 @@ const platformTables = [
 ] as const;
 
 /**
- * The tables of the business modules: accounts (users, credentials, codes, throttle, lockout),
- * sessions (sessions and the last organization each account chose), memberships (the copy of the
- * memberships) and api-tokens. Those with an `organization_id` carry the forced policy of the kit.
+ * The tables of the business modules: accounts (users, credentials, codes, throttles, lockout,
+ * reset links, pending changes of address), sessions (sessions and the last organization each
+ * account chose), memberships (the copy of the memberships) and api-tokens. Those with an
+ * `organization_id` carry the forced policy of the kit.
  */
 const businessTables = [
   'api_tokens',
   'code_requests',
+  'email_changes',
   'memberships',
   'one_time_codes',
   'organization_choices',
   'password_credentials',
+  'password_reset_links',
+  'password_reset_requests',
   'sessions',
   'sign_in_attempts',
   'users',
@@ -82,7 +86,7 @@ const businessTables = [
 const allTables = [...platformTables, ...businessTables].sort();
 
 /** Migrations of `migrations/meta/_journal.json`. */
-const migrationCount = 4;
+const migrationCount = 5;
 
 /**
  * Runs `docker compose` on the throwaway project.
@@ -557,6 +561,30 @@ describe('identity-service wiring', () => {
         code: '42501',
       });
     }
+  });
+
+  it('provisions the queues of the jobs, which the application role uses without any DDL right', async () => {
+    const system = service().get(SystemTransactionRunner);
+    const queues = await system.run(
+      async (tx) =>
+        (
+          await tx.client.query(
+            "select name from pgboss.queue where left(name, 10) <> '__pgboss__' order by name",
+          )
+        ).rows as {
+          name: string;
+        }[],
+    );
+
+    expect(queues.map(({ name }) => name)).toEqual([
+      'account.delete',
+      'account.delete.dead-letter',
+      'account.deletion-sweep',
+      'account.deletion-sweep.dead-letter',
+    ]);
+    await expect(
+      system.run((tx) => tx.client.query('create table pgboss.wiring_probe (id integer)')),
+    ).rejects.toMatchObject({ code: '42501' });
   });
 
   it('keeps the application role out of the migration journal of the drizzle schema', async () => {

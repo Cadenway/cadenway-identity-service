@@ -162,7 +162,7 @@ export class SignUp {
       if ('reason' in accepted) {
         throw new AccountRefusal(accepted);
       }
-      const user: User = await this.register(store, email, input.name, existing);
+      const user: User = await this.register(store, email, input.name, existing, now);
       await store.credentials.save(user.id, passwordHash);
       await store.codeRequests.save(email, accepted.throttle);
       await store.events.userSignedUp(user);
@@ -188,6 +188,7 @@ export class SignUp {
    * @param {EmailAddress} email - The normalized address.
    * @param {string} name - The full name as typed.
    * @param {User | null} existing - The unverified account of the address, locked, or `null`.
+   * @param {Date} now - When the sign-up sets the password.
    * @returns {Promise<User>} The account after the sign-up.
    */
   private async register(
@@ -195,11 +196,12 @@ export class SignUp {
     email: EmailAddress,
     name: string,
     existing: User | null,
+    now: Date,
   ): Promise<User> {
     if (existing === null) {
-      return store.users.insert(User.register(email, name));
+      return store.users.insert(User.register(email, name, now));
     }
-    const replaced: User = existing.replaceRegistration(name);
+    const replaced: User = existing.replaceRegistration(name, now);
     await store.users.update(replaced);
     return replaced;
   }

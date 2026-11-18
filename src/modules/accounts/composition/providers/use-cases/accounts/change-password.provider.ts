@@ -1,0 +1,44 @@
+import type { FactoryProvider } from '@nestjs/common';
+
+import type { AccountSessions } from '../../../../application/ports/outbound/identity/sessions/account-sessions.port.js';
+import type { AccountsUnitOfWork } from '../../../../application/ports/outbound/transactions/accounts/accounts-unit-of-work.port.js';
+import type { Clock } from '../../../../application/ports/outbound/clock/accounts/clock.port.js';
+import type { CompromisedPasswords } from '../../../../application/ports/outbound/security/authentication/compromised-passwords.port.js';
+import type { DeviceReader } from '../../../../application/ports/outbound/device/accounts/device-reader.port.js';
+import type { PasswordHasher } from '../../../../application/ports/outbound/security/authentication/password-hasher.port.js';
+import { ChangePassword } from '../../../../application/use-cases/commands/password/change-password/change-password.use-case.js';
+import { ACCOUNT_SESSIONS } from '../../../tokens/accounts/account-sessions.token.js';
+import { CLOCK } from '../../../tokens/accounts/clock.token.js';
+import { COMPROMISED_PASSWORDS } from '../../../tokens/accounts/compromised-passwords.token.js';
+import { DEVICE_READER } from '../../../tokens/accounts/device-reader.token.js';
+import { PASSWORD_HASHER } from '../../../tokens/accounts/password-hasher.token.js';
+import { UNIT_OF_WORK } from '../../../tokens/accounts/accounts-unit-of-work.token.js';
+
+/**
+ * Constant changePasswordProvider
+ *
+ * @description
+ * Builds the change of password from a session.
+ *
+ * @type {FactoryProvider<ChangePassword>}
+ */
+export const changePasswordProvider: FactoryProvider<ChangePassword> = {
+  provide: ChangePassword,
+  inject: [
+    UNIT_OF_WORK,
+    PASSWORD_HASHER,
+    COMPROMISED_PASSWORDS,
+    ACCOUNT_SESSIONS,
+    DEVICE_READER,
+    CLOCK,
+  ],
+  useFactory: (
+    unitOfWork: AccountsUnitOfWork,
+    hasher: PasswordHasher,
+    compromised: CompromisedPasswords,
+    sessions: AccountSessions,
+    devices: DeviceReader,
+    clock: Clock,
+  ): ChangePassword =>
+    new ChangePassword(unitOfWork, hasher, compromised, sessions, devices, clock),
+};

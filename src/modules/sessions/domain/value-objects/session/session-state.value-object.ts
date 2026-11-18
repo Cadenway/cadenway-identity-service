@@ -105,5 +105,29 @@ export interface SessionState {
    * @readonly
    */
   readonly version: number;
+
+  /**
+   * Property signedInAt
+   *
+   * @description
+   * When the sign-in opened the session (`signedInAt` of `OpenSession`).
+   *
+   * @type {Date}
+   * @readonly
+   */
+  readonly signedInAt: Date;
+
+  /**
+   * Property authenticatedAt
+   *
+   * @description
+   * When the person of the session last proved who they are: the sign-in, a confirmed password or
+   * the current password of a change; `null` once a change or a reset of the password ended it.
+   * Not a change of version, like activity.
+   *
+   * @type {Date | null}
+   * @readonly
+   */
+  readonly authenticatedAt: Date | null;
   // #endregion
 }

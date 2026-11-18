@@ -3,16 +3,17 @@ import { AccountLockedError } from '../../../../../domain/errors/password/accoun
 import type { PasswordFailure } from '../../../../../domain/policies/password/password-failure.policy.js';
 import type { PasswordLockout } from '../../../../../domain/policies/password/password-lockout.policy.js';
 import { EmailAddress } from '../../../../../domain/value-objects/email/email-address.value-object.js';
-import { toAccountView } from '../../../../mappers/accounts/account-view.mapper.js';
 import { AccountRefusal } from '../../../../models/authentication/account-refusal.model.js';
 import type { Refusal } from '../../../../models/authentication/refusal.model.js';
-import type { OpenedSession } from '../../../../models/sessions/opened-session.model.js';
 import type { AccountsStore } from '../../../../models/transactions/accounts-store.model.js';
 import type { Clock } from '../../../../ports/outbound/clock/accounts/clock.port.js';
+import type { DeviceReader } from '../../../../ports/outbound/device/accounts/device-reader.port.js';
 import type { SessionOpener } from '../../../../ports/outbound/identity/sessions/session-opener.port.js';
 import type { PasswordHasher } from '../../../../ports/outbound/security/authentication/password-hasher.port.js';
 import type { AccountsUnitOfWork } from '../../../../ports/outbound/transactions/accounts/accounts-unit-of-work.port.js';
 import type { SessionIssuedView } from '../../../../projections/authentication/session-issued-view.projection.js';
+import { completeSignIn } from '../../../../services/authentication/sign-in-completion.service.js';
+import { settlePasswordCheck } from '../../../../services/password/password-attempts.service.js';
 import type { SignInWithPasswordInput } from './sign-in-with-password.input.js';
 
 /**
@@ -30,8 +31,10 @@ import type { SignInWithPasswordInput } from './sign-in-with-password.input.js';
  *    the address, so the time does not tell. A wrong one keeps its counted failure:
  *    `auth.invalid-credentials` with `remainingAttempts`, or `auth.account-locked` for the failure
  *    that used the last attempt.
- * 3. For the right password, a second transaction resets the count and, for a verified account,
- *    opens the session; an unverified account answers `auth.email-not-verified`.
+ * 3. For the right password, a second transaction resets the count, locks the account and, for a
+ *    verified one, opens the session (`completeSignIn`: "Nouvelle connexion", and the cancellation of
+ *    a scheduled deletion); an unverified account answers `auth.email-not-verified`, and an account
+ *    deleted meanwhile answers like a wrong password.
  */
 export class SignInWithPassword {
   // #region Properties
@@ -78,6 +81,17 @@ export class SignInWithPassword {
    * @readonly
    */
   private readonly clock: Clock;
+
+  /**
+   * Property devices
+   *
+   * @description
+   * Reads the device of the browser for the security e-mails.
+   *
+   * @type {DeviceReader}
+   * @readonly
+   */
+  private readonly devices: DeviceReader;
   // #endregion
 
   // #region Constructor
@@ -91,6 +105,7 @@ export class SignInWithPassword {
    * @param {PasswordHasher} hasher - Checks the password.
    * @param {SessionOpener} sessions - Opens the session.
    * @param {Clock} clock - The time of the sign-in.
+   * @param {DeviceReader} devices - Reads the device of the browser.
    * @constructor
    */
   public constructor(
@@ -98,11 +113,13 @@ export class SignInWithPassword {
     hasher: PasswordHasher,
     sessions: SessionOpener,
     clock: Clock,
+    devices: DeviceReader,
   ) {
     this.unitOfWork = unitOfWork;
     this.hasher = hasher;
     this.sessions = sessions;
     this.clock = clock;
+    this.devices = devices;
   }
   // #endregion
 
@@ -129,26 +146,33 @@ export class SignInWithPassword {
     }
     const matches: boolean = await this.hasher.verify(input.password, attempt.passwordHash);
     if (attempt.user === null || !matches) {
-      throw new AccountRefusal(
-        attempt.failure.lockedUntil === null
-          ? { reason: 'invalid-credentials', remainingAttempts: attempt.failure.remainingAttempts }
-          : { reason: 'account-locked', lockedUntil: attempt.failure.lockedUntil },
-      );
+      throw new AccountRefusal(wrongCredentials(attempt.failure));
     }
-    const user: User = attempt.user;
+    const userId: string = attempt.user.id;
+    const passwordHash: string | null = attempt.passwordHash;
+    const failure: PasswordFailure = attempt.failure;
     const outcome: SessionIssuedView | Refusal = await this.unitOfWork.run(
       async (store: AccountsStore): Promise<SessionIssuedView | Refusal> => {
-        const lockout: PasswordLockout = await store.signInAttempts.lock(email);
-        await store.signInAttempts.save(email, lockout.recordSuccess());
+        const user: User | 'account-gone' | 'password-moved' = await settlePasswordCheck(
+          store,
+          userId,
+          email,
+          passwordHash,
+        );
+        if (typeof user === 'string') {
+          return wrongCredentials(failure);
+        }
         if (!user.isVerified) {
           return { reason: 'email-not-verified' };
         }
-        const session: OpenedSession = await this.sessions.open({
-          userId: user.id,
-          persistent: input.rememberMe,
-          client: input.client,
-        });
-        return { session, user: toAccountView(user) };
+        return completeSignIn(
+          store,
+          this.sessions,
+          this.devices,
+          user,
+          input.rememberMe,
+          input.client,
+        );
       },
     );
     if ('reason' in outcome) {
@@ -191,6 +215,22 @@ export class SignInWithPassword {
     return { failure, user, passwordHash };
   }
   // #endregion
+}
+
+/**
+ * Function wrongCredentials
+ *
+ * @description
+ * The answer to a wrong password, or to a password that stopped being the one of the account
+ * during its check: the attempt counted in advance stays.
+ *
+ * @param {PasswordFailure} failure - The attempt counted in advance.
+ * @returns {Refusal} `auth.invalid-credentials`, or `auth.account-locked` when it locks.
+ */
+function wrongCredentials(failure: PasswordFailure): Refusal {
+  return failure.lockedUntil === null
+    ? { reason: 'invalid-credentials', remainingAttempts: failure.remainingAttempts }
+    : { reason: 'account-locked', lockedUntil: failure.lockedUntil };
 }
 
 /**

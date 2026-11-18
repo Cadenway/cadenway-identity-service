@@ -9,6 +9,7 @@ import type {
   InternalTokenClaims,
 } from '@cadenway/nest-common';
 import { SystemTransactionRunner } from '@cadenway/nest-common/database';
+import { JobProducer } from '@cadenway/nest-jobs/runtime';
 import { OutboxRelay, OutboxWriter } from '@cadenway/nest-messaging/outbox';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import pg from 'pg';
@@ -871,8 +872,10 @@ describe('identity-service authentication flows', () => {
         displayName: null,
         jobTitle: null,
         timeZone: 'Europe/Paris',
+        passwordChangedAt: anyString,
         version: 3,
       });
+      expect(body).toMatchObject({ deletionCancelled: false });
       const verified = await systemQuery<{ payload: Record<string, unknown> }>(
         `select payload from outbox_events where event_name = 'user.email-verified.v1'`,
       );
@@ -896,7 +899,7 @@ describe('identity-service authentication flows', () => {
           ip_address: client.ipAddress,
           user_agent: client.userAgent,
           browser: 'Firefox 145',
-          operating_system: 'Windows 10',
+          operating_system: 'Windows',
           device_type: 'desktop',
           persistent: false,
         },
@@ -1489,6 +1492,7 @@ describe('identity-service authentication flows', () => {
         displayName: null,
         jobTitle: null,
         timeZone: 'Europe/Paris',
+        passwordChangedAt: anyString,
         version: 3,
       });
     });
@@ -1599,6 +1603,7 @@ describe('identity-service authentication flows', () => {
         app.get(SystemTransactionRunner),
         app.get(OutboxWriter),
         app.get(OutboxRelay),
+        app.get(JobProducer),
       );
       const openSession = app.get(OpenSession, { strict: false });
       const email = EmailAddress.of('rollback@ateliernord.fr');
@@ -1609,9 +1614,14 @@ describe('identity-service authentication flows', () => {
 
       await expect(
         unitOfWork.run(async (store) => {
-          const user = await store.users.insert(User.register(email, 'Camille Martin'));
+          const user = await store.users.insert(User.register(email, 'Camille Martin', new Date()));
           await store.events.userSignedUp(user);
-          await openSession.execute({ userId: user.id, persistent: false, client });
+          await openSession.execute({
+            userId: user.id,
+            persistent: false,
+            client,
+            newDeviceNotice: null,
+          });
           throw new Error('the work fails after its writes');
         }),
       ).rejects.toThrow('the work fails after its writes');
@@ -1627,7 +1637,7 @@ describe('identity-service authentication flows', () => {
   });
 
   describe('the outbox', () => {
-    it('publishes the four events, the code on the restricted subject only', async () => {
+    it('publishes the events, the code on the restricted subject only', async () => {
       app.get(OutboxRelay).wake();
       await vi.waitFor(
         async () => {
@@ -1643,11 +1653,15 @@ describe('identity-service authentication flows', () => {
       const restricted = streamSubjects('EVENTS_RESTRICTED');
 
       expect(Object.keys(events).sort()).toEqual([
+        'evt.session.opened-on-new-device.v1',
         'evt.session.revoked.v1',
         'evt.user.email-verified.v1',
         'evt.user.signed-up.v1',
       ]);
       expect(events['evt.user.signed-up.v1']).toBe(await eventCount('user.signed-up.v1'));
+      expect(events['evt.session.opened-on-new-device.v1']).toBe(
+        await eventCount('session.opened-on-new-device.v1'),
+      );
       expect(Object.keys(restricted)).toEqual(['restricted.one-time-code.issued.v1']);
       expect(restricted['restricted.one-time-code.issued.v1']).toBe(
         await eventCount('one-time-code.issued.v1'),

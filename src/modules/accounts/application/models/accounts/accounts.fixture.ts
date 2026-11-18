@@ -3,25 +3,46 @@ import { User } from '../../../domain/aggregates/account/user.aggregate.js';
 import type { OneTimeCodeIssue } from '../../../domain/aggregates/one-time-codes/one-time-code-issue.aggregate.js';
 import type { OneTimeCodeState } from '../../../domain/aggregates/one-time-codes/one-time-code-state.aggregate.js';
 import { OneTimeCode } from '../../../domain/aggregates/one-time-codes/one-time-code.aggregate.js';
+import type { PasswordResetLinkIssue } from '../../../domain/aggregates/password-reset/password-reset-link-issue.aggregate.js';
+import type { PasswordResetLinkState } from '../../../domain/aggregates/password-reset/password-reset-link-state.aggregate.js';
+import { PasswordResetLink } from '../../../domain/aggregates/password-reset/password-reset-link.aggregate.js';
 import { CodeRequestThrottle } from '../../../domain/policies/one-time-codes/code-request-throttle.policy.js';
+import { PasswordResetThrottle } from '../../../domain/policies/password-reset/password-reset-throttle.policy.js';
 import { PasswordLockout } from '../../../domain/policies/password/password-lockout.policy.js';
+import type { PendingEmailChange } from '../../../domain/value-objects/email-change/pending-email-change.value-object.js';
 import { EmailAddress } from '../../../domain/value-objects/email/email-address.value-object.js';
 import type { OneTimeCodePurpose } from '../../../domain/value-objects/one-time-code-purpose/one-time-code-purpose.value-object.js';
 import type { Clock } from '../../ports/outbound/clock/accounts/clock.port.js';
+import type { DeviceReader } from '../../ports/outbound/device/accounts/device-reader.port.js';
+import type { AccountApiTokens } from '../../ports/outbound/identity/api-tokens/account-api-tokens.port.js';
+import type { AccountSessions } from '../../ports/outbound/identity/sessions/account-sessions.port.js';
 import type { SessionOpener } from '../../ports/outbound/identity/sessions/session-opener.port.js';
+import type { AccountDeletionQueue } from '../../ports/outbound/jobs/accounts/account-deletion-queue.port.js';
+import type { OwnedOrganizations } from '../../ports/outbound/memberships/accounts/owned-organizations.port.js';
 import type { AccountEvents } from '../../ports/outbound/messaging/accounts/account-events.port.js';
 import type { CodeRequestRepository } from '../../ports/outbound/persistence/accounts/code-request-repository.port.js';
+import type { EmailChangeRepository } from '../../ports/outbound/persistence/accounts/email-change-repository.port.js';
 import type { OneTimeCodeRepository } from '../../ports/outbound/persistence/accounts/one-time-code-repository.port.js';
 import type { PasswordCredentialRepository } from '../../ports/outbound/persistence/accounts/password-credential-repository.port.js';
+import type { PasswordResetLinkRepository } from '../../ports/outbound/persistence/accounts/password-reset-link-repository.port.js';
+import type { PasswordResetRequestRepository } from '../../ports/outbound/persistence/accounts/password-reset-request-repository.port.js';
 import type { SignInAttemptRepository } from '../../ports/outbound/persistence/accounts/sign-in-attempt-repository.port.js';
 import type { UserRepository } from '../../ports/outbound/persistence/accounts/user-repository.port.js';
 import type { CompromisedPasswords } from '../../ports/outbound/security/authentication/compromised-passwords.port.js';
 import type { OneTimeCodeSecrets } from '../../ports/outbound/security/authentication/one-time-code-secrets.port.js';
 import type { PasswordHasher } from '../../ports/outbound/security/authentication/password-hasher.port.js';
+import type { ResetLinkSecrets } from '../../ports/outbound/security/password-reset/reset-link-secrets.port.js';
 import type { AccountsUnitOfWork } from '../../ports/outbound/transactions/accounts/accounts-unit-of-work.port.js';
 import type { CodeSubject } from '../authentication/code-subject.model.js';
 import type { IssuedCode } from '../authentication/issued-code.model.js';
+import type { DueAccountDeletion } from '../deletion/due-account-deletion.model.js';
+import type { IssuedResetLink } from '../password-reset/issued-reset-link.model.js';
+import type { IssuedResetToken } from '../password-reset/issued-reset-token.model.js';
+import type { ClientDescription } from '../sessions/client-description.model.js';
+import type { ClientDevice } from '../sessions/client-device.model.js';
 import type { OpenedSession } from '../sessions/opened-session.model.js';
+import type { RecentAuthentication } from '../sessions/recent-authentication.model.js';
+import type { SessionAuthentication } from '../sessions/session-authentication.model.js';
 import type { SessionRequest } from '../sessions/session-request.model.js';
 import type { AccountsStore } from '../transactions/accounts-store.model.js';
 
@@ -31,16 +52,40 @@ import type { AccountsStore } from '../transactions/accounts-store.model.js';
  * @description
  * An event a use case appended, as the fake outbox keeps it.
  *
- * @type {{ readonly name: 'user.signed-up.v1' | 'user.email-verified.v1'; readonly user: User } | { readonly name: 'one-time-code.issued.v1'; readonly issued: IssuedCode } | { readonly name: 'user.profile-updated.v1'; readonly user: User; readonly changed: readonly string[] }}
+ * @type {object}
  */
 export type RecordedEvent =
-  | { readonly name: 'user.signed-up.v1' | 'user.email-verified.v1'; readonly user: User }
+  | {
+      readonly name: 'user.signed-up.v1' | 'user.email-verified.v1' | 'user.deletion-scheduled.v1';
+      readonly user: User;
+    }
   | { readonly name: 'one-time-code.issued.v1'; readonly issued: IssuedCode }
+  | { readonly name: 'password-reset-link.issued.v1'; readonly issued: IssuedResetLink }
   | {
       readonly name: 'user.profile-updated.v1';
       readonly user: User;
       readonly changed: readonly string[];
-    };
+    }
+  | {
+      readonly name: 'user.password-changed.v1';
+      readonly user: User;
+      readonly method: 'change' | 'reset';
+      readonly closedSessionCount: number;
+      readonly client: ClientDescription;
+    }
+  | {
+      readonly name: 'user.email-changed.v1';
+      readonly user: User;
+      readonly previousEmail: string;
+      readonly client: ClientDescription;
+    }
+  | {
+      readonly name: 'user.deletion-cancelled.v1';
+      readonly user: User;
+      readonly sessionId: string;
+      readonly client: ClientDescription;
+    }
+  | { readonly name: 'user.deleted.v1'; readonly userId: string; readonly version: number };
 
 /**
  * Interface AccountsState
@@ -116,6 +161,61 @@ interface AccountsState {
    * @readonly
    */
   readonly events: RecordedEvent[];
+
+  /**
+   * Property resetLinks
+   *
+   * @description
+   * Password reset links, in issue order.
+   *
+   * @type {PasswordResetLinkState[]}
+   * @readonly
+   */
+  readonly resetLinks: PasswordResetLinkState[];
+
+  /**
+   * Property resetRequests
+   *
+   * @description
+   * Throttles of the reset requests by address.
+   *
+   * @type {Map<string, PasswordResetThrottle>}
+   * @readonly
+   */
+  readonly resetRequests: Map<string, PasswordResetThrottle>;
+
+  /**
+   * Property emailChanges
+   *
+   * @description
+   * Pending changes of address by account.
+   *
+   * @type {Map<string, PendingEmailChange>}
+   * @readonly
+   */
+  readonly emailChanges: Map<string, PendingEmailChange>;
+
+  /**
+   * Property deletionJobs
+   *
+   * @description
+   * Occurrence keys of the enqueued deletion jobs.
+   *
+   * @type {string[]}
+   * @readonly
+   */
+  readonly deletionJobs: string[];
+
+  /**
+   * Property deletionChecks
+   *
+   * @description
+   * Last check that kept a due deletion, by account.
+   *
+   * @type {Map<string, Date>}
+   * @readonly
+   */
+  readonly deletionChecks: Map<string, Date>;
   // #endregion
 }
 
@@ -137,6 +237,11 @@ function copyState(state: AccountsState): AccountsState {
     codeRequests: new Map(state.codeRequests),
     lockouts: new Map(state.lockouts),
     events: [...state.events],
+    resetLinks: [...state.resetLinks],
+    resetRequests: new Map(state.resetRequests),
+    emailChanges: new Map(state.emailChanges),
+    deletionJobs: [...state.deletionJobs],
+    deletionChecks: new Map(state.deletionChecks),
   };
 }
 
@@ -177,6 +282,11 @@ export class InMemoryAccounts implements AccountsUnitOfWork {
     codeRequests: new Map(),
     lockouts: new Map(),
     events: [],
+    resetLinks: [],
+    resetRequests: new Map(),
+    emailChanges: new Map(),
+    deletionJobs: [],
+    deletionChecks: new Map(),
   };
 
   /**
@@ -245,9 +355,16 @@ export class InMemoryAccounts implements AccountsUnitOfWork {
    * @param {string} email - The address.
    * @param {boolean} verified - Whether the address is verified.
    * @param {string} passwordHash - The stored hash.
+   * @param {Date | null} deleteAt - The end of a scheduled deletion of a verified account, or
+   * `null`.
    * @returns {User} The account.
    */
-  public seedUser(email: string, verified: boolean, passwordHash: string): User {
+  public seedUser(
+    email: string,
+    verified: boolean,
+    passwordHash: string,
+    deleteAt: Date | null = null,
+  ): User {
     this.ids += 1;
     const user: User = User.restore({
       id: fakeId(this.ids),
@@ -258,8 +375,10 @@ export class InMemoryAccounts implements AccountsUnitOfWork {
       jobTitle: null,
       timeZone: 'Europe/Paris',
       emailVerifiedAt: verified ? new Date('2026-11-08T12:00:00Z') : null,
-      version: verified ? 2 : 1,
+      version: verified ? (deleteAt === null ? 2 : 3) : 1,
       signUpCount: 1,
+      passwordChangedAt: new Date('2026-08-12T09:30:00Z'),
+      deleteAt,
     });
     this.state.users.set(user.id, user);
     this.state.credentials.set(user.id, passwordHash);
@@ -289,6 +408,7 @@ export class InMemoryAccounts implements AccountsUnitOfWork {
           ...registration,
           id: fakeId(this.ids),
           emailVerifiedAt: null,
+          deleteAt: null,
         });
         draft.users.set(user.id, user);
         return Promise.resolve(user);
@@ -298,6 +418,37 @@ export class InMemoryAccounts implements AccountsUnitOfWork {
           return Promise.reject(new Error('The account changed since it was loaded.'));
         }
         draft.users.set(user.id, user);
+        return Promise.resolve();
+      },
+      findDueDeletions: (
+        now: Date,
+        checkedBefore: Date,
+        limit: number,
+      ): Promise<DueAccountDeletion[]> =>
+        Promise.resolve(
+          [...draft.users.values()]
+            .filter((user: User) => user.isDeletionDueAt(now))
+            .filter((user: User) => {
+              const checked: Date | undefined = draft.deletionChecks.get(user.id);
+              return checked === undefined || checked.getTime() <= checkedBefore.getTime();
+            })
+            .slice(0, limit)
+            .map((user: User) => ({
+              userId: user.id,
+              dueSince: draft.deletionChecks.get(user.id) ?? user.deleteAt ?? now,
+            })),
+        ),
+      markDeletionChecked: (userId: string, now: Date): Promise<void> => {
+        draft.deletionChecks.set(userId, now);
+        return Promise.resolve();
+      },
+      delete: (user: User): Promise<void> => {
+        if (draft.users.get(user.id)?.version !== user.version) {
+          return Promise.reject(new Error('The account changed since it was loaded.'));
+        }
+        draft.users.delete(user.id);
+        draft.credentials.delete(user.id);
+        draft.emailChanges.delete(user.id);
         return Promise.resolve();
       },
     };
@@ -328,6 +479,14 @@ export class InMemoryAccounts implements AccountsUnitOfWork {
             code.consumedAt === null &&
             code.replacedAt === null
           ) {
+            draft.codes[index] = { ...code, replacedAt: now };
+          }
+        });
+        return Promise.resolve();
+      },
+      replaceAllCurrent: (userId: string, now: Date): Promise<void> => {
+        draft.codes.forEach((code: OneTimeCodeState, index: number) => {
+          if (code.userId === userId && code.consumedAt === null && code.replacedAt === null) {
             draft.codes[index] = { ...code, replacedAt: now };
           }
         });
@@ -374,6 +533,10 @@ export class InMemoryAccounts implements AccountsUnitOfWork {
         draft.codeRequests.set(email.value, throttle);
         return Promise.resolve();
       },
+      erase: (email: EmailAddress): Promise<void> => {
+        draft.codeRequests.delete(email.value);
+        return Promise.resolve();
+      },
     };
     const signInAttempts: SignInAttemptRepository = {
       lock: (email: EmailAddress): Promise<PasswordLockout> =>
@@ -384,6 +547,10 @@ export class InMemoryAccounts implements AccountsUnitOfWork {
         } else {
           draft.lockouts.set(email.value, lockout);
         }
+        return Promise.resolve();
+      },
+      erase: (email: EmailAddress): Promise<void> => {
+        draft.lockouts.delete(email.value);
         return Promise.resolve();
       },
     };
@@ -404,8 +571,135 @@ export class InMemoryAccounts implements AccountsUnitOfWork {
         draft.events.push({ name: 'one-time-code.issued.v1', issued });
         return Promise.resolve();
       },
+      passwordResetLinkIssued: (issued: IssuedResetLink): Promise<void> => {
+        draft.events.push({ name: 'password-reset-link.issued.v1', issued });
+        return Promise.resolve();
+      },
+      userPasswordChanged: (
+        user: User,
+        method: 'change' | 'reset',
+        closedSessionCount: number,
+        client: ClientDescription,
+      ): Promise<void> => {
+        draft.events.push({
+          name: 'user.password-changed.v1',
+          user,
+          method,
+          closedSessionCount,
+          client,
+        });
+        return Promise.resolve();
+      },
+      userEmailChanged: (
+        user: User,
+        previousEmail: EmailAddress,
+        client: ClientDescription,
+      ): Promise<void> => {
+        draft.events.push({
+          name: 'user.email-changed.v1',
+          user,
+          previousEmail: previousEmail.value,
+          client,
+        });
+        return Promise.resolve();
+      },
+      userDeletionScheduled: (user: User): Promise<void> => {
+        draft.events.push({ name: 'user.deletion-scheduled.v1', user });
+        return Promise.resolve();
+      },
+      userDeletionCancelled: (
+        user: User,
+        sessionId: string,
+        client: ClientDescription,
+      ): Promise<void> => {
+        draft.events.push({ name: 'user.deletion-cancelled.v1', user, sessionId, client });
+        return Promise.resolve();
+      },
+      userDeleted: (userId: string, version: number): Promise<void> => {
+        draft.events.push({ name: 'user.deleted.v1', userId, version });
+        return Promise.resolve();
+      },
     };
-    return { users, credentials, codes, codeRequests, signInAttempts, events };
+    const resetLinks: PasswordResetLinkRepository = {
+      findByTokenHash: (tokenHash: string): Promise<PasswordResetLink | null> => {
+        const found: PasswordResetLinkState | undefined = draft.resetLinks.find(
+          (link: PasswordResetLinkState) => link.tokenHash === tokenHash,
+        );
+        return Promise.resolve(found === undefined ? null : PasswordResetLink.restore(found));
+      },
+      replaceCurrent: (userId: string, now: Date): Promise<void> => {
+        draft.resetLinks.forEach((link: PasswordResetLinkState, index: number) => {
+          if (link.userId === userId && link.usedAt === null && link.replacedAt === null) {
+            draft.resetLinks[index] = { ...link, replacedAt: now };
+          }
+        });
+        return Promise.resolve();
+      },
+      insert: (issue: PasswordResetLinkIssue): Promise<PasswordResetLink> => {
+        this.ids += 1;
+        const state: PasswordResetLinkState = {
+          ...issue,
+          id: fakeId(this.ids),
+          usedAt: null,
+          replacedAt: null,
+        };
+        draft.resetLinks.push(state);
+        return Promise.resolve(PasswordResetLink.restore(state));
+      },
+      save: (link: PasswordResetLink): Promise<void> => {
+        const index: number = draft.resetLinks.findIndex(
+          (stored: PasswordResetLinkState) => stored.id === link.id,
+        );
+        draft.resetLinks[index] = link.snapshot;
+        return Promise.resolve();
+      },
+    };
+    const resetRequests: PasswordResetRequestRepository = {
+      lock: (email: EmailAddress): Promise<PasswordResetThrottle> =>
+        Promise.resolve(draft.resetRequests.get(email.value) ?? PasswordResetThrottle.none()),
+      save: (email: EmailAddress, throttle: PasswordResetThrottle): Promise<void> => {
+        draft.resetRequests.set(email.value, throttle);
+        return Promise.resolve();
+      },
+      erase: (email: EmailAddress): Promise<void> => {
+        draft.resetRequests.delete(email.value);
+        return Promise.resolve();
+      },
+    };
+    const emailChanges: EmailChangeRepository = {
+      find: (userId: string): Promise<PendingEmailChange | null> =>
+        Promise.resolve(draft.emailChanges.get(userId) ?? null),
+      save: (change: PendingEmailChange): Promise<void> => {
+        draft.emailChanges.set(change.userId, change);
+        return Promise.resolve();
+      },
+      drop: (userId: string): Promise<void> => {
+        draft.emailChanges.delete(userId);
+        return Promise.resolve();
+      },
+    };
+    const deletionQueue: AccountDeletionQueue = {
+      enqueue: (userId: string, occurrence: string): Promise<boolean> => {
+        const key: string = `${userId}:${occurrence}`;
+        if (draft.deletionJobs.includes(key)) {
+          return Promise.resolve(false);
+        }
+        draft.deletionJobs.push(key);
+        return Promise.resolve(true);
+      },
+    };
+    return {
+      users,
+      credentials,
+      codes,
+      codeRequests,
+      signInAttempts,
+      resetLinks,
+      resetRequests,
+      emailChanges,
+      events,
+      deletionQueue,
+    };
   }
   // #endregion
 }
@@ -703,6 +997,380 @@ export class FakeSessionOpener implements SessionOpener {
       expiresAt: new Date('2026-12-08T13:07:00Z'),
       persistent: request.persistent,
     });
+  }
+  // #endregion
+}
+
+/**
+ * Class FakeDeviceReader
+ *
+ * @description
+ * Reads every `User-Agent` as Firefox 132 on Windows, and a missing one as an unknown device.
+ */
+export class FakeDeviceReader implements DeviceReader {
+  // #region Methods
+  /**
+   * Method read
+   *
+   * @description
+   * The device of a header.
+   *
+   * @param {string | null} userAgent - The header.
+   * @returns {ClientDevice} The device.
+   */
+  public read(userAgent: string | null): ClientDevice {
+    return userAgent === null
+      ? { type: 'unknown', browser: null, browserVersion: null, os: null, osVersion: null }
+      : {
+          type: 'desktop',
+          browser: 'Firefox',
+          browserVersion: '132',
+          os: 'Windows',
+          osVersion: null,
+        };
+  }
+  // #endregion
+}
+
+/**
+ * Class FakeResetLinkSecrets
+ *
+ * @description
+ * Tokens `reset-token-<n>`, hashed as `hash:<token>`; a token that does not start with
+ * `reset-token-` is malformed.
+ */
+export class FakeResetLinkSecrets implements ResetLinkSecrets {
+  // #region Properties
+  /**
+   * Property issued
+   *
+   * @description
+   * Tokens drawn so far.
+   *
+   * @type {number}
+   */
+  public issued: number = 0;
+  // #endregion
+
+  // #region Methods
+  /**
+   * Method issue
+   *
+   * @description
+   * Draws the next token.
+   *
+   * @returns {IssuedResetToken} The token and its hash.
+   */
+  public issue(): IssuedResetToken {
+    this.issued += 1;
+    const token: string = `reset-token-${String(this.issued)}`;
+    return { token, tokenHash: `hash:${token}` };
+  }
+
+  /**
+   * Method hashOf
+   *
+   * @description
+   * Hashes a token sent back.
+   *
+   * @param {string} token - The token.
+   * @returns {string | null} Its hash, or `null` when malformed.
+   */
+  public hashOf(token: string): string | null {
+    return token.startsWith('reset-token-') ? `hash:${token}` : null;
+  }
+  // #endregion
+}
+
+/**
+ * Class FakeAccountSessions
+ *
+ * @description
+ * The sessions of the accounts, in memory: each session names its person, whether it is open and
+ * when its person last proved who they are.
+ */
+export class FakeAccountSessions implements AccountSessions {
+  // #region Properties
+  /**
+   * Property sessions
+   *
+   * @description
+   * Sessions by id.
+   *
+   * @type {Map<string, { userId: string; open: boolean; authenticatedAt: Date | null }>}
+   */
+  public readonly sessions = new Map<
+    string,
+    { userId: string; open: boolean; authenticatedAt: Date | null }
+  >();
+
+  /**
+   * Property erased
+   *
+   * @description
+   * Accounts whose sessions were erased.
+   *
+   * @type {string[]}
+   */
+  public readonly erased: string[] = [];
+
+  /**
+   * Property clock
+   *
+   * @description
+   * The clock of the spec.
+   *
+   * @type {Clock}
+   * @readonly
+   */
+  private readonly clock: Clock;
+  // #endregion
+
+  // #region Constructor
+  /**
+   * Constructor
+   *
+   * @description
+   * Takes the clock of the spec.
+   *
+   * @param {Clock} clock - The clock.
+   * @constructor
+   */
+  public constructor(clock: Clock) {
+    this.clock = clock;
+  }
+  // #endregion
+
+  // #region Methods
+  /**
+   * Method seed
+   *
+   * @description
+   * Stores an open session.
+   *
+   * @param {string} id - Id of the session.
+   * @param {string} userId - Its person.
+   * @param {Date | null} authenticatedAt - Its last proof of who the person is.
+   */
+  public seed(id: string, userId: string, authenticatedAt: Date | null): void {
+    this.sessions.set(id, { userId, open: true, authenticatedAt });
+  }
+
+  /**
+   * Method check
+   *
+   * @description
+   * The status of a session.
+   *
+   * @param {string} userId - The person.
+   * @param {string} sessionId - The session.
+   * @returns {Promise<SessionAuthentication>} Its status.
+   */
+  public check(userId: string, sessionId: string): Promise<SessionAuthentication> {
+    const session: { userId: string; open: boolean; authenticatedAt: Date | null } | undefined =
+      this.sessions.get(sessionId);
+    if (session?.userId !== userId || !session.open) {
+      return Promise.resolve('not-found');
+    }
+    const recent: boolean =
+      session.authenticatedAt !== null &&
+      this.clock.now().getTime() < session.authenticatedAt.getTime() + 10 * 60_000;
+    return Promise.resolve(recent ? 'recent' : 'stale');
+  }
+
+  /**
+   * Method authenticate
+   *
+   * @description
+   * Records a recent authentication.
+   *
+   * @param {string} userId - The person.
+   * @param {string} sessionId - The session.
+   * @returns {Promise<RecentAuthentication | null>} The window, or `null`.
+   */
+  public async authenticate(
+    userId: string,
+    sessionId: string,
+  ): Promise<RecentAuthentication | null> {
+    if ((await this.check(userId, sessionId)) === 'not-found') {
+      return null;
+    }
+    const now: Date = this.clock.now();
+    this.sessions.set(sessionId, { userId, open: true, authenticatedAt: now });
+    return { authenticatedAt: now, expiresAt: new Date(now.getTime() + 10 * 60_000) };
+  }
+
+  /**
+   * Method endRecentAuthentication
+   *
+   * @description
+   * Ends the recent authentication of the open sessions but one.
+   *
+   * @param {string} userId - The person.
+   * @param {string | null} exceptSessionId - The session that keeps its own.
+   * @returns {Promise<void>} Resolves at once.
+   */
+  public endRecentAuthentication(userId: string, exceptSessionId: string | null): Promise<void> {
+    for (const [id, session] of this.sessions) {
+      if (session.userId === userId && session.open && id !== exceptSessionId) {
+        this.sessions.set(id, { ...session, authenticatedAt: null });
+      }
+    }
+    return Promise.resolve();
+  }
+
+  /**
+   * Method revokeAll
+   *
+   * @description
+   * Closes the open sessions but one.
+   *
+   * @param {string} userId - The person.
+   * @param {string | null} exceptSessionId - The session that stays open.
+   * @returns {Promise<number>} How many were closed.
+   */
+  public revokeAll(userId: string, exceptSessionId: string | null): Promise<number> {
+    let revoked: number = 0;
+    for (const [id, session] of this.sessions) {
+      if (session.userId === userId && session.open && id !== exceptSessionId) {
+        this.sessions.set(id, { ...session, open: false });
+        revoked += 1;
+      }
+    }
+    return Promise.resolve(revoked);
+  }
+
+  /**
+   * Method countOpen
+   *
+   * @description
+   * Counts the open sessions of a person.
+   *
+   * @param {string} userId - The person.
+   * @returns {Promise<number>} The count.
+   */
+  public countOpen(userId: string): Promise<number> {
+    return Promise.resolve(
+      [...this.sessions.values()].filter(
+        (session: { userId: string; open: boolean }) => session.userId === userId && session.open,
+      ).length,
+    );
+  }
+
+  /**
+   * Method erase
+   *
+   * @description
+   * Deletes the sessions of an account.
+   *
+   * @param {string} userId - The account.
+   * @returns {Promise<void>} Resolves at once.
+   */
+  public erase(userId: string): Promise<void> {
+    for (const [id, session] of this.sessions) {
+      if (session.userId === userId) {
+        this.sessions.delete(id);
+      }
+    }
+    this.erased.push(userId);
+    return Promise.resolve();
+  }
+  // #endregion
+}
+
+/**
+ * Class FakeAccountApiTokens
+ *
+ * @description
+ * Counts the unrevoked personal API tokens of each person.
+ */
+export class FakeAccountApiTokens implements AccountApiTokens {
+  // #region Properties
+  /**
+   * Property unrevoked
+   *
+   * @description
+   * Unrevoked tokens by person.
+   *
+   * @type {Map<string, number>}
+   */
+  public readonly unrevoked = new Map<string, number>();
+
+  /**
+   * Property erased
+   *
+   * @description
+   * Accounts whose tokens were erased.
+   *
+   * @type {string[]}
+   */
+  public readonly erased: string[] = [];
+  // #endregion
+
+  // #region Methods
+  /**
+   * Method revokeAll
+   *
+   * @description
+   * Revokes every token of a person.
+   *
+   * @param {string} userId - The person.
+   * @returns {Promise<number>} How many were revoked.
+   */
+  public revokeAll(userId: string): Promise<number> {
+    const count: number = this.unrevoked.get(userId) ?? 0;
+    this.unrevoked.set(userId, 0);
+    return Promise.resolve(count);
+  }
+
+  /**
+   * Method erase
+   *
+   * @description
+   * Deletes the tokens of an account.
+   *
+   * @param {string} userId - The account.
+   * @returns {Promise<void>} Resolves at once.
+   */
+  public erase(userId: string): Promise<void> {
+    this.unrevoked.delete(userId);
+    this.erased.push(userId);
+    return Promise.resolve();
+  }
+  // #endregion
+}
+
+/**
+ * Class FakeOwnedOrganizations
+ *
+ * @description
+ * The organizations each person owns.
+ */
+export class FakeOwnedOrganizations implements OwnedOrganizations {
+  // #region Properties
+  /**
+   * Property owned
+   *
+   * @description
+   * Owned organizations by person.
+   *
+   * @type {Map<string, readonly string[]>}
+   */
+  public readonly owned = new Map<string, readonly string[]>();
+  // #endregion
+
+  // #region Methods
+  /**
+   * Method find
+   *
+   * @description
+   * The organizations a person owns.
+   *
+   * @param {string} userId - The person.
+   * @returns {Promise<readonly string[]>} Their ids.
+   */
+  public find(userId: string): Promise<readonly string[]> {
+    return Promise.resolve(this.owned.get(userId) ?? []);
   }
   // #endregion
 }

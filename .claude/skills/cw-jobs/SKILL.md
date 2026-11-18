@@ -40,7 +40,10 @@ modules awaiting migration.
 - Events between services: they go through the outbox (`cw-outbox-and-events`).
 - Work on another service's data: a job only touches this service's database.
 
-## Not there yet
+## In this service
 
-`@cadenway/nest-jobs` is the fourth package of cadenway-service-kit and is not published yet. Until
-it is installed, no job is written: do not depend on `pg-boss` directly.
+`@cadenway/nest-jobs` is installed: `JobsRuntimeModule` (producer, worker and scheduler) is
+registered in `src/app.module.ts`, the queues are declared once in `src/config/job-queues.ts`, and
+`src/migrate.ts` provisions the `pgboss` schema and the queues as the migrator role. The accounts
+module completes the scheduled deletions with them (its `MODULE.md`). Never depend on `pg-boss`
+directly.

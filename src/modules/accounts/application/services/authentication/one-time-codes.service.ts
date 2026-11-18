@@ -93,6 +93,8 @@ export async function requestOneTimeCode(
  * @param {User} user - Account the code is for.
  * @param {OneTimeCodePurpose} purpose - What the code proves.
  * @param {Date} now - When the code is issued.
+ * @param {EmailAddress} recipient - Where the e-mail goes: the address of the account, or the new
+ * address of an `email-change`, whose code a signed-in person asked for.
  * @returns {Promise<Date>} When the new code stops working.
  */
 export async function issueOneTimeCode(
@@ -101,6 +103,7 @@ export async function issueOneTimeCode(
   user: User,
   purpose: OneTimeCodePurpose,
   now: Date,
+  recipient: EmailAddress = user.email,
 ): Promise<Date> {
   await store.codes.replaceCurrent(user.id, purpose, now);
   const code: string = secrets.generate();
@@ -108,7 +111,15 @@ export async function issueOneTimeCode(
     OneTimeCode.issue(user.id, purpose, secrets.hash({ userId: user.id, purpose, code }), now),
   );
   const expiresAt: Date = stored.snapshot.expiresAt;
-  await store.events.oneTimeCodeIssued({ codeId: stored.id, user, purpose, code, expiresAt });
+  await store.events.oneTimeCodeIssued({
+    codeId: stored.id,
+    user,
+    purpose,
+    code,
+    expiresAt,
+    recipient,
+    requestedByUser: purpose === 'email-change',
+  });
   return expiresAt;
 }
 

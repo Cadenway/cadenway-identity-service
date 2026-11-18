@@ -72,5 +72,18 @@ export interface OneTimeCodeRepository {
    * @returns {Promise<boolean>} Whether such a code exists.
    */
   endedWithHash(userId: string, purpose: OneTimeCodePurpose, codeHash: string): Promise<boolean>;
+
+  /**
+   * Method replaceAllCurrent
+   *
+   * @description
+   * Makes every current code of an account stop working, whatever its purpose: a new address
+   * leaves no code of the previous one usable.
+   *
+   * @param {string} userId - Id of the account.
+   * @param {Date} now - When they were replaced.
+   * @returns {Promise<void>} Resolves once written.
+   */
+  replaceAllCurrent(userId: string, now: Date): Promise<void>;
   // #endregion
 }

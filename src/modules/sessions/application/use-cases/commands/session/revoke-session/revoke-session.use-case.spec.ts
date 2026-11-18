@@ -42,6 +42,7 @@ describe('RevokeSession', () => {
       userId: CAMILLE_ID,
       persistent: true,
       client: { ipAddress: '86.247.12.30', userAgent: null },
+      newDeviceNotice: null,
     });
   });
 

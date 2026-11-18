@@ -31,5 +31,7 @@ export function toSession(row: SessionRow): Session {
     organizationId: row.organizationId,
     memberId: row.memberId,
     version: row.version,
+    signedInAt: row.signedInAt,
+    authenticatedAt: row.authenticatedAt,
   });
 }

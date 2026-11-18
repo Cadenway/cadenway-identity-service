@@ -327,7 +327,7 @@ describe('identity-service organization context', () => {
   async function openSession(userId: string): Promise<{ id: string; token: string }> {
     const opened = await app
       .get(OpenSession, { strict: false })
-      .execute({ userId, persistent: false, client });
+      .execute({ userId, persistent: false, client, newDeviceNotice: null });
     secrets.push(opened.token);
     return { id: opened.id, token: opened.token };
   }
@@ -375,7 +375,8 @@ describe('identity-service organization context', () => {
   }
 
   /**
-   * Creates a personal API token in the current organization of a session.
+   * Creates a personal API token in the current organization of a session, from a session opened
+   * just before, which chooses that organization and counts as recently authenticated.
    *
    * @param userId - The user.
    * @param organizationId - The current organization of the session.
@@ -387,12 +388,12 @@ describe('identity-service organization context', () => {
     organizationId: string,
     body: object = { name: 'Synchronisation GitLab', scopes: ['tasks:read'] },
   ): Promise<Response> {
-    const response = await call(
-      'post',
-      '/internal/v1/api-tokens',
-      user(userId, organizationId),
-      body,
-    );
+    const session = await openSession(userId);
+    expect((await choose(userId, session.id, organizationId)).status).toBe(200);
+    const response = await call('post', '/internal/v1/api-tokens', user(userId, organizationId), {
+      ...body,
+      sessionId: session.id,
+    });
     const secret = (response.body as { secret?: unknown }).secret;
     if (typeof secret === 'string') {
       secrets.push(secret);

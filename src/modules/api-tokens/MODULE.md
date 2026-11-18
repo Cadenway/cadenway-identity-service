@@ -12,12 +12,18 @@ It does not own the scopes a route requires nor the rate limit (the gateway), no
 
 ## Public entry points
 
-| Entry point | Consumers |
-| ----------- | --------- |
-| None        | None      |
+| Entry point                               | Consumers |
+| ----------------------------------------- | --------- |
+| `api-tokens.module`                       | accounts  |
+| `public/api-token/revoke-user-api-tokens` | accounts  |
+| `public/api-token/erase-user-api-tokens`  | accounts  |
 
-`ApiTokensModule` imports `MembershipsModule` and binds its own `ActiveMemberships` port to the
-`FindActiveMembership` provider that module exports.
+`ApiTokensModule` exports the `RevokeUserApiTokens` and `EraseUserApiTokens` providers, with their
+input and output types: the accounts module binds them to its `AccountApiTokens` port for the
+deletion of an account, and they join its system transaction. `ApiTokensModule` imports
+`MembershipsModule` and binds its own `ActiveMemberships` port to the `FindActiveMembership`
+provider that module exports, and `SessionsModule`, binding its `RecentAuthentications` port to
+`CheckOrganizationSessionAuthentication`.
 
 ## Owned tables
 
@@ -27,20 +33,22 @@ It does not own the scopes a route requires nor the rate limit (the gateway), no
 
 Created by `migrations/0003_organization_context_and_api_tokens.sql`, which forces the policy by
 hand. `user_id` names an account of the accounts module without a foreign key. Index
-`(organization_id, user_id, created_at, id)` for the list; `scopes` is a `text[]` with a `CHECK`
-on the four known scopes, widened by a migration when the contract adds one.
+`(organization_id, user_id, created_at, id)` for the list, and `(user_id)` for the revocation and
+the erasure of the tokens of a person in every organization (migration 0004); `scopes` is a
+`text[]` with a `CHECK` on the four known scopes, widened by a migration when the contract adds
+one.
 
 ## API
 
 From `openapi/internal/identity-service.yaml` of the installed `@cadenway/contracts`; issuer
 `api-gateway` only.
 
-| Route                                         | Actor    | Organization | Success                     | Refusals                       |
-| --------------------------------------------- | -------- | ------------ | --------------------------- | ------------------------------ |
-| `POST /internal/v1/api-tokens`                | `user`   | Required     | 201, `Location`, secret     | 400                            |
-| `GET /internal/v1/api-tokens`                 | `user`   | Required     | 200, one page               | 400                            |
-| `DELETE /internal/v1/api-tokens/{apiTokenId}` | `user`   | Required     | 204                         | 400, 404 `api-token.not-found` |
-| `POST /internal/v1/api-tokens/introspect`     | `system` | None         | 200, `active` true or false | 400                            |
+| Route                                         | Actor    | Organization | Success                     | Refusals                                                           |
+| --------------------------------------------- | -------- | ------------ | --------------------------- | ------------------------------------------------------------------ |
+| `POST /internal/v1/api-tokens`                | `user`   | Required     | 201, `Location`, secret     | 400, 403 `auth.reauthentication-required`, 404 `session.not-found` |
+| `GET /internal/v1/api-tokens`                 | `user`   | Required     | 200, one page               | 400                                                                |
+| `DELETE /internal/v1/api-tokens/{apiTokenId}` | `user`   | Required     | 204                         | 400, 404 `api-token.not-found`                                     |
+| `POST /internal/v1/api-tokens/introspect`     | `system` | None         | 200, `active` true or false | 400                                                                |
 
 Every route also answers the 401 and 403 of the internal token guard, `403
 auth.organization-required` included for the routes of a session. The gateway answers `403
@@ -65,6 +73,13 @@ answers `active: false` for a token whose user is no longer a member of its orga
   an event, never in a list.
 - A token belongs to its user and to the organization of the internal token of its creation, the
   current organization of the session.
+- The creation requires a recent authentication of the session of the request, `sessionId` of the
+  body (decision 4 of P2c): without `sessionId`, or when its person did not prove who they are in
+  the last 10 minutes, `auth.reauthentication-required` with `details.methods: [password]`, and
+  nothing is created; a session that is not an open session of the actor acting on that
+  organization answers `session.not-found`.
+- The scheduling of the deletion of an account revokes every token of the person, in every
+  organization, with the next version of each; the deletion erases them.
 - Name trimmed, 1 to 100 characters; 1 to 4 scopes among `tasks:read`, `tasks:write`,
   `members:read`, `webhooks:manage`, a scope given twice counting once; expiry 30 days (default),
   90 days, 1 year (the same date of the next year, UTC) or never.
@@ -82,7 +97,12 @@ answers `active: false` for a token whose user is no longer a member of its orga
 
 - Creation, list and revocation run in the tenant transaction of the organization of the internal
   token (`TenantApiTokensUnitOfWork`): the runner sets it, the policy of `api_tokens` keeps the
-  work inside it, and every query names it again. The revocation locks the token.
+  work inside it, and every query names it again. The revocation locks the token. The check of the
+  recent authentication of the creation joins that tenant transaction and locks the session, so a
+  scheduling of the deletion of the account that overlaps the creation revokes the new token too.
+- `RevokeUserApiTokens` and `EraseUserApiTokens` run in `SystemApiTokensUnitOfWork` and join the
+  system transaction of the accounts use case that calls them (the scheduling and the completion of
+  a deletion); the tokens are locked before their revocation.
 - The introspection runs in one system transaction (`SystemApiTokensUnitOfWork`): it finds the
   token by its hash, reads the copy of the memberships in the same transaction, and writes the last
   use.
@@ -92,7 +112,13 @@ answers `active: false` for a token whose user is no longer a member of its orga
 - The system runner serves the introspection, a bounded exception like the one of the sessions
   module: the gateway calls it as itself without an organization, and the organization of a token
   is known once it is found. The exception is bounded to reading one token by its hash and writing
-  its last use; every other route uses the tenant runner.
+  its last use; every other route uses the tenant runner. The revocation and the erasure of the
+  tokens of a person for the deletion of the account are the other bounded exception: they serve
+  no route with an organization, name their rows by `user_id`, and join the system transaction of
+  the accounts module.
+- The internal creation body carries `sessionId` as optional (`@cadenway/contracts` 0.7.0); the
+  gateway always sends it, and its absence answers `403 auth.reauthentication-required`, as the
+  contract states.
 - The secret is drawn with `randomInt` character by character, which has no modulo bias, and its
   CRC32 is computed by `crc32` of `node:zlib` over the 30 random characters, encoded in base62 with
   leading zeros. A CRC32 is not a security measure: it lets a malformed or truncated token be

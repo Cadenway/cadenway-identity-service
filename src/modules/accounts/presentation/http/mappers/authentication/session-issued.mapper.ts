@@ -22,5 +22,6 @@ export function toSessionIssued(view: SessionIssuedView): SessionIssued {
       persistent: view.session.persistent,
     },
     user: toUser(view.user),
+    deletionCancelled: view.deletionCancelled,
   };
 }

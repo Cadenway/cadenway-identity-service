@@ -32,6 +32,7 @@ describe('UpdateUserProfile', () => {
       jobTitle: 'Responsable produit',
       timeZone: 'Europe/Paris',
       version: 3,
+      passwordChangedAt: new Date('2026-08-12T09:30:00Z'),
     });
     expect(accounts.state.users.get(camille.id)?.version).toBe(3);
     expect(accounts.state.events).toEqual([

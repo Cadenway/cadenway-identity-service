@@ -16,7 +16,7 @@ paths:
   direct NATS client.
 - Handlers deduplicate on the event id and call a use case; they never write another service's data.
 - A shape change is a new version; the old one keeps being emitted until every consumer moved.
-- Events emitted by this service, from `asyncapi/identity-service.yaml`: `user.signed-up.v1`, `user.email-verified.v1`, `user.profile-updated.v1`, `session.revoked.v1`, and `one-time-code.issued.v1`, restricted (listed in `RESTRICTED_EVENT_NAMES`, published on `restricted.` for notification-service only). Any other event starts in cadenway-api-contracts.
+- Events emitted by this service, from `asyncapi/identity-service.yaml`: `user.signed-up.v1`, `user.email-verified.v1`, `user.profile-updated.v1`, `user.password-changed.v1`, `user.email-changed.v1`, `user.deletion-scheduled.v1`, `user.deletion-cancelled.v1`, `user.deleted.v1`, `session.revoked.v1`, `session.opened-on-new-device.v1`, and `one-time-code.issued.v1` and `password-reset-link.issued.v1`, restricted (listed in `RESTRICTED_EVENT_NAMES`, published on `restricted.` for notification-service only). Any other event starts in cadenway-api-contracts.
 - Events consumed, from `asyncapi/organization-service.yaml`: `member.joined.v1`, `member.role-changed.v1` and `member.removed.v1`, by the memberships module, which applies a membership by its `version` and keeps a removed one removed (`claimVersion` keys versions per consumer and cannot order three subjects).
 
 ## Review example

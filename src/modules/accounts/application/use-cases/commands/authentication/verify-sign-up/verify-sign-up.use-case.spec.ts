@@ -201,11 +201,18 @@ describe('VerifySignUp', () => {
       jobTitle: null,
       timeZone: 'Europe/Paris',
       version: 2,
+      passwordChangedAt: user?.passwordChangedAt,
     });
+    expect(issued.deletionCancelled).toBe(false);
     expect(issued.session.token).toBe('token-1');
     expect(sessions.opened).toEqual([
       {
-        request: { userId: user?.id, persistent: false, client: VERIFICATION.client },
+        request: {
+          userId: user?.id,
+          persistent: false,
+          client: VERIFICATION.client,
+          newDeviceNotice: null,
+        },
         inTransaction: true,
       },
     ]);

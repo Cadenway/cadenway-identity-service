@@ -90,5 +90,18 @@ export class DrizzleCodeRequestRepository implements CodeRequestRepository {
       .set({ ...throttle.snapshot, updatedAt: sql`now()` })
       .where(eq(codeRequests.email, email.value));
   }
+
+  /**
+   * Method erase
+   *
+   * @description
+   * Deletes the throttle row of an address.
+   *
+   * @param {EmailAddress} email - The normalized address.
+   * @returns {Promise<void>} Resolves once deleted.
+   */
+  public async erase(email: EmailAddress): Promise<void> {
+    await this.db.delete(codeRequests).where(eq(codeRequests.email, email.value));
+  }
   // #endregion
 }

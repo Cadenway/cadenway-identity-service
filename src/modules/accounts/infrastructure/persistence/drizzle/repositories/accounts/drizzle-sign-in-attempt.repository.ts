@@ -91,5 +91,18 @@ export class DrizzleSignInAttemptRepository implements SignInAttemptRepository {
       })
       .where(eq(signInAttempts.email, email.value));
   }
+
+  /**
+   * Method erase
+   *
+   * @description
+   * Deletes the lockout row of an address.
+   *
+   * @param {EmailAddress} email - The normalized address.
+   * @returns {Promise<void>} Resolves once deleted.
+   */
+  public async erase(email: EmailAddress): Promise<void> {
+    await this.db.delete(signInAttempts).where(eq(signInAttempts.email, email.value));
+  }
   // #endregion
 }

@@ -60,6 +60,7 @@ describe('IntrospectToken', () => {
       userId: CAMILLE_ID,
       persistent: false,
       client: { ipAddress: '86.247.12.30', userAgent: null },
+      newDeviceNotice: null,
     });
   });
 

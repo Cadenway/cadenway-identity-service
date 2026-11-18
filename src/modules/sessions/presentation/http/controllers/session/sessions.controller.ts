@@ -1,13 +1,19 @@
-import type { SessionOrganization } from '@cadenway/contracts/types/internal/identity-service';
+import type {
+  RevokedSessions,
+  SessionOrganization,
+} from '@cadenway/contracts/types/internal/identity-service';
 import { InternalAccess, ProblemException, getOrganizationContext } from '@cadenway/nest-common';
 import type { OrganizationContext } from '@cadenway/nest-common';
-import { Body, Controller, Delete, HttpCode, Param, Put } from '@nestjs/common';
+import { Body, Controller, Delete, HttpCode, Param, Post, Put } from '@nestjs/common';
 
 import { OrganizationNotFound } from '../../../../application/models/session/organization-not-found.model.js';
 import { SessionNotFound } from '../../../../application/models/session/session-not-found.model.js';
+import type { RevokeOtherSessionsOutput } from '../../../../application/use-cases/commands/session/revoke-other-sessions/revoke-other-sessions.output.js';
+import { RevokeOtherSessions } from '../../../../application/use-cases/commands/session/revoke-other-sessions/revoke-other-sessions.use-case.js';
 import { RevokeSession } from '../../../../application/use-cases/commands/session/revoke-session/revoke-session.use-case.js';
 import type { SwitchSessionOrganizationOutput } from '../../../../application/use-cases/commands/session/switch-session-organization/switch-session-organization.output.js';
 import { SwitchSessionOrganization } from '../../../../application/use-cases/commands/session/switch-session-organization/switch-session-organization.use-case.js';
+import { RevokeOtherSessionsPath } from '../../dto/input/session/revoke-other-sessions-path.dto.js';
 import { RevokeSessionPath } from '../../dto/input/session/revoke-session-path.dto.js';
 import { SwitchSessionOrganizationBody } from '../../dto/input/session/switch-session-organization-body.dto.js';
 import { SwitchSessionOrganizationPath } from '../../dto/input/session/switch-session-organization-path.dto.js';
@@ -36,8 +42,10 @@ function actorUserId(): string {
  * @description
  * The routes of a session of the signed-in user: `DELETE /internal/v1/sessions/{sessionId}`, which
  * the gateway calls for `POST /v1/auth/sign-out`, and
- * `PUT /internal/v1/sessions/{sessionId}/organization`, for `PUT /v1/session/organization`, both
- * with the session the introspection returned. They accept the issuer `api-gateway` only, with the
+ * `PUT /internal/v1/sessions/{sessionId}/organization`, for `PUT /v1/session/organization`, and
+ * `POST /internal/v1/sessions/{sessionId}/revoke-others`, for `POST /v1/sessions/revoke-others`, with
+ * the session the introspection returned (the revocation also with the id of
+ * `DELETE /v1/sessions/{sessionId}`). They accept the issuer `api-gateway` only, with the
  * actor `user` and no organization (an organization the token may carry is ignored); the user comes
  * from the verified internal token, never from the request.
  */
@@ -66,6 +74,17 @@ export class SessionsController {
    * @readonly
    */
   private readonly switchSessionOrganization: SwitchSessionOrganization;
+
+  /**
+   * Property revokeOtherSessions
+   *
+   * @description
+   * Use case of "Déconnecter les autres".
+   *
+   * @type {RevokeOtherSessions}
+   * @readonly
+   */
+  private readonly revokeOtherSessions: RevokeOtherSessions;
   // #endregion
 
   // #region Constructor
@@ -78,14 +97,17 @@ export class SessionsController {
    * @param {RevokeSession} revokeSession - Use case of the revocation.
    * @param {SwitchSessionOrganization} switchSessionOrganization - Use case of the choice of the
    * current organization.
+   * @param {RevokeOtherSessions} revokeOtherSessions - Use case of "Déconnecter les autres".
    * @constructor
    */
   public constructor(
     revokeSession: RevokeSession,
     switchSessionOrganization: SwitchSessionOrganization,
+    revokeOtherSessions: RevokeOtherSessions,
   ) {
     this.revokeSession = revokeSession;
     this.switchSessionOrganization = switchSessionOrganization;
+    this.revokeOtherSessions = revokeOtherSessions;
   }
   // #endregion
 
@@ -151,6 +173,36 @@ export class SessionsController {
       throw error;
     }
     return { organizationId: chosen.organizationId, role: chosen.role };
+  }
+
+  /**
+   * Method revokeOthers
+   *
+   * @description
+   * `POST /internal/v1/sessions/{sessionId}/revoke-others`: revokes every other open session of the
+   * actor. A session of another user, an unknown or an ended one answers `404 session.not-found`,
+   * which the gateway answers as `401 auth.session-expired`.
+   *
+   * @param {RevokeOtherSessionsPath} path - The session of the request.
+   * @returns {Promise<RevokedSessions>} How many were revoked.
+   * @throws {ProblemException} `404 session.not-found`.
+   */
+  @Post(':sessionId/revoke-others')
+  @HttpCode(200)
+  public async revokeOthers(@Param() path: RevokeOtherSessionsPath): Promise<RevokedSessions> {
+    let revoked: RevokeOtherSessionsOutput;
+    try {
+      revoked = await this.revokeOtherSessions.execute({
+        actorUserId: actorUserId(),
+        sessionId: path.sessionId,
+      });
+    } catch (error) {
+      if (error instanceof SessionNotFound) {
+        throw new ProblemException({ status: 404, code: 'session.not-found' });
+      }
+      throw error;
+    }
+    return { revokedCount: revoked.revokedCount };
   }
   // #endregion
 }

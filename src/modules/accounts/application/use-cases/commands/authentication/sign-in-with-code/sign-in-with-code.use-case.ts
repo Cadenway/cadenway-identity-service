@@ -1,16 +1,16 @@
 import type { User } from '../../../../../domain/aggregates/account/user.aggregate.js';
 import { EmailAddress } from '../../../../../domain/value-objects/email/email-address.value-object.js';
-import { toAccountView } from '../../../../mappers/accounts/account-view.mapper.js';
 import { AccountRefusal } from '../../../../models/authentication/account-refusal.model.js';
 import type { Refusal } from '../../../../models/authentication/refusal.model.js';
-import type { OpenedSession } from '../../../../models/sessions/opened-session.model.js';
 import type { AccountsStore } from '../../../../models/transactions/accounts-store.model.js';
 import type { Clock } from '../../../../ports/outbound/clock/accounts/clock.port.js';
+import type { DeviceReader } from '../../../../ports/outbound/device/accounts/device-reader.port.js';
 import type { SessionOpener } from '../../../../ports/outbound/identity/sessions/session-opener.port.js';
 import type { OneTimeCodeSecrets } from '../../../../ports/outbound/security/authentication/one-time-code-secrets.port.js';
 import type { AccountsUnitOfWork } from '../../../../ports/outbound/transactions/accounts/accounts-unit-of-work.port.js';
 import type { SessionIssuedView } from '../../../../projections/authentication/session-issued-view.projection.js';
 import { checkOneTimeCode } from '../../../../services/authentication/one-time-codes.service.js';
+import { completeSignIn } from '../../../../services/authentication/sign-in-completion.service.js';
 import type { SignInWithCodeInput } from './sign-in-with-code.input.js';
 
 /**
@@ -68,6 +68,17 @@ export class SignInWithCode {
    * @readonly
    */
   private readonly clock: Clock;
+
+  /**
+   * Property devices
+   *
+   * @description
+   * Reads the device of the browser for the security e-mails.
+   *
+   * @type {DeviceReader}
+   * @readonly
+   */
+  private readonly devices: DeviceReader;
   // #endregion
 
   // #region Constructor
@@ -88,11 +99,13 @@ export class SignInWithCode {
     secrets: OneTimeCodeSecrets,
     sessions: SessionOpener,
     clock: Clock,
+    devices: DeviceReader,
   ) {
     this.unitOfWork = unitOfWork;
     this.secrets = secrets;
     this.sessions = sessions;
     this.clock = clock;
+    this.devices = devices;
   }
   // #endregion
 
@@ -112,7 +125,7 @@ export class SignInWithCode {
     const now: Date = this.clock.now();
     const outcome: SessionIssuedView | Refusal = await this.unitOfWork.run(
       async (store: AccountsStore): Promise<SessionIssuedView | Refusal> => {
-        const user: User | null = await store.users.findByEmail(email, false);
+        const user: User | null = await store.users.findByEmail(email, true);
         if (!user?.isVerified) {
           return { reason: 'code-invalid' };
         }
@@ -127,12 +140,14 @@ export class SignInWithCode {
         if (refusal !== null) {
           return refusal;
         }
-        const session: OpenedSession = await this.sessions.open({
-          userId: user.id,
-          persistent: input.rememberMe,
-          client: input.client,
-        });
-        return { session, user: toAccountView(user) };
+        return completeSignIn(
+          store,
+          this.sessions,
+          this.devices,
+          user,
+          input.rememberMe,
+          input.client,
+        );
       },
     );
     if ('reason' in outcome) {

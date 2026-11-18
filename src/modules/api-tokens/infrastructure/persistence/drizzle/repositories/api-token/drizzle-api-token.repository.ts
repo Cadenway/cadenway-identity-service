@@ -221,5 +221,38 @@ export class DrizzleApiTokenRepository implements ApiTokenRepository {
         ),
       );
   }
+
+  /**
+   * Method lockUnrevokedOfUser
+   *
+   * @description
+   * Reads and locks the unrevoked tokens of a person through the index on `user_id`; only a system
+   * transaction sees the rows of every organization.
+   *
+   * @param {string} userId - The person.
+   * @returns {Promise<ApiToken[]>} The tokens.
+   */
+  public async lockUnrevokedOfUser(userId: string): Promise<ApiToken[]> {
+    const rows: ApiTokenRow[] = await this.db
+      .select()
+      .from(apiTokens)
+      .where(and(eq(apiTokens.userId, userId), isNull(apiTokens.revokedAt)))
+      .orderBy(apiTokens.id)
+      .for('update');
+    return rows.map(toApiToken);
+  }
+
+  /**
+   * Method eraseOfUser
+   *
+   * @description
+   * Deletes every token of an account through the index on `user_id`.
+   *
+   * @param {string} userId - The account.
+   * @returns {Promise<void>} Resolves once deleted.
+   */
+  public async eraseOfUser(userId: string): Promise<void> {
+    await this.db.delete(apiTokens).where(eq(apiTokens.userId, userId));
+  }
   // #endregion
 }

@@ -25,6 +25,7 @@ describe('GetUser', () => {
       jobTitle: null,
       timeZone: 'Europe/Paris',
       version: 2,
+      passwordChangedAt: new Date('2026-08-12T09:30:00Z'),
     });
   });
 

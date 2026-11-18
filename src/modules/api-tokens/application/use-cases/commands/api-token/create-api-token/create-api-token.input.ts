@@ -61,5 +61,17 @@ export interface CreateApiTokenInput {
    * @readonly
    */
   readonly expiration: '30-days' | '90-days' | '1-year' | 'never';
+
+  /**
+   * Property sessionId
+   *
+   * @description
+   * The session of the request, whose recent authentication is checked; `null` when the request
+   * names none, which is refused.
+   *
+   * @type {string | null}
+   * @readonly
+   */
+  readonly sessionId: string | null;
   // #endregion
 }

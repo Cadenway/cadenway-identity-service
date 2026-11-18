@@ -78,7 +78,36 @@ function shapeOf(refusal: Refusal): ProblemShape {
     case 'code-invalid':
     case 'code-expired':
     case 'sign-up-replaced':
+    case 'reset-link-expired':
+    case 'email-unchanged':
       return { status: 422, code: `auth.${refusal.reason}` };
+    case 'password-incorrect':
+      return {
+        status: 422,
+        code: 'auth.password-incorrect',
+        details: { remainingAttempts: refusal.remainingAttempts },
+      };
+    case 'reauthentication-required':
+      return {
+        status: 403,
+        code: 'auth.reauthentication-required',
+        details: { methods: ['password'] },
+      };
+    case 'reset-throttled':
+      return {
+        status: 429,
+        code: 'auth.reset-throttled',
+        details: { resendAvailableAt: refusal.resendAvailableAt.toISOString() },
+        retryAt: refusal.resendAvailableAt,
+      };
+    case 'organization-owner':
+      return {
+        status: 409,
+        code: 'account.organization-owner',
+        details: { organizationIds: [...refusal.organizationIds] },
+      };
+    case 'session-not-found':
+      return { status: 404, code: 'session.not-found' };
     case 'password-too-short':
       return {
         status: 422,

@@ -357,8 +357,9 @@ export class VerifySignUp {
       userId: verified.id,
       persistent: input.rememberMe,
       client: input.client,
+      newDeviceNotice: null,
     });
-    return { session, user: toAccountView(verified) };
+    return { session, user: toAccountView(verified), deletionCancelled: false };
   }
   // #endregion
 }

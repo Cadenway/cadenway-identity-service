@@ -26,7 +26,13 @@ import type { SessionState } from '../../value-objects/session/session-state.val
  *   active, with the next version; choosing the same membership again changes nothing. A new
  *   session starts in the membership its sign-in found, or in none. The session acts on its
  *   organization only while that very membership is active: a removal ends it for good, since a
- *   person who joins again gets a new membership (`asyncapi/organization-service.yaml`).
+ *   person who joins again gets a new membership (`asyncapi/organization-service.yaml`);
+ * - a session records when its person last proved who they are (decision 4 of P2c, "Recent
+ *   authentication" of `openapi/internal/identity-service.yaml`): the sign-in that opened it, a
+ *   confirmed password or the current password of a change. The change of address, the scheduling
+ *   of the deletion and the creation of a personal API token require it within the last 10
+ *   minutes. A change or a reset of the password ends it in the sessions it leaves open; the
+ *   window belongs to one session.
  */
 export class Session {
   // #region Properties
@@ -63,6 +69,17 @@ export class Session {
    * @readonly
    */
   public static readonly ACTIVITY_RESOLUTION_MS: number = 60_000;
+
+  /**
+   * Property RECENT_AUTHENTICATION_MS
+   *
+   * @description
+   * How long a proof of who the person is counts as recent: 10 minutes (decision 4 of P2c).
+   *
+   * @type {number}
+   * @readonly
+   */
+  public static readonly RECENT_AUTHENTICATION_MS: number = 10 * 60_000;
 
   /**
    * Property state
@@ -170,6 +187,8 @@ export class Session {
       memberId: membership?.memberId ?? null,
       lastActiveAt: now,
       expiresAt: new Date(now.getTime() + Session.ABSOLUTE_LIFETIME_MS),
+      signedInAt: now,
+      authenticatedAt: now,
       version: 1,
     };
   }
@@ -292,6 +311,56 @@ export class Session {
       throw new SessionEndedError();
     }
     return new Session({ ...this.state, revokedAt: now, version: this.state.version + 1 });
+  }
+
+  /**
+   * Method isRecentlyAuthenticatedAt
+   *
+   * @description
+   * Whether the person of the session proved who they are within the 10 minutes before an instant.
+   *
+   * @param {Date} now - The instant.
+   * @returns {boolean} `true` inside the window.
+   */
+  public isRecentlyAuthenticatedAt(now: Date): boolean {
+    const authenticatedAt: Date | null = this.state.authenticatedAt;
+    return (
+      authenticatedAt !== null &&
+      now.getTime() < authenticatedAt.getTime() + Session.RECENT_AUTHENTICATION_MS
+    );
+  }
+
+  /**
+   * Method authenticate
+   *
+   * @description
+   * Records that the person of an active session proved who they are now, which opens its window
+   * of recent authentication.
+   *
+   * @param {Date} now - When they proved it.
+   * @returns {Session} The session with its recent authentication.
+   * @throws {SessionEndedError} When the session is no longer active.
+   */
+  public authenticate(now: Date): Session {
+    if (!this.isActiveAt(now)) {
+      throw new SessionEndedError();
+    }
+    return new Session({ ...this.state, authenticatedAt: now });
+  }
+
+  /**
+   * Method endRecentAuthentication
+   *
+   * @description
+   * Ends the recent authentication of the session, as a change or a reset of the password does to
+   * the sessions it leaves open.
+   *
+   * @returns {Session} The session without a recent authentication.
+   */
+  public endRecentAuthentication(): Session {
+    return this.state.authenticatedAt === null
+      ? this
+      : new Session({ ...this.state, authenticatedAt: null });
   }
   // #endregion
 }

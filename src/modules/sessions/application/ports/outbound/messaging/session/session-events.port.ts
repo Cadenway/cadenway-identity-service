@@ -1,4 +1,5 @@
 import type { Session } from '../../../../../domain/aggregates/session/session.aggregate.js';
+import type { DeviceDescription } from '../../../../models/session/device-description.model.js';
 
 /**
  * Interface SessionEvents
@@ -20,5 +21,29 @@ export interface SessionEvents {
    * @returns {Promise<void>} Resolves once appended.
    */
   sessionRevoked(session: Session, actorUserId: string): Promise<void>;
+
+  /**
+   * Method sessionOpenedOnNewDevice
+   *
+   * @description
+   * Appends `session.opened-on-new-device.v1` for a session a sign-in has just opened.
+   *
+   * @param {Session} session - The new session.
+   * @param {{ readonly device: DeviceDescription; readonly ipAddress: string }} client - The
+   * device and the address of the browser.
+   * @param {{ readonly email: string; readonly name: string; readonly language: string; readonly timeZone: string }} notice
+   * - Whom the e-mail addresses.
+   * @returns {Promise<void>} Resolves once appended.
+   */
+  sessionOpenedOnNewDevice(
+    session: Session,
+    client: { readonly device: DeviceDescription; readonly ipAddress: string },
+    notice: {
+      readonly email: string;
+      readonly name: string;
+      readonly language: string;
+      readonly timeZone: string;
+    },
+  ): Promise<void>;
   // #endregion
 }

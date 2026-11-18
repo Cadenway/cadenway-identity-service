@@ -54,8 +54,9 @@ as `migrations/0000_platform_tables.sql` does.
 ## Tables without an organization, and the system runner
 
 The tables of an account (`users`, `password_credentials`, `one_time_codes`, `code_requests`,
-`sign_in_attempts` of the accounts module) carry no `organization_id`: the contracts give an
-account, its codes and its lockout no organization. They have no policy and nothing to force; their
+`sign_in_attempts`, `password_reset_links`, `password_reset_requests` and `email_changes` of the
+accounts module) carry no `organization_id`: the contracts give an account, its codes, its links
+and its lockout no organization. They have no policy and nothing to force; their
 MODULE.md says so, and every query names its row by key or by the verified actor.
 
 Four tables carry an `organization_id` and the forced policy of the kit (migration 0003):
@@ -64,11 +65,15 @@ Four tables carry an `organization_id` and the forced policy of the kit (migrati
   the tenant transaction of their organization (the handler of a member event, the routes of a
   session that manage tokens). In a system transaction, by key only: the copy of the memberships is
   read by organization and account (the choice of an organization, both introspections, the
-  opening of a session inside a sign-in), and the introspection of a token finds it by the hash of
-  its secret and writes its last use;
+  opening of a session inside a sign-in) and by account alone for the organizations it owns (the
+  deletion of the account), the introspection of a token finds it by the hash of its secret and
+  writes its last use, and the deletion of an account revokes, then erases, the tokens of that
+  account in every organization;
 - `sessions` (its current organization, `null` without one) and `organization_choices` (the last
   organization each account chose), of the sessions module: rows of an account that name an
-  organization, read and written in system transactions only, by id, token hash or account.
+  organization, read and written in system transactions, by id, token hash or account. The one
+  tenant read is the check of the recent authentication of the session that creates a personal API
+  token, which joins the tenant transaction of the creation and locks that session.
 
 The use cases that serve a route or an event without an organization run in the system runner: the
 kit README reserves it for "events or routes without an organization" but also says "never use it

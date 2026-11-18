@@ -25,6 +25,7 @@ export default pgTable(
   },
   (table) => [
     index('memberships_organization_user_index').on(table.organizationId, table.userId),
+    index('memberships_user_id_index').on(table.userId),
     check('memberships_role_check', sql`${table.role} in ('owner', 'admin', 'member', 'guest')`),
     check('memberships_version_check', sql`${table.version} >= 1`),
     organizationPolicy('memberships_organization_isolation'),

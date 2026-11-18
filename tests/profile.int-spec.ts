@@ -9,6 +9,7 @@ import type {
   InternalTokenClaims,
 } from '@cadenway/nest-common';
 import { SystemTransactionRunner } from '@cadenway/nest-common/database';
+import { JobProducer } from '@cadenway/nest-jobs/runtime';
 import { OutboxRelay, OutboxWriter } from '@cadenway/nest-messaging/outbox';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import pg from 'pg';
@@ -268,6 +269,7 @@ describe('identity-service profile', () => {
       displayName: null,
       jobTitle: null,
       timeZone: 'Europe/Paris',
+      passwordChangedAt: expect.any(String) as unknown,
       version: 2,
     });
   });
@@ -289,6 +291,7 @@ describe('identity-service profile', () => {
       displayName: 'camille',
       jobTitle: 'Responsable produit',
       timeZone: 'America/Montreal',
+      passwordChangedAt: expect.any(String) as unknown,
       version: 3,
     });
     expect(await profileEvents()).toEqual([
@@ -387,6 +390,7 @@ describe('identity-service profile', () => {
       app.get(SystemTransactionRunner),
       app.get(OutboxWriter),
       app.get(OutboxRelay),
+      app.get(JobProducer),
     );
     const before = await profileEvents();
 

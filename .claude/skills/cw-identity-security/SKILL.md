@@ -91,10 +91,23 @@ verified. A value below is changed here first, then in code.
   checked outside any transaction, between a first transaction that uses the code and a second that
   verifies the account if its version did not move. Without it, signing up someone else's pending
   address again would let its owner verify a password chosen by another person.
-- Resend: one code request every 30 seconds per address whatever the purpose, sign-ups included,
-  account or not (45 s for an email change in the mockup, when it exists), and 5 at most per address
-  in an hour, so successive codes cannot be guessed at length (5 codes of 5 attempts, 25 guesses an
-  hour at most).
+- Resend: one code request every 30 seconds per address whatever the purpose, sign-ups and the
+  change of address (counted on the new address) included, account or not, and 5 at most per
+  address in an hour, so successive codes cannot be guessed at length (5 codes of 5 attempts, 25
+  guesses an hour at most).
+- Password reset link (`@cadenway/contracts` 0.7.0): a token of 256 random bits in base64url, which
+  travels only in the restricted `password-reset-link.issued.v1` and after `#token=` in the link;
+  only its SHA-256 is stored. It works once, for 30 minutes, from any browser; a newer link of the
+  account, and a change of address, void it. Requests of an address are throttled apart from the
+  codes: 45 seconds and 5 in an hour, account or not, with the same answer whatever the account. A
+  reset ends the lockout of the address, drops a pending change of address, closes every session
+  unless unticked (and ends their recent authentication otherwise), keeps the API tokens and never
+  signs in.
+- Recent authentication: a session records when its person last proved who they are (the sign-in,
+  a confirmed password, the current password of a change); the change of address, the scheduling
+  of the deletion and the creation of a personal API token require it within 10 minutes
+  (`403 auth.reauthentication-required`). The failed passwords of the re-authentication and of the
+  change count with the failed sign-ins of the address of the account.
 
 ## Primitives
 

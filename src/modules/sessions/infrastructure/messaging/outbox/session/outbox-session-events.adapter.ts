@@ -2,6 +2,7 @@ import { eventSchemas } from '@cadenway/contracts/events/identity-service';
 import type { TransactionScope } from '@cadenway/nest-common/database';
 import type { OutboxWriter } from '@cadenway/nest-messaging/outbox';
 
+import type { DeviceDescription } from '../../../../application/models/session/device-description.model.js';
 import type { SessionEvents } from '../../../../application/ports/outbound/messaging/session/session-events.port.js';
 import type { Session } from '../../../../domain/aggregates/session/session.aggregate.js';
 
@@ -86,6 +87,44 @@ export class OutboxSessionEvents implements SessionEvents {
       version: session.snapshot.version,
       sessionId: session.id,
       userId: session.userId,
+    });
+    this.onAppend();
+  }
+
+  /**
+   * Method sessionOpenedOnNewDevice
+   *
+   * @description
+   * Appends `session.opened-on-new-device.v1`, credited to the user, with the version of the new
+   * session and the device and address of its browser, never its token nor its `User-Agent`.
+   *
+   * @param {Session} session - The new session.
+   * @param {{ readonly device: DeviceDescription; readonly ipAddress: string }} client - The
+   * device and the address of the browser.
+   * @param {{ readonly email: string; readonly name: string; readonly language: string; readonly timeZone: string }} notice
+   * - Whom the e-mail addresses.
+   * @returns {Promise<void>} Resolves once appended.
+   */
+  public async sessionOpenedOnNewDevice(
+    session: Session,
+    client: { readonly device: DeviceDescription; readonly ipAddress: string },
+    notice: {
+      readonly email: string;
+      readonly name: string;
+      readonly language: string;
+      readonly timeZone: string;
+    },
+  ): Promise<void> {
+    await this.outbox.append(this.transaction, eventSchemas, 'session.opened-on-new-device.v1', {
+      organizationId: null,
+      actor: { type: 'user', id: session.userId },
+      version: session.snapshot.version,
+      sessionId: session.id,
+      userId: session.userId,
+      client: { device: { ...client.device }, ipAddress: client.ipAddress },
+      recipient: { email: notice.email, name: notice.name },
+      language: notice.language,
+      timeZone: notice.timeZone,
     });
     this.onAppend();
   }

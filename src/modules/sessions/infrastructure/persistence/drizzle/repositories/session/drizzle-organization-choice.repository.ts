@@ -78,5 +78,18 @@ export class DrizzleOrganizationChoiceRepository implements OrganizationChoiceRe
         set: { organizationId, updatedAt: sql`now()` },
       });
   }
+
+  /**
+   * Method erase
+   *
+   * @description
+   * Deletes the last choice of an account.
+   *
+   * @param {string} userId - The account.
+   * @returns {Promise<void>} Resolves once deleted.
+   */
+  public async erase(userId: string): Promise<void> {
+    await this.db.delete(organizationChoices).where(eq(organizationChoices.userId, userId));
+  }
   // #endregion
 }
