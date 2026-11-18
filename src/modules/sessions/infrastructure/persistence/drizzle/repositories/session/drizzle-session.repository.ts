@@ -1,5 +1,5 @@
 import type { TransactionDatabase } from '@cadenway/nest-common/database';
-import { and, count, desc, eq, gt, isNull, lt, max, or, sql } from 'drizzle-orm';
+import { and, count, desc, eq, getTableColumns, gt, isNull, lt, max, or, sql } from 'drizzle-orm';
 import type { SQL } from 'drizzle-orm';
 
 import type { SessionOrigin } from '../../../../../application/models/session/session-origin.model.js';
@@ -10,6 +10,7 @@ import { Session } from '../../../../../domain/aggregates/session/session.aggreg
 import type { SessionStart } from '../../../../../domain/value-objects/session/session-start.value-object.js';
 import { toSession } from '../../mappers/session/session.mapper.js';
 import type { SessionRow } from '../../mappers/session/session.mapper.js';
+import policies from '../../schemas/authentication-policy/authentication-policy.schema.js';
 import sessions from '../../schemas/session/session.schema.js';
 
 /**
@@ -33,8 +34,10 @@ function label(name: string | null, version: string | null): string | null {
  * Function openAt
  *
  * @description
- * The condition of a session open at an instant: neither revoked, expired nor idle for 12 hours,
- * the same rule as `Session.isActiveAt`.
+ * The condition of a session open at an instant: neither revoked, expired nor idle for the
+ * inactivity of the policy of its organization, the same rule as `Session.isActiveAt`. The first
+ * bound on `last_active_at`, the longest inactivity a policy allows, keeps the comparison simple for
+ * the planner; the second applies the inactivity of each session.
  *
  * @param {Date} now - The instant.
  * @returns {SQL | undefined} The condition.
@@ -43,9 +46,42 @@ function openAt(now: Date): SQL | undefined {
   return and(
     isNull(sessions.revokedAt),
     gt(sessions.expiresAt, now),
-    gt(sessions.lastActiveAt, new Date(now.getTime() - Session.INACTIVITY_TIMEOUT_MS)),
+    gt(
+      sessions.lastActiveAt,
+      new Date(now.getTime() - Session.LONGEST_INACTIVITY_TIMEOUT_MINUTES * 60_000),
+    ),
+    sql`${sessions.lastActiveAt} + make_interval(mins => ${INACTIVITY_TIMEOUT_MINUTES}) > ${now.toISOString()}::timestamptz`,
   );
 }
+
+/**
+ * Constant INACTIVITY_TIMEOUT_MINUTES
+ *
+ * @description
+ * The inactivity of a session, in minutes: the one of the policy of the organization it names, 720
+ * without an organization or a policy (decision 8 of P2c). A correlated subquery rather than a
+ * join, so that `for update` locks the session rows only; read through the primary key of
+ * `authentication_policies`.
+ *
+ * @type {SQL<number>}
+ */
+const INACTIVITY_TIMEOUT_MINUTES: SQL<number> =
+  sql<number>`coalesce((select ${policies.sessionInactivityTimeoutMinutes} from ${policies} where ${policies.organizationId} = ${sessions.organizationId}), ${sql.raw(String(Session.DEFAULT_INACTIVITY_TIMEOUT_MINUTES))})`.mapWith(
+    Number,
+  );
+
+/**
+ * Constant SESSION_COLUMNS
+ *
+ * @description
+ * The columns of a session row, with the inactivity of its organization.
+ *
+ * @type {typeof sessions._.columns & { inactivityTimeoutMinutes: SQL<number> }}
+ */
+const SESSION_COLUMNS: typeof sessions._.columns & { inactivityTimeoutMinutes: SQL<number> } = {
+  ...getTableColumns(sessions),
+  inactivityTimeoutMinutes: INACTIVITY_TIMEOUT_MINUTES,
+};
 
 /**
  * Class DrizzleSessionRepository
@@ -113,9 +149,10 @@ export class DrizzleSessionRepository implements SessionRepository {
         expiresAt: start.expiresAt,
         signedInAt: start.signedInAt,
         authenticatedAt: start.authenticatedAt,
+        twoStepAuthenticatedAt: start.twoStepAuthenticatedAt,
         version: start.version,
       })
-      .returning();
+      .returning(SESSION_COLUMNS);
     const row: SessionRow | undefined = rows[0];
     if (row === undefined) {
       throw new Error('The insert of a session returned no row.');
@@ -134,7 +171,7 @@ export class DrizzleSessionRepository implements SessionRepository {
    */
   public async findByTokenHash(tokenHash: string): Promise<Session | null> {
     const rows: SessionRow[] = await this.db
-      .select()
+      .select(SESSION_COLUMNS)
       .from(sessions)
       .where(eq(sessions.tokenHash, tokenHash))
       .limit(1);
@@ -153,7 +190,7 @@ export class DrizzleSessionRepository implements SessionRepository {
    */
   public async findForUpdate(id: string): Promise<Session | null> {
     const rows: SessionRow[] = await this.db
-      .select()
+      .select(SESSION_COLUMNS)
       .from(sessions)
       .where(eq(sessions.id, id))
       .limit(1)
@@ -243,7 +280,7 @@ export class DrizzleSessionRepository implements SessionRepository {
    */
   public async findById(id: string): Promise<Session | null> {
     const rows: SessionRow[] = await this.db
-      .select()
+      .select(SESSION_COLUMNS)
       .from(sessions)
       .where(eq(sessions.id, id))
       .limit(1);
@@ -263,9 +300,32 @@ export class DrizzleSessionRepository implements SessionRepository {
    */
   public async lockOpenOfUser(userId: string, now: Date): Promise<Session[]> {
     const rows: SessionRow[] = await this.db
-      .select()
+      .select(SESSION_COLUMNS)
       .from(sessions)
       .where(and(eq(sessions.userId, userId), openAt(now)))
+      .orderBy(sessions.id)
+      .for('update');
+    return rows.map(toSession);
+  }
+
+  /**
+   * Method lockUnendedOfUser
+   *
+   * @description
+   * Reads and locks the sessions of an account neither revoked nor expired, idle ones included,
+   * through the index on `user_id`, in the order of their ids.
+   *
+   * @param {string} userId - The account.
+   * @param {Date} now - The instant.
+   * @returns {Promise<Session[]>} The unended sessions.
+   */
+  public async lockUnendedOfUser(userId: string, now: Date): Promise<Session[]> {
+    const rows: SessionRow[] = await this.db
+      .select(SESSION_COLUMNS)
+      .from(sessions)
+      .where(
+        and(eq(sessions.userId, userId), isNull(sessions.revokedAt), gt(sessions.expiresAt, now)),
+      )
       .orderBy(sessions.id)
       .for('update');
     return rows.map(toSession);
@@ -318,7 +378,7 @@ export class DrizzleSessionRepository implements SessionRepository {
       );
     }
     const rows: SessionRow[] = await this.db
-      .select()
+      .select(SESSION_COLUMNS)
       .from(sessions)
       .where(and(...conditions))
       .orderBy(desc(sessions.signedInAt), desc(sessions.id))
@@ -369,7 +429,10 @@ export class DrizzleSessionRepository implements SessionRepository {
   public async saveAuthentication(session: Session): Promise<void> {
     await this.db
       .update(sessions)
-      .set({ authenticatedAt: session.snapshot.authenticatedAt })
+      .set({
+        authenticatedAt: session.snapshot.authenticatedAt,
+        twoStepAuthenticatedAt: session.snapshot.twoStepAuthenticatedAt,
+      })
       .where(eq(sessions.id, session.id));
   }
 

@@ -10,6 +10,8 @@ import type { AccountsUnitOfWork } from '../../../../ports/outbound/transactions
 import { dropPendingEmailChange } from '../../../../services/email-change/pending-email-change.service.js';
 import type { ScheduleAccountDeletionInput } from './schedule-account-deletion.input.js';
 import type { ScheduleAccountDeletionOutput } from './schedule-account-deletion.output.js';
+import type { TrustedDevices } from '../../../../ports/outbound/identity/sessions/trusted-devices.port.js';
+import { reauthenticationRequired } from '../../../../services/two-step/recent-authentication.service.js';
 
 /**
  * Class ScheduleAccountDeletion
@@ -23,11 +25,13 @@ import type { ScheduleAccountDeletionOutput } from './schedule-account-deletion.
  *    the actor (`session.not-found`).
  * 2. The actor owns no organization in the copy of the memberships
  *    (`account.organization-owner`, with the organizations); it never calls organization-service.
- * 3. The recent authentication of the session (`auth.reauthentication-required`, decision 4).
+ * 3. The recent authentication of the session (`auth.reauthentication-required`, decision 4), a
+ *    second factor for an account with two-step verification.
  *
  * Then, in the same transaction: the account takes its `deleteAt` with the next version, every
  * session of the account (the one of the request included) and every personal API token are
- * revoked, a pending change of address is dropped, and `user.deletion-scheduled.v1` is appended. A
+ * revoked, a pending change of address is dropped, every trusted device is forgotten (the two-step
+ * verification stays), and `user.deletion-scheduled.v1` is appended. A
  * sign-in before the deletion cancels it; the durable job of `CompleteAccountDeletion` deletes the
  * account at `deleteAt`.
  */
@@ -87,6 +91,17 @@ export class ScheduleAccountDeletion {
    * @readonly
    */
   private readonly clock: Clock;
+
+  /**
+   * Property trustedDevices
+   *
+   * @description
+   * The trusted devices of the account, forgotten by the scheduling.
+   *
+   * @type {TrustedDevices}
+   * @readonly
+   */
+  private readonly trustedDevices: TrustedDevices;
   // #endregion
 
   // #region Constructor
@@ -101,6 +116,7 @@ export class ScheduleAccountDeletion {
    * @param {AccountApiTokens} apiTokens - The personal API tokens of the person.
    * @param {OwnedOrganizations} ownedOrganizations - The organizations the person owns.
    * @param {Clock} clock - The time of the scheduling.
+   * @param {TrustedDevices} trustedDevices - The trusted devices of the account, forgotten by the scheduling.
    * @constructor
    */
   public constructor(
@@ -109,12 +125,14 @@ export class ScheduleAccountDeletion {
     apiTokens: AccountApiTokens,
     ownedOrganizations: OwnedOrganizations,
     clock: Clock,
+    trustedDevices: TrustedDevices,
   ) {
     this.unitOfWork = unitOfWork;
     this.sessions = sessions;
     this.apiTokens = apiTokens;
     this.ownedOrganizations = ownedOrganizations;
     this.clock = clock;
+    this.trustedDevices = trustedDevices;
   }
   // #endregion
 
@@ -155,13 +173,14 @@ export class ScheduleAccountDeletion {
           throw new AccountRefusal({ reason: 'organization-owner', organizationIds: owned });
         }
         if (authentication === 'stale') {
-          throw new AccountRefusal({ reason: 'reauthentication-required' });
+          throw new AccountRefusal(await reauthenticationRequired(store, user.id));
         }
         const scheduled: User = user.scheduleDeletion(now);
         await store.users.update(scheduled);
         await this.sessions.revokeAll(user.id, null);
         await this.apiTokens.revokeAll(user.id);
         await dropPendingEmailChange(store, user.id, now);
+        await this.trustedDevices.forget(user.id);
         await store.events.userDeletionScheduled(scheduled);
         return { deleteAt: scheduled.deleteAt ?? now };
       },

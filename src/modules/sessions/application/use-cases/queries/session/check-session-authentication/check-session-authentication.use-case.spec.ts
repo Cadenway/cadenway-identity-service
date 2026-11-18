@@ -80,6 +80,8 @@ function put(
       version: 1,
       signedInAt,
       authenticatedAt: signedInAt,
+      twoStepAuthenticatedAt: null,
+      inactivityTimeoutMinutes: 720,
       ...changes,
     },
     origin: {
@@ -132,16 +134,19 @@ describe('CheckSessionAuthentication', () => {
       await expect(check.execute({ userId: CAMILLE_ID, sessionId: sessionId(1) })).resolves.toEqual(
         {
           status: 'recent',
+          twoStepVerificationEnabled: false,
         },
       );
       await expect(check.execute({ userId: CAMILLE_ID, sessionId: sessionId(2) })).resolves.toEqual(
         {
           status: 'stale',
+          twoStepVerificationEnabled: false,
         },
       );
       await expect(check.execute({ userId: CAMILLE_ID, sessionId: sessionId(3) })).resolves.toEqual(
         {
           status: 'stale',
+          twoStepVerificationEnabled: false,
         },
       );
     }
@@ -155,6 +160,7 @@ describe('CheckSessionAuthentication', () => {
       for (const id of [sessionId(4), sessionId(5), sessionId(9)]) {
         await expect(check.execute({ userId: CAMILLE_ID, sessionId: id })).resolves.toEqual({
           status: 'not-found',
+          twoStepVerificationEnabled: false,
         });
       }
     }
@@ -168,6 +174,6 @@ describe('CheckSessionAuthentication', () => {
         userId: CAMILLE_ID,
         sessionId: sessionId(1),
       }),
-    ).resolves.toEqual({ status: 'not-found' });
+    ).resolves.toEqual({ status: 'not-found', twoStepVerificationEnabled: false });
   });
 });

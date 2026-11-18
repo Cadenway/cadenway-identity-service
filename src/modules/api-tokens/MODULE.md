@@ -23,7 +23,9 @@ input and output types: the accounts module binds them to its `AccountApiTokens`
 deletion of an account, and they join its system transaction. `ApiTokensModule` imports
 `MembershipsModule` and binds its own `ActiveMemberships` port to the `FindActiveMembership`
 provider that module exports, and `SessionsModule`, binding its `RecentAuthentications` port to
-`CheckOrganizationSessionAuthentication`.
+`CheckOrganizationSessionAuthentication` and its `OrganizationAccess` port to
+`CheckOrganizationAccess` (`sessions/public/authentication-policy/check-organization-access`, P2c-2),
+which joins the system transaction of the introspection.
 
 ## Owned tables
 
@@ -75,8 +77,9 @@ answers `active: false` for a token whose user is no longer a member of its orga
   current organization of the session.
 - The creation requires a recent authentication of the session of the request, `sessionId` of the
   body (decision 4 of P2c): without `sessionId`, or when its person did not prove who they are in
-  the last 10 minutes, `auth.reauthentication-required` with `details.methods: [password]`, and
-  nothing is created; a session that is not an open session of the actor acting on that
+  the last 10 minutes, `auth.reauthentication-required` with `details.methods`, and nothing is
+  created: `[password]`, or `[authenticator-app]` for an account with two-step verification, whose
+  recent authentication counts only by a second factor (P2c-2); a session that is not an open session of the actor acting on that
   organization answers `session.not-found`.
 - The scheduling of the deletion of an account revokes every token of the person, in every
   organization, with the next version of each; the deletion erases them.
@@ -86,6 +89,11 @@ answers `active: false` for a token whose user is no longer a member of its orga
 - A token is active when it is known by its hash, neither revoked nor expired, and its user has an
   active membership in its organization in the copy of the memberships. A malformed value, one
   whose check characters do not match, and a session token are inactive without a lookup.
+- An active token of a member whom the authentication policy of its organization requires to have
+  two-step verification, and who has none, introspects with `withheldOrganization`
+  (`organization.mfa-required`) and no scope, its organization and role kept (decision 8 of P2c); it
+  stays active, and the person turning two-step verification on ends the withholding at the next
+  introspection.
 - The list holds the tokens of the caller in the organization of the internal token that are
   neither revoked nor expired, the most recently created first.
 - Revoking a revoked token answers 204 and changes nothing; a token of another user or
@@ -104,8 +112,8 @@ answers `active: false` for a token whose user is no longer a member of its orga
   system transaction of the accounts use case that calls them (the scheduling and the completion of
   a deletion); the tokens are locked before their revocation.
 - The introspection runs in one system transaction (`SystemApiTokensUnitOfWork`): it finds the
-  token by its hash, reads the copy of the memberships in the same transaction, and writes the last
-  use.
+  token by its hash, reads the copy of the memberships, the authentication policy of the
+  organization and the enrollment of the account in the same transaction, and writes the last use.
 
 ## Decisions
 

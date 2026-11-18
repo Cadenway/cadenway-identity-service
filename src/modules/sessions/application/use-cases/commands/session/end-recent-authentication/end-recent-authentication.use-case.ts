@@ -71,7 +71,7 @@ export class EndRecentAuthentication {
     await this.unitOfWork.run(async (store: SessionsStore): Promise<void> => {
       const open: Session[] = await store.sessions.lockOpenOfUser(input.userId, now);
       for (const session of open) {
-        const ended: Session = session.endRecentAuthentication();
+        const ended: Session = session.endRecentAuthentication(input.scope);
         if (session.id !== input.exceptSessionId && ended !== session) {
           await store.sessions.saveAuthentication(ended);
         }

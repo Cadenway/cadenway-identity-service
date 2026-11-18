@@ -120,6 +120,7 @@ export class ListUserSessions {
         ipAddress: record.ipAddress,
         signedInAt: record.session.snapshot.signedInAt,
         lastActiveAt: record.session.snapshot.lastActiveAt,
+        inactivityTimeoutMinutes: record.session.snapshot.inactivityTimeoutMinutes,
         expiresAt: record.session.snapshot.expiresAt,
       })),
       next:

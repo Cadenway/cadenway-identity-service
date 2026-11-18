@@ -5,6 +5,7 @@ import type { OutboxWriter } from '@cadenway/nest-messaging/outbox';
 import type { IssuedCode } from '../../../../application/models/authentication/issued-code.model.js';
 import type { IssuedResetLink } from '../../../../application/models/password-reset/issued-reset-link.model.js';
 import type { ClientDescription } from '../../../../application/models/sessions/client-description.model.js';
+import type { TwoStepSummary } from '../../../../application/models/two-step/two-step-summary.model.js';
 import type { AccountEvents } from '../../../../application/ports/outbound/messaging/accounts/account-events.port.js';
 import type { User } from '../../../../domain/aggregates/account/user.aggregate.js';
 import type { EmailAddress } from '../../../../domain/value-objects/email/email-address.value-object.js';
@@ -351,6 +352,46 @@ export class OutboxAccountEvents implements AccountEvents {
       version,
       userId,
     });
+    this.onAppend();
+  }
+
+  /**
+   * Method userTwoStepVerificationChanged
+   *
+   * @description
+   * Appends `user.two-step-verification-changed.v1`, actor the user, `organizationId: null`: the
+   * change, the state after it and what its security e-mail shows, never a secret.
+   *
+   * @param {User} user - The account, with the version of the change.
+   * @param {TwoStepSummary} summary - The change and the state after it.
+   * @param {ClientDescription} client - The browser of the change.
+   * @returns {Promise<void>} Resolves once appended.
+   */
+  public async userTwoStepVerificationChanged(
+    user: User,
+    summary: TwoStepSummary,
+    client: ClientDescription,
+  ): Promise<void> {
+    await this.outbox.append(
+      this.transaction,
+      eventSchemas,
+      'user.two-step-verification-changed.v1',
+      {
+        organizationId: null,
+        actor: { type: 'user', id: user.id },
+        version: user.version,
+        userId: user.id,
+        change: summary.change,
+        enabled: summary.enabled,
+        methods: [...summary.methods],
+        backupCodesRemaining: summary.backupCodesRemaining,
+        securityKey: summary.securityKey === null ? null : { ...summary.securityKey },
+        client: { device: { ...client.device }, ipAddress: client.ipAddress },
+        recipient: { email: user.email.value, name: user.name },
+        language: user.language,
+        timeZone: user.timeZone,
+      },
+    );
     this.onAppend();
   }
   // #endregion

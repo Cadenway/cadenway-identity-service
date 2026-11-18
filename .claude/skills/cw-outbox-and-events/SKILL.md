@@ -12,8 +12,8 @@ module (`src/modules/platform`) brings their tables into the migrations. The REA
 those of `asyncapi/identity-service.yaml` (`eventSchemas` of
 `@cadenway/contracts/events/identity-service`): `user.signed-up.v1`, `user.email-verified.v1`,
 `user.profile-updated.v1`, `user.password-changed.v1`, `user.email-changed.v1`,
-`user.deletion-scheduled.v1`, `user.deletion-cancelled.v1`, `user.deleted.v1`, `session.revoked.v1`,
-`session.opened-on-new-device.v1` and the restricted `one-time-code.issued.v1` and
+`user.deletion-scheduled.v1`, `user.deletion-cancelled.v1`, `user.deleted.v1`,
+`user.two-step-verification-changed.v1`, `session.revoked.v1`, `session.opened-on-new-device.v1` and the restricted `one-time-code.issued.v1` and
 `password-reset-link.issued.v1`, all with `organizationId: null`, appended by the outbox adapters of
 the accounts and sessions modules.
 The memberships module consumes `member.joined.v1`, `member.role-changed.v1` and

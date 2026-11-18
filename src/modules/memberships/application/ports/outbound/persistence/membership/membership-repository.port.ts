@@ -69,5 +69,29 @@ export interface MembershipRepository {
    * @returns {Promise<string[]>} Their ids.
    */
   findOwnedOrganizationIds(userId: string): Promise<string[]>;
+
+  /**
+   * Method findActiveOfUser
+   *
+   * @description
+   * The active memberships of an account, one per organization (the latest when the copy holds
+   * several), across organizations.
+   *
+   * @param {string} userId - The account.
+   * @returns {Promise<Membership[]>} Its memberships, by organization id.
+   */
+  findActiveOfUser(userId: string): Promise<Membership[]>;
+
+  /**
+   * Method listActiveOfOrganization
+   *
+   * @description
+   * The active memberships of an organization, one per account (the latest when the copy holds
+   * several).
+   *
+   * @param {string} organizationId - The organization.
+   * @returns {Promise<Membership[]>} Its memberships, by account id.
+   */
+  listActiveOfOrganization(organizationId: string): Promise<Membership[]>;
   // #endregion
 }

@@ -13,7 +13,11 @@ the organizations, the members and the invitations; this module only follows the
   the `role` of its introspection;
 - the accounts module refuses to schedule the deletion of an account that owns an organization
   (`409 account.organization-owner`), and checks again before the deletion
-  ("Ownership" of `openapi/internal/identity-service.yaml`).
+  ("Ownership" of `openapi/internal/identity-service.yaml`);
+- the sessions module applies the authentication policy of each organization (P2c-2, decision 8):
+  the roles of an account in every organization it belongs to (the requirements of two-step
+  verification), the role of the actor of a policy route and the members an organization counts
+  without two-step verification.
 
 It owns no route and emits no event. A module of its own rather than a part of sessions: two
 modules read it, and its tenant transactions (one per event) differ from the system transactions of
@@ -21,17 +25,22 @@ the sessions.
 
 ## Public entry points
 
-| Entry point                                  | Consumers                      |
-| -------------------------------------------- | ------------------------------ |
-| `memberships.module`                         | sessions, api-tokens, accounts |
-| `public/membership/find-active-membership`   | sessions, api-tokens           |
-| `public/membership/find-owned-organizations` | accounts                       |
+| Entry point                                   | Consumers                      |
+| --------------------------------------------- | ------------------------------ |
+| `memberships.module`                          | sessions, api-tokens, accounts |
+| `public/membership/find-active-membership`    | sessions, api-tokens           |
+| `public/membership/find-owned-organizations`  | accounts                       |
+| `public/membership/find-user-memberships`     | sessions                       |
+| `public/membership/find-organization-member`  | sessions                       |
+| `public/membership/list-organization-members` | sessions                       |
 
-`MembershipsModule` exports the `FindActiveMembership` and `FindOwnedOrganizations` providers. Their
-signatures expose `FindActiveMembershipInput` and `FindActiveMembershipOutput`, and
-`FindOwnedOrganizationsInput` and `FindOwnedOrganizationsOutput`. Both run in the system transaction
-of their caller and join it; they must not be called from a tenant transaction (the kit refuses to
-open a system transaction inside a tenant one).
+`MembershipsModule` exports the `FindActiveMembership`, `FindOwnedOrganizations`,
+`FindUserMemberships`, `FindOrganizationMember` and `ListOrganizationMembers` providers, each with
+its input and output types. `FindActiveMembership`, `FindOwnedOrganizations` and
+`FindUserMemberships` run in the system transaction of their caller and join it; they must not be
+called from a tenant transaction (the kit refuses to open a system transaction inside a tenant one).
+`FindOrganizationMember` and `ListOrganizationMembers` run in the tenant transaction of their
+caller, the routes of the authentication policy, and join it.
 
 ## Owned tables
 
@@ -152,6 +161,11 @@ then, within 7 days of its outbox retention, organization-service publishes the 
   introspection of an API token.
 - `FindOwnedOrganizations` runs in the system transaction of its caller and joins it: the scheduling
   of the deletion of an account and its completion by its durable job.
+- `FindUserMemberships` runs in the system transaction of its caller and joins it: the requirements
+  of two-step verification of an account (its card, the refusal to turn it off).
+- `FindOrganizationMember` and `ListOrganizationMembers` run in the tenant transaction of the
+  policy routes (`TenantMembershipsUnitOfWork` joins it), so row-level security limits them to the
+  organization of the internal token, which each query also names.
 
 ## Decisions
 
@@ -167,6 +181,11 @@ then, within 7 days of its outbox retention, organization-service publishes the 
   a scheduling may not be in the copy yet; the completion of the deletion checks again. When the
   account is deleted, the copy keeps its memberships (ids and role, no personal data) until the
   `member.removed.v1` organization-service emits for them reaches it.
+- `FindUserMemberships` and `ListOrganizationMembers` return one active membership per organization
+  or per account (the most recent when a person holds two), through the indexes on `user_id` and on
+  `(organization_id, user_id)`. The listing reads every active member of the organization: it serves
+  the counts of the policy screen only, and its cost grows with the members of the organization
+  (P2c-2, see the sessions module).
 - `tests/organization-context.int-spec.ts` proves, on real PostgreSQL and NATS, that member events
   published to the stream reach the copy, those published before the service started included,
   in any order of versions, with a removal after a role change kept, and a redelivered event

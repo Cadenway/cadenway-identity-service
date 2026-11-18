@@ -79,6 +79,8 @@ function put(
       version: 1,
       signedInAt,
       authenticatedAt: signedInAt,
+      twoStepAuthenticatedAt: null,
+      inactivityTimeoutMinutes: 720,
       ...changes,
     },
     origin: {
@@ -127,7 +129,7 @@ describe('AuthenticateSession', () => {
 
   it('records the recent authentication of an open session for 10 minutes, without a new version', async () => {
     await expect(
-      authenticate.execute({ userId: CAMILLE_ID, sessionId: sessionId(1) }),
+      authenticate.execute({ userId: CAMILLE_ID, sessionId: sessionId(1), method: 'password' }),
     ).resolves.toEqual({
       authenticatedAt: new Date('2026-11-09T13:24:00Z'),
       expiresAt: new Date('2026-11-09T13:34:00Z'),
@@ -145,10 +147,10 @@ describe('AuthenticateSession', () => {
     });
 
     await expect(
-      authenticate.execute({ userId: LEA_ID, sessionId: sessionId(1) }),
+      authenticate.execute({ userId: LEA_ID, sessionId: sessionId(1), method: 'password' }),
     ).resolves.toBeNull();
     await expect(
-      authenticate.execute({ userId: CAMILLE_ID, sessionId: sessionId(2) }),
+      authenticate.execute({ userId: CAMILLE_ID, sessionId: sessionId(2), method: 'password' }),
     ).resolves.toBeNull();
     expect(store.sessions.get(sessionId(1))?.state.authenticatedAt).toBeNull();
     expect(store.sessions.get(sessionId(2))?.state.authenticatedAt).toBeNull();

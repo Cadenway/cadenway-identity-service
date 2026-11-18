@@ -72,6 +72,14 @@ export class TokensController {
       role: view.role,
       scopes: [...view.scopes],
       expiresAt: view.expiresAt.toISOString(),
+      ...(view.withheldOrganizationId === null
+        ? {}
+        : {
+            withheldOrganization: {
+              organizationId: view.withheldOrganizationId,
+              code: 'organization.mfa-required',
+            },
+          }),
     };
   }
   // #endregion

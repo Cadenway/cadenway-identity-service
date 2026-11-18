@@ -1,6 +1,7 @@
 import type { Session } from '../../../../../domain/aggregates/session/session.aggregate.js';
 import { SESSION_SCOPES } from '../../../../../domain/policies/session/session-scopes.policy.js';
 import type { ActiveMembership } from '../../../../models/session/active-membership.model.js';
+import { isOrganizationWithheld } from '../../../../services/authentication-policy/organization-access.service.js';
 import type { SessionsStore } from '../../../../models/session/sessions-store.model.js';
 import type { ActiveMemberships } from '../../../../ports/outbound/memberships/session/active-memberships.port.js';
 import type { SessionTokens } from '../../../../ports/outbound/security/session/session-tokens.port.js';
@@ -23,6 +24,11 @@ import type { IntrospectTokenOutput } from './introspect-token.output.js';
  * from the copy of the memberships, read in the same system transaction: `null` for both when the
  * session has none, or when the membership it acts through is no longer active (a removal), as
  * `ActiveToken.organizationId` of the contract says. A session holds every scope (decision 7).
+ *
+ * The inactivity of the session is the one of the policy of the organization it names (decision 8
+ * of P2c). When that policy requires two-step verification for the role of the member, whose account
+ * has none, the organization is withheld: `organizationId` and `role` are `null` and
+ * `withheldOrganizationId` names it ("Withheld organization" of the internal contract).
  */
 export class IntrospectToken {
   // #region Properties
@@ -126,8 +132,12 @@ export class IntrospectToken {
         active.organizationId === null
           ? null
           : await this.memberships.find(active.organizationId, active.userId);
-      const current: ActiveMembership | null =
+      const acting: ActiveMembership | null =
         membership !== null && active.isActingThrough(membership.memberId) ? membership : null;
+      const withheld: boolean =
+        acting !== null &&
+        (await isOrganizationWithheld(store, acting.organizationId, active.userId, acting.role));
+      const current: ActiveMembership | null = withheld ? null : acting;
       return {
         active: true,
         tokenType: 'session',
@@ -137,6 +147,7 @@ export class IntrospectToken {
         role: current?.role ?? null,
         scopes: [...SESSION_SCOPES],
         expiresAt: active.snapshot.expiresAt,
+        withheldOrganizationId: withheld && acting !== null ? acting.organizationId : null,
       };
     });
   }

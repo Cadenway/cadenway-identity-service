@@ -1,5 +1,7 @@
 import type { FactoryProvider } from '@nestjs/common';
 
+import { TRUSTED_DEVICES } from '../../../tokens/two-step/trusted-devices.token.js';
+import type { TrustedDevices } from '../../../../application/ports/outbound/identity/sessions/trusted-devices.port.js';
 import type { AccountApiTokens } from '../../../../application/ports/outbound/identity/api-tokens/account-api-tokens.port.js';
 import type { AccountSessions } from '../../../../application/ports/outbound/identity/sessions/account-sessions.port.js';
 import type { AccountsUnitOfWork } from '../../../../application/ports/outbound/transactions/accounts/accounts-unit-of-work.port.js';
@@ -22,13 +24,28 @@ import { UNIT_OF_WORK } from '../../../tokens/accounts/accounts-unit-of-work.tok
  */
 export const scheduleAccountDeletionProvider: FactoryProvider<ScheduleAccountDeletion> = {
   provide: ScheduleAccountDeletion,
-  inject: [UNIT_OF_WORK, ACCOUNT_SESSIONS, ACCOUNT_API_TOKENS, OWNED_ORGANIZATIONS, CLOCK],
+  inject: [
+    UNIT_OF_WORK,
+    ACCOUNT_SESSIONS,
+    ACCOUNT_API_TOKENS,
+    OWNED_ORGANIZATIONS,
+    CLOCK,
+    TRUSTED_DEVICES,
+  ],
   useFactory: (
     unitOfWork: AccountsUnitOfWork,
     sessions: AccountSessions,
     apiTokens: AccountApiTokens,
     ownedOrganizations: OwnedOrganizations,
     clock: Clock,
+    trustedDevices: TrustedDevices,
   ): ScheduleAccountDeletion =>
-    new ScheduleAccountDeletion(unitOfWork, sessions, apiTokens, ownedOrganizations, clock),
+    new ScheduleAccountDeletion(
+      unitOfWork,
+      sessions,
+      apiTokens,
+      ownedOrganizations,
+      clock,
+      trustedDevices,
+    ),
 };

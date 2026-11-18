@@ -101,6 +101,16 @@ describe('CreateApiToken recent authentication', () => {
     expect(store.rows.size).toBe(0);
   });
 
+  it('asks an account with two-step verification for a code of its app', async () => {
+    const sessions: FakeRecentAuthentications = new FakeRecentAuthentications();
+    sessions.set(CAMILLE_ID, SESSION_ID, 'stale');
+    sessions.twoStepUsers.add(CAMILLE_ID);
+
+    await expect(creation(new InMemoryApiTokens(), sessions).execute(input)).rejects.toMatchObject({
+      twoStepVerificationEnabled: true,
+    });
+  });
+
   it('refuses a session that is not an open session of the actor in the organization', async () => {
     const store: InMemoryApiTokens = new InMemoryApiTokens();
 

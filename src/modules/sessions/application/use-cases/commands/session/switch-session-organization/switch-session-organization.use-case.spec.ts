@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
+import { OrganizationMfaRequired } from '../../../../models/session/organization-mfa-required.model.js';
 import { OrganizationNotFound } from '../../../../models/session/organization-not-found.model.js';
 import { SessionNotFound } from '../../../../models/session/session-not-found.model.js';
+import { AuthenticationPolicy } from '../../../../../domain/aggregates/authentication-policy/authentication-policy.aggregate.js';
 import type { OpenSessionOutput } from '../open-session/open-session.output.js';
 import { OpenSession } from '../open-session/open-session.use-case.js';
 import { RevokeSession } from '../revoke-session/revoke-session.use-case.js';
@@ -42,6 +44,7 @@ describe('SwitchSessionOrganization', () => {
       userId: CAMILLE_ID,
       persistent: false,
       client: { ipAddress: '86.247.12.30', userAgent: null },
+      authentication: 'password',
       newDeviceNotice: null,
     });
     memberships.join(CAMILLE_ID, {
@@ -124,5 +127,52 @@ describe('SwitchSessionOrganization', () => {
         organizationId: ATELIER_NORD,
       }),
     ).rejects.toThrow(SessionNotFound);
+  });
+  it('refuses an organization that requires two-step verification of the actor, and changes nothing', async () => {
+    store.policies.set(
+      ATELIER_NORD,
+      AuthenticationPolicy.defaultFor(ATELIER_NORD).apply({
+        twoStepVerificationRequiredFor: 'admins',
+      }),
+    );
+
+    const refusal: unknown = await switchOrganization
+      .execute({ actorUserId: CAMILLE_ID, sessionId: opened.id, organizationId: ATELIER_NORD })
+      .catch((error: unknown) => error);
+
+    expect(refusal).toBeInstanceOf(OrganizationMfaRequired);
+    expect(refusal).toMatchObject({ organizationId: ATELIER_NORD });
+    expect(store.sessions.get(opened.id)?.state).toMatchObject({
+      organizationId: null,
+      version: 1,
+    });
+    expect(store.choices.has(CAMILLE_ID)).toBe(false);
+    store.enrollments.add(CAMILLE_ID);
+    await expect(
+      switchOrganization.execute({
+        actorUserId: CAMILLE_ID,
+        sessionId: opened.id,
+        organizationId: ATELIER_NORD,
+      }),
+    ).resolves.toEqual({ organizationId: ATELIER_NORD, role: 'owner' });
+  });
+
+  it('closes, without an event, a session idle for longer than the inactivity of the organization chosen', async () => {
+    store.policies.set(
+      ATELIER_NORD,
+      AuthenticationPolicy.defaultFor(ATELIER_NORD).apply({ sessionInactivityTimeoutMinutes: 60 }),
+    );
+    clock.advance(2 * 60 * 60_000);
+
+    await expect(
+      switchOrganization.execute({
+        actorUserId: CAMILLE_ID,
+        sessionId: opened.id,
+        organizationId: ATELIER_NORD,
+      }),
+    ).rejects.toThrow(SessionNotFound);
+    expect(store.sessions.get(opened.id)?.state.revokedAt).not.toBeNull();
+    expect(store.revoked).toEqual([]);
+    expect(store.choices.has(CAMILLE_ID)).toBe(false);
   });
 });

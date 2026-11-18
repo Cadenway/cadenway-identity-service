@@ -5,6 +5,8 @@ import type { FactoryProvider } from '@nestjs/common';
 import { SystemClock } from '../../infrastructure/system-clock.js';
 import { MembershipsModule } from '../memberships/memberships.module.js';
 import { FindActiveMembership } from '../memberships/public/membership/find-active-membership.js';
+import { CheckOrganizationAccess } from '../sessions/public/authentication-policy/check-organization-access.js';
+import type { CheckOrganizationAccessOutput } from '../sessions/public/authentication-policy/check-organization-access.js';
 import { SessionsModule } from '../sessions/sessions.module.js';
 import { CheckOrganizationSessionAuthentication } from '../sessions/public/session/check-organization-session-authentication.js';
 import type { CheckOrganizationSessionAuthenticationOutput } from '../sessions/public/session/check-organization-session-authentication.js';
@@ -12,6 +14,7 @@ import type { FindActiveMembershipOutput } from '../memberships/public/membershi
 import type { ActiveMembership } from './application/models/api-token/active-membership.model.js';
 import type { ActiveMemberships } from './application/ports/outbound/memberships/api-token/active-memberships.port.js';
 import type { ApiTokenSecrets } from './application/ports/outbound/security/api-token/api-token-secrets.port.js';
+import type { OrganizationAccess } from './application/ports/outbound/sessions/api-token/organization-access.port.js';
 import type { RecentAuthentications } from './application/ports/outbound/sessions/api-token/recent-authentications.port.js';
 import type { Clock } from './application/ports/outbound/time/api-token/clock.port.js';
 import type { ApiTokensUnitOfWork } from './application/ports/outbound/transactions/api-token/api-tokens-unit-of-work.port.js';
@@ -52,6 +55,9 @@ const CLOCK: unique symbol = Symbol('ApiTokensClock');
  * @type {unique symbol}
  */
 const RECENT_AUTHENTICATIONS: unique symbol = Symbol('ApiTokensRecentAuthentications');
+
+/** Identifies the OrganizationAccess port, bound to `CheckOrganizationAccess` of the sessions module. */
+const ORGANIZATION_ACCESS: unique symbol = Symbol('ApiTokensOrganizationAccess');
 
 /**
  * Constant providers
@@ -104,12 +110,36 @@ const providers: FactoryProvider[] = [
       check: async (
         userId: string,
         sessionId: string,
-      ): Promise<'recent' | 'stale' | 'not-found'> => {
+      ): Promise<{
+        readonly status: 'recent' | 'stale' | 'not-found';
+        readonly twoStepVerificationEnabled: boolean;
+      }> => {
         const checked: CheckOrganizationSessionAuthenticationOutput = await check.execute({
           userId,
           sessionId,
         });
-        return checked.status;
+        return {
+          status: checked.status,
+          twoStepVerificationEnabled: checked.twoStepVerificationEnabled,
+        };
+      },
+    }),
+  },
+  {
+    provide: ORGANIZATION_ACCESS,
+    inject: [CheckOrganizationAccess],
+    useFactory: (check: CheckOrganizationAccess): OrganizationAccess => ({
+      isWithheld: async (
+        organizationId: string,
+        userId: string,
+        role: 'owner' | 'admin' | 'member' | 'guest',
+      ): Promise<boolean> => {
+        const access: CheckOrganizationAccessOutput = await check.execute({
+          organizationId,
+          userId,
+          role,
+        });
+        return access.withheld;
       },
     }),
   },
@@ -149,13 +179,15 @@ const providers: FactoryProvider[] = [
   },
   {
     provide: IntrospectApiToken,
-    inject: [SYSTEM_UNIT_OF_WORK, SECRETS, ACTIVE_MEMBERSHIPS, CLOCK],
+    inject: [SYSTEM_UNIT_OF_WORK, SECRETS, ACTIVE_MEMBERSHIPS, CLOCK, ORGANIZATION_ACCESS],
     useFactory: (
       unitOfWork: ApiTokensUnitOfWork,
       secrets: ApiTokenSecrets,
       memberships: ActiveMemberships,
       clock: Clock,
-    ): IntrospectApiToken => new IntrospectApiToken(unitOfWork, secrets, memberships, clock),
+      access: OrganizationAccess,
+    ): IntrospectApiToken =>
+      new IntrospectApiToken(unitOfWork, secrets, memberships, clock, access),
   },
 ];
 

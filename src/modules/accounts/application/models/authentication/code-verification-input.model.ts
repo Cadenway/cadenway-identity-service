@@ -52,5 +52,17 @@ export interface CodeVerificationInput {
    * @readonly
    */
   readonly client: SessionClient;
+
+  /**
+   * Property trustedDeviceToken
+   *
+   * @description
+   * The value of the cookie `__Host-cw_trusted_device`, when the browser has one: a device the
+   * account trusts skips the two-step challenge. A secret, never logged.
+   *
+   * @type {string | undefined}
+   * @readonly
+   */
+  readonly trustedDeviceToken?: string | undefined;
   // #endregion
 }

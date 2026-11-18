@@ -77,9 +77,8 @@ export class CheckOrganizationSessionAuthentication {
   ): Promise<CheckOrganizationSessionAuthenticationOutput> {
     const now: Date = this.clock.now();
     return this.unitOfWork.run(
-      async (store: SessionsStore): Promise<CheckOrganizationSessionAuthenticationOutput> => ({
-        status: await checkSessionAuthentication(store, input.userId, input.sessionId, now, true),
-      }),
+      async (store: SessionsStore): Promise<CheckOrganizationSessionAuthenticationOutput> =>
+        checkSessionAuthentication(store, input.userId, input.sessionId, now, true),
     );
   }
   // #endregion

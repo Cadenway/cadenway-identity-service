@@ -60,7 +60,12 @@ function opened(persistent: boolean): Session {
     persistent,
     SIGNED_IN_AT,
   );
-  return Session.restore({ ...start, id: '019a6a2e-4b1c-7d3e-8f5a-2c9b7e1d4a60', revokedAt: null });
+  return Session.restore({
+    ...start,
+    id: '019a6a2e-4b1c-7d3e-8f5a-2c9b7e1d4a60',
+    revokedAt: null,
+    inactivityTimeoutMinutes: Session.DEFAULT_INACTIVITY_TIMEOUT_MINUTES,
+  });
 }
 
 describe('Session', () => {
@@ -222,5 +227,162 @@ describe('Session recent authentication', () => {
     expect(ended.snapshot.authenticatedAt).toBeNull();
     expect(ended.isRecentlyAuthenticatedAt(at(MINUTE))).toBe(false);
     expect(ended.endRecentAuthentication()).toBe(ended);
+  });
+});
+
+const TWO_STEP_SIGNED_IN_AT: Date = new Date('2026-11-09T07:42:00Z');
+const TWO_STEP_HOUR: number = 60 * MINUTE;
+const ATELIER_NORD: SessionMembership = {
+  organizationId: '019a5f3c-8d2e-7c4a-9b1f-3e5d7a9c1b2f',
+  memberId: '019a6b10-0000-7000-8000-000000000001',
+};
+
+/**
+ * Function at
+ *
+ * @description
+ * An instant after the sign-in of the session of Camille Martin.
+ *
+ * @param {number} milliseconds - Delay after the sign-in.
+ * @returns {Date} The instant.
+ */
+function twoStepAt(milliseconds: number): Date {
+  return new Date(TWO_STEP_SIGNED_IN_AT.getTime() + milliseconds);
+}
+
+/**
+ * Function opened
+ *
+ * @description
+ * A session of Camille Martin opened with a proof, and the inactivity of its organization.
+ *
+ * @param {'password' | 'two-step' | null} authentication - The proof of the sign-in.
+ * @param {number} inactivityTimeoutMinutes - The inactivity of its policy.
+ * @returns {Session} The session.
+ */
+function openedTwoStep(
+  authentication: 'password' | 'two-step' | null,
+  inactivityTimeoutMinutes: number = 720,
+): Session {
+  return Session.restore({
+    ...Session.start(
+      '019a5f3c-8d2e-7c4a-9b1f-3e5d7a9c1b30',
+      false,
+      TWO_STEP_SIGNED_IN_AT,
+      null,
+      authentication,
+    ),
+    id: '019a6914-2f7a-7b3c-9d4e-5f6a7b8c9d01',
+    revokedAt: null,
+    inactivityTimeoutMinutes,
+  });
+}
+
+describe('Session and two-step verification (P2c-2)', () => {
+  it('counts a window opened by a password only for an account without two-step verification', () => {
+    const session: Session = openedTwoStep('password');
+
+    expect(session.isRecentlyAuthenticatedAt(twoStepAt(MINUTE), false)).toBe(true);
+    expect(session.isRecentlyAuthenticatedAt(twoStepAt(MINUTE), true)).toBe(false);
+  });
+
+  it('counts a window opened by a second factor for both, within 10 minutes', () => {
+    const session: Session = openedTwoStep('two-step');
+
+    expect(session.isRecentlyAuthenticatedAt(twoStepAt(9 * MINUTE), true)).toBe(true);
+    expect(session.isRecentlyAuthenticatedAt(twoStepAt(9 * MINUTE), false)).toBe(true);
+    expect(session.isRecentlyAuthenticatedAt(twoStepAt(10 * MINUTE), true)).toBe(false);
+  });
+
+  it('opens no window for a sign-in on a trusted device', () => {
+    const session: Session = openedTwoStep(null);
+
+    expect(session.snapshot.authenticatedAt).toBeNull();
+    expect(session.isRecentlyAuthenticatedAt(twoStepAt(0), false)).toBe(false);
+  });
+
+  it('counts a window a previous version recorded without its method as a password', () => {
+    const session: Session = Session.restore({
+      ...openedTwoStep('password').snapshot,
+      twoStepAuthenticatedAt: null,
+    });
+
+    expect(session.isRecentlyAuthenticatedAt(twoStepAt(MINUTE), false)).toBe(true);
+    expect(session.isRecentlyAuthenticatedAt(twoStepAt(MINUTE), true)).toBe(false);
+  });
+
+  it('counts a window as a second factor only while it is the instant of the second factor', () => {
+    const twoStep: Session = openedTwoStep('two-step');
+    // A previous version records a password window by moving authenticated_at alone.
+    const movedByPassword: Session = Session.restore({
+      ...twoStep.snapshot,
+      authenticatedAt: twoStepAt(MINUTE),
+    });
+
+    expect(twoStep.isRecentlyAuthenticatedAt(twoStepAt(2 * MINUTE), true)).toBe(true);
+    expect(movedByPassword.isRecentlyAuthenticatedAt(twoStepAt(2 * MINUTE), false)).toBe(true);
+    expect(movedByPassword.isRecentlyAuthenticatedAt(twoStepAt(2 * MINUTE), true)).toBe(false);
+    expect(movedByPassword.endRecentAuthentication('password-windows').snapshot).toMatchObject({
+      authenticatedAt: null,
+      twoStepAuthenticatedAt: null,
+    });
+  });
+
+  it('records the method of a re-authentication', () => {
+    const confirmed: Session = openedTwoStep(null).authenticate(
+      twoStepAt(TWO_STEP_HOUR),
+      'two-step',
+    );
+
+    expect(confirmed.snapshot).toMatchObject({
+      authenticatedAt: twoStepAt(TWO_STEP_HOUR),
+      twoStepAuthenticatedAt: twoStepAt(TWO_STEP_HOUR),
+    });
+    expect(confirmed.isRecentlyAuthenticatedAt(twoStepAt(TWO_STEP_HOUR + MINUTE), true)).toBe(true);
+  });
+
+  it('ends only the windows opened by a password when two-step verification turns on', () => {
+    const password: Session = openedTwoStep('password');
+    const twoStep: Session = openedTwoStep('two-step');
+
+    expect(
+      password.endRecentAuthentication('password-windows').snapshot.authenticatedAt,
+    ).toBeNull();
+    expect(twoStep.endRecentAuthentication('password-windows')).toBe(twoStep);
+    expect(twoStep.endRecentAuthentication('every-window').snapshot.authenticatedAt).toBeNull();
+  });
+
+  it('closes after the inactivity of the policy of its organization', () => {
+    const hourly: Session = openedTwoStep('password', 60);
+
+    expect(hourly.isActiveAt(twoStepAt(59 * MINUTE))).toBe(true);
+    expect(hourly.isActiveAt(twoStepAt(TWO_STEP_HOUR))).toBe(false);
+    expect(openedTwoStep('password', 43_200).isActiveAt(twoStepAt(29 * 24 * TWO_STEP_HOUR))).toBe(
+      true,
+    );
+  });
+
+  it('takes the inactivity of the organization it chooses', () => {
+    const chosen: Session = openedTwoStep('password').chooseOrganization(
+      ATELIER_NORD,
+      twoStepAt(MINUTE),
+      60,
+    );
+
+    expect(chosen.snapshot.inactivityTimeoutMinutes).toBe(60);
+    expect(chosen.isActiveAt(twoStepAt(59 * MINUTE))).toBe(true);
+    expect(chosen.isActiveAt(twoStepAt(TWO_STEP_HOUR))).toBe(false);
+  });
+
+  it('refuses to choose an organization whose inactivity would have closed it, and closes it without a revocation event', () => {
+    const idle: Session = openedTwoStep('password');
+
+    expect(idle.isIdleLongerThan(60, twoStepAt(2 * TWO_STEP_HOUR))).toBe(true);
+    expect(() => idle.chooseOrganization(ATELIER_NORD, twoStepAt(2 * TWO_STEP_HOUR), 60)).toThrow(
+      SessionEndedError,
+    );
+    const closed: Session = idle.closeForInactivity(twoStepAt(2 * TWO_STEP_HOUR));
+    expect(closed.isActiveAt(twoStepAt(2 * TWO_STEP_HOUR))).toBe(false);
+    expect(closed.snapshot.version).toBe(2);
   });
 });

@@ -1,5 +1,7 @@
 import type { FactoryProvider } from '@nestjs/common';
 
+import { TRUSTED_DEVICES } from '../../../tokens/two-step/trusted-devices.token.js';
+import type { TrustedDevices } from '../../../../application/ports/outbound/identity/sessions/trusted-devices.port.js';
 import type { AccountSessions } from '../../../../application/ports/outbound/identity/sessions/account-sessions.port.js';
 import type { AccountsUnitOfWork } from '../../../../application/ports/outbound/transactions/accounts/accounts-unit-of-work.port.js';
 import type { Clock } from '../../../../application/ports/outbound/clock/accounts/clock.port.js';
@@ -34,6 +36,7 @@ export const confirmPasswordResetProvider: FactoryProvider<ConfirmPasswordReset>
     ACCOUNT_SESSIONS,
     DEVICE_READER,
     CLOCK,
+    TRUSTED_DEVICES,
   ],
   useFactory: (
     unitOfWork: AccountsUnitOfWork,
@@ -43,6 +46,7 @@ export const confirmPasswordResetProvider: FactoryProvider<ConfirmPasswordReset>
     sessions: AccountSessions,
     devices: DeviceReader,
     clock: Clock,
+    trustedDevices: TrustedDevices,
   ): ConfirmPasswordReset =>
     new ConfirmPasswordReset(
       unitOfWork,
@@ -52,5 +56,6 @@ export const confirmPasswordResetProvider: FactoryProvider<ConfirmPasswordReset>
       sessions,
       devices,
       clock,
+      trustedDevices,
     ),
 };

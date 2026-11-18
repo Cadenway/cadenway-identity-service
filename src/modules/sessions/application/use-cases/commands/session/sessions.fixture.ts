@@ -1,4 +1,9 @@
+import { AuthenticationPolicy } from '../../../../domain/aggregates/authentication-policy/authentication-policy.aggregate.js';
 import { Session } from '../../../../domain/aggregates/session/session.aggregate.js';
+import type { UserMembership } from '../../../models/session/user-membership.model.js';
+import type { AuthenticationPolicyRepository } from '../../../ports/outbound/persistence/authentication-policy/authentication-policy-repository.port.js';
+import type { TrustedDeviceRepository } from '../../../ports/outbound/persistence/session/trusted-device-repository.port.js';
+import type { TwoStepEnrollmentRepository } from '../../../ports/outbound/persistence/session/two-step-enrollment-repository.port.js';
 import type { SessionStart } from '../../../../domain/value-objects/session/session-start.value-object.js';
 import type { SessionState } from '../../../../domain/value-objects/session/session-state.value-object.js';
 import type { ActiveMembership } from '../../../models/session/active-membership.model.js';
@@ -112,6 +117,38 @@ export class InMemorySessions implements SessionsUnitOfWork {
   public choices: Map<string, string> = new Map<string, string>();
 
   /**
+   * Property policies
+   *
+   * @description
+   * Committed authentication policies, by organization; an organization without one has the
+   * default policy.
+   *
+   * @type {Map<string, AuthenticationPolicy>}
+   */
+  public policies: Map<string, AuthenticationPolicy> = new Map<string, AuthenticationPolicy>();
+
+  /**
+   * Property trustedDevices
+   *
+   * @description
+   * Committed trusted devices, by token hash.
+   *
+   * @type {Map<string, { readonly userId: string; readonly expiresAt: Date }>}
+   */
+  public trustedDevices: Map<string, { readonly userId: string; readonly expiresAt: Date }> =
+    new Map<string, { readonly userId: string; readonly expiresAt: Date }>();
+
+  /**
+   * Property enrollments
+   *
+   * @description
+   * Committed accounts with two-step verification.
+   *
+   * @type {Set<string>}
+   */
+  public enrollments: Set<string> = new Set<string>();
+
+  /**
    * Property ids
    *
    * @description
@@ -143,8 +180,22 @@ export class InMemorySessions implements SessionsUnitOfWork {
       readonly email: string;
       readonly device: DeviceDescription;
     }[] = [...this.newDevices];
-    const openAt = (state: SessionState, now: Date): boolean =>
-      Session.restore(state).isActiveAt(now);
+    const policies = new Map<string, AuthenticationPolicy>(this.policies);
+    const devices = new Map<string, { readonly userId: string; readonly expiresAt: Date }>(
+      this.trustedDevices,
+    );
+    const enrolled = new Set<string>(this.enrollments);
+    const policyOf = (organizationId: string): AuthenticationPolicy =>
+      policies.get(organizationId) ?? AuthenticationPolicy.defaultFor(organizationId);
+    const restore = (state: SessionState): Session =>
+      Session.restore({
+        ...state,
+        inactivityTimeoutMinutes:
+          state.organizationId === null
+            ? Session.DEFAULT_INACTIVITY_TIMEOUT_MINUTES
+            : policyOf(state.organizationId).snapshot.sessionInactivityTimeoutMinutes,
+      });
+    const openAt = (state: SessionState, now: Date): boolean => restore(state).isActiveAt(now);
     const choices: Map<string, string> = new Map<string, string>(this.choices);
     const repository: SessionRepository = {
       insert: (start: SessionStart, origin: SessionOrigin): Promise<Session> => {
@@ -153,19 +204,20 @@ export class InMemorySessions implements SessionsUnitOfWork {
           ...start,
           id: `019a6a2e-4b1c-7d3e-8f5a-${String(this.ids).padStart(12, '0')}`,
           revokedAt: null,
+          inactivityTimeoutMinutes: Session.DEFAULT_INACTIVITY_TIMEOUT_MINUTES,
         };
         sessions.set(state.id, { state, origin });
-        return Promise.resolve(Session.restore(state));
+        return Promise.resolve(restore(state));
       },
       findByTokenHash: (tokenHash: string): Promise<Session | null> => {
         const stored: StoredSession | undefined = [...sessions.values()].find(
           (session: StoredSession) => session.origin.tokenHash === tokenHash,
         );
-        return Promise.resolve(stored === undefined ? null : Session.restore(stored.state));
+        return Promise.resolve(stored === undefined ? null : restore(stored.state));
       },
       findForUpdate: (id: string): Promise<Session | null> => {
         const stored: StoredSession | undefined = sessions.get(id);
-        return Promise.resolve(stored === undefined ? null : Session.restore(stored.state));
+        return Promise.resolve(stored === undefined ? null : restore(stored.state));
       },
       recordActivity: (session: Session): Promise<void> => {
         const stored: StoredSession | undefined = sessions.get(session.id);
@@ -192,7 +244,7 @@ export class InMemorySessions implements SessionsUnitOfWork {
       },
       findById: (id: string): Promise<Session | null> => {
         const stored: StoredSession | undefined = sessions.get(id);
-        return Promise.resolve(stored === undefined ? null : Session.restore(stored.state));
+        return Promise.resolve(stored === undefined ? null : restore(stored.state));
       },
       lockOpenOfUser: (userId: string, now: Date): Promise<Session[]> =>
         Promise.resolve(
@@ -201,7 +253,18 @@ export class InMemorySessions implements SessionsUnitOfWork {
               (stored: StoredSession) =>
                 stored.state.userId === userId && openAt(stored.state, now),
             )
-            .map((stored: StoredSession) => Session.restore(stored.state)),
+            .map((stored: StoredSession) => restore(stored.state)),
+        ),
+      lockUnendedOfUser: (userId: string, now: Date): Promise<Session[]> =>
+        Promise.resolve(
+          [...sessions.values()]
+            .filter(
+              (stored: StoredSession) =>
+                stored.state.userId === userId &&
+                stored.state.revokedAt === null &&
+                now.getTime() < stored.state.expiresAt.getTime(),
+            )
+            .map((stored: StoredSession) => restore(stored.state)),
         ),
       countOpen: (userId: string, now: Date): Promise<number> =>
         Promise.resolve(
@@ -235,7 +298,7 @@ export class InMemorySessions implements SessionsUnitOfWork {
             )
             .slice(0, count)
             .map((stored: StoredSession) => ({
-              session: Session.restore(stored.state),
+              session: restore(stored.state),
               ipAddress: stored.origin.ipAddress,
               userAgent: stored.origin.userAgent,
             })),
@@ -267,7 +330,11 @@ export class InMemorySessions implements SessionsUnitOfWork {
         if (stored !== undefined) {
           sessions.set(session.id, {
             ...stored,
-            state: { ...stored.state, authenticatedAt: session.snapshot.authenticatedAt },
+            state: {
+              ...stored.state,
+              authenticatedAt: session.snapshot.authenticatedAt,
+              twoStepAuthenticatedAt: session.snapshot.twoStepAuthenticatedAt,
+            },
           });
         }
         return Promise.resolve();
@@ -307,9 +374,80 @@ export class InMemorySessions implements SessionsUnitOfWork {
         return Promise.resolve();
       },
     };
-    const result: TResult = await work({ sessions: repository, organizationChoices, events });
+    const policyRepository: AuthenticationPolicyRepository = {
+      find: (organizationId: string): Promise<AuthenticationPolicy> =>
+        Promise.resolve(policyOf(organizationId)),
+      findMany: (organizationIds: readonly string[]): Promise<AuthenticationPolicy[]> =>
+        Promise.resolve(organizationIds.map(policyOf)),
+      lock: (organizationId: string): Promise<AuthenticationPolicy> =>
+        Promise.resolve(policyOf(organizationId)),
+      save: (policy: AuthenticationPolicy): Promise<void> => {
+        policies.set(policy.snapshot.organizationId, policy);
+        return Promise.resolve();
+      },
+    };
+    const trustedDevices: TrustedDeviceRepository = {
+      insert: (userId: string, tokenHash: string, expiresAt: Date): Promise<void> => {
+        devices.set(tokenHash, { userId, expiresAt });
+        return Promise.resolve();
+      },
+      isTrusted: (userId: string, tokenHash: string, now: Date): Promise<boolean> => {
+        const device: { readonly userId: string; readonly expiresAt: Date } | undefined =
+          devices.get(tokenHash);
+        return Promise.resolve(
+          device?.userId === userId && device.expiresAt.getTime() > now.getTime(),
+        );
+      },
+      pruneOfUser: (userId: string, now: Date, keep: number): Promise<void> => {
+        const trusted: [string, { readonly userId: string; readonly expiresAt: Date }][] = [
+          ...devices,
+        ]
+          .filter(([, device]) => device.userId === userId)
+          .sort(([, left], [, right]) => right.expiresAt.getTime() - left.expiresAt.getTime());
+        trusted.forEach(([hash, device], index: number) => {
+          if (device.expiresAt.getTime() <= now.getTime() || index >= keep) {
+            devices.delete(hash);
+          }
+        });
+        return Promise.resolve();
+      },
+      deleteOfUser: (userId: string): Promise<number> => {
+        let deleted: number = 0;
+        for (const [hash, device] of devices) {
+          if (device.userId === userId) {
+            devices.delete(hash);
+            deleted += 1;
+          }
+        }
+        return Promise.resolve(deleted);
+      },
+    };
+    const enrollments: TwoStepEnrollmentRepository = {
+      isEnrolled: (userId: string): Promise<boolean> => Promise.resolve(enrolled.has(userId)),
+      enroll: (userId: string): Promise<void> => {
+        enrolled.add(userId);
+        return Promise.resolve();
+      },
+      unenroll: (userId: string): Promise<void> => {
+        enrolled.delete(userId);
+        return Promise.resolve();
+      },
+      enrolledAmong: (userIds: readonly string[]): Promise<ReadonlySet<string>> =>
+        Promise.resolve(new Set(userIds.filter((userId: string) => enrolled.has(userId)))),
+    };
+    const result: TResult = await work({
+      sessions: repository,
+      organizationChoices,
+      events,
+      policies: policyRepository,
+      trustedDevices,
+      enrollments,
+    });
     this.sessions = sessions;
     this.choices = choices;
+    this.policies = policies;
+    this.trustedDevices = devices;
+    this.enrollments = enrolled;
     this.revoked = revoked;
     this.activityWrites = writes.count;
     this.newDevices = newDevices;
@@ -376,6 +514,29 @@ export class FakeActiveMemberships implements ActiveMemberships {
    */
   public find(organizationId: string, userId: string): Promise<ActiveMembership | null> {
     return Promise.resolve(this.active.get(`${organizationId}/${userId}`) ?? null);
+  }
+
+  /**
+   * Method listOfUser
+   *
+   * @description
+   * The active memberships of an account, ordered by organization.
+   *
+   * @param {string} userId - The account.
+   * @returns {Promise<readonly UserMembership[]>} Its memberships.
+   */
+  public listOfUser(userId: string): Promise<readonly UserMembership[]> {
+    return Promise.resolve(
+      [...this.active.entries()]
+        .filter(([key]: [string, ActiveMembership]) => key.endsWith(`/${userId}`))
+        .map(([, membership]: [string, ActiveMembership]) => ({
+          organizationId: membership.organizationId,
+          role: membership.role,
+        }))
+        .sort((left: UserMembership, right: UserMembership) =>
+          left.organizationId.localeCompare(right.organizationId),
+        ),
+    );
   }
   // #endregion
 }

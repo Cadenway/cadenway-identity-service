@@ -129,5 +129,32 @@ export interface SessionState {
    * @readonly
    */
   readonly authenticatedAt: Date | null;
+
+  /**
+   * Property twoStepAuthenticatedAt
+   *
+   * @description
+   * When the window was opened by a second factor (P2c-2): the instant of `authenticatedAt` itself;
+   * `null` for a window of a password, without a window, and for the rows a previous version wrote.
+   * A window counts as a second factor only while both instants are equal, so a window a previous
+   * version records during a rollout, which writes `authenticated_at` alone, never passes for one.
+   *
+   * @type {Date | null}
+   * @readonly
+   */
+  readonly twoStepAuthenticatedAt: Date | null;
+
+  /**
+   * Property inactivityTimeoutMinutes
+   *
+   * @description
+   * Minutes without activity after which the session closes: the inactivity of the authentication
+   * policy of the organization it names, read with it, 720 without one (decision 8 of P2c). Not
+   * stored on the session: a change of the policy applies from the next introspection.
+   *
+   * @type {number}
+   * @readonly
+   */
+  readonly inactivityTimeoutMinutes: number;
   // #endregion
 }

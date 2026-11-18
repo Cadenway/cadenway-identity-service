@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
+import { AuthenticationPolicy } from '../../../../../domain/aggregates/authentication-policy/authentication-policy.aggregate.js';
 import type { OpenSessionOutput } from '../open-session/open-session.output.js';
 import { OpenSession } from '../open-session/open-session.use-case.js';
 import { RevokeSession } from '../revoke-session/revoke-session.use-case.js';
@@ -60,6 +61,7 @@ describe('IntrospectToken', () => {
       userId: CAMILLE_ID,
       persistent: false,
       client: { ipAddress: '86.247.12.30', userAgent: null },
+      authentication: 'password',
       newDeviceNotice: null,
     });
   });
@@ -74,6 +76,7 @@ describe('IntrospectToken', () => {
       role: null,
       scopes: EVERY_SCOPE,
       expiresAt: new Date('2026-12-08T13:07:00Z'),
+      withheldOrganizationId: null,
     });
   });
 
@@ -100,6 +103,59 @@ describe('IntrospectToken', () => {
       role: 'guest',
       scopes: EVERY_SCOPE,
     });
+  });
+
+  it('withholds the organization of an admin without two-step verification once the policy requires it, keeping the scopes', async () => {
+    memberships.join(CAMILLE_ID, {
+      memberId: MEMBER_ID,
+      organizationId: ATELIER_NORD,
+      role: 'admin',
+    });
+    await new SwitchSessionOrganization(store, memberships, clock).execute({
+      actorUserId: CAMILLE_ID,
+      sessionId: opened.id,
+      organizationId: ATELIER_NORD,
+    });
+    store.policies.set(
+      ATELIER_NORD,
+      AuthenticationPolicy.defaultFor(ATELIER_NORD).apply({
+        twoStepVerificationRequiredFor: 'admins',
+      }),
+    );
+
+    await expect(introspect.execute({ token: opened.token })).resolves.toMatchObject({
+      active: true,
+      organizationId: null,
+      role: null,
+      scopes: EVERY_SCOPE,
+      withheldOrganizationId: ATELIER_NORD,
+    });
+    store.enrollments.add(CAMILLE_ID);
+    await expect(introspect.execute({ token: opened.token })).resolves.toMatchObject({
+      organizationId: ATELIER_NORD,
+      role: 'admin',
+      withheldOrganizationId: null,
+    });
+  });
+
+  it('closes a session after the inactivity of the policy of its organization', async () => {
+    memberships.join(CAMILLE_ID, {
+      memberId: MEMBER_ID,
+      organizationId: ATELIER_NORD,
+      role: 'admin',
+    });
+    await new SwitchSessionOrganization(store, memberships, clock).execute({
+      actorUserId: CAMILLE_ID,
+      sessionId: opened.id,
+      organizationId: ATELIER_NORD,
+    });
+    store.policies.set(
+      ATELIER_NORD,
+      AuthenticationPolicy.defaultFor(ATELIER_NORD).apply({ sessionInactivityTimeoutMinutes: 60 }),
+    );
+    clock.advance(HOUR);
+
+    await expect(introspect.execute({ token: opened.token })).resolves.toEqual({ active: false });
   });
 
   it('answers no organization once the account was removed from it, even if it joined again', async () => {

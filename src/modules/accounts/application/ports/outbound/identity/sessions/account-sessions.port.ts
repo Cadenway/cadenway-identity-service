@@ -33,10 +33,15 @@ export interface AccountSessions {
    *
    * @param {string} userId - The person, the actor.
    * @param {string} sessionId - The session of the request.
+   * @param {'password' | 'two-step'} method - How the person proved it (P2c-2).
    * @returns {Promise<RecentAuthentication | null>} The window, or `null` when the session is not
    * an open session of the person.
    */
-  authenticate(userId: string, sessionId: string): Promise<RecentAuthentication | null>;
+  authenticate(
+    userId: string,
+    sessionId: string,
+    method: 'password' | 'two-step',
+  ): Promise<RecentAuthentication | null>;
 
   /**
    * Method endRecentAuthentication
@@ -46,9 +51,15 @@ export interface AccountSessions {
    *
    * @param {string} userId - The person.
    * @param {string | null} exceptSessionId - The session that keeps its own, or `null` for none.
+   * @param {'every-window' | 'password-windows'} scope - Every window, or only those opened by a
+   * password, as turning two-step verification on does (P2c-2).
    * @returns {Promise<void>} Resolves once written.
    */
-  endRecentAuthentication(userId: string, exceptSessionId: string | null): Promise<void>;
+  endRecentAuthentication(
+    userId: string,
+    exceptSessionId: string | null,
+    scope: 'every-window' | 'password-windows',
+  ): Promise<void>;
 
   /**
    * Method revokeAll

@@ -6,6 +6,7 @@ import { InternalAccess, ProblemException, getOrganizationContext } from '@caden
 import type { OrganizationContext } from '@cadenway/nest-common';
 import { Body, Controller, Delete, HttpCode, Param, Post, Put } from '@nestjs/common';
 
+import { OrganizationMfaRequired } from '../../../../application/models/session/organization-mfa-required.model.js';
 import { OrganizationNotFound } from '../../../../application/models/session/organization-not-found.model.js';
 import { SessionNotFound } from '../../../../application/models/session/session-not-found.model.js';
 import type { RevokeOtherSessionsOutput } from '../../../../application/use-cases/commands/session/revoke-other-sessions/revoke-other-sessions.output.js';
@@ -169,6 +170,13 @@ export class SessionsController {
       }
       if (error instanceof OrganizationNotFound) {
         throw new ProblemException({ status: 404, code: 'organization.not-found' });
+      }
+      if (error instanceof OrganizationMfaRequired) {
+        throw new ProblemException({
+          status: 403,
+          code: 'organization.mfa-required',
+          details: { organizationId: error.organizationId },
+        });
       }
       throw error;
     }

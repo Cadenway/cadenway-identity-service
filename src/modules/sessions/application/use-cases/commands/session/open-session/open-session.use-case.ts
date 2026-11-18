@@ -148,7 +148,7 @@ export class OpenSession {
           input.newDeviceNotice !== null &&
           (await this.isNewDevice(store, input.userId, device, now));
         const opened: Session = await store.sessions.insert(
-          Session.start(input.userId, input.persistent, now, membership),
+          Session.start(input.userId, input.persistent, now, membership, input.authentication),
           {
             tokenHash: issued.tokenHash,
             ipAddress: input.client.ipAddress,

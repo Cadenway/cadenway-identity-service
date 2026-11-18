@@ -33,8 +33,8 @@ function actorUserId(): string {
  *
  * @description
  * `POST /internal/v1/sessions/{sessionId}/reauthentication`, for `POST /v1/auth/reauthentication`,
- * with the session the introspection returned. The password check and its lockout belong to the
- * accounts module, which records the recent authentication through the sessions module. Issuer
+ * with the session the introspection returned. The check of the password or of the code of the
+ * authenticator app, and their lockouts, belong to the accounts module, which records the recent authentication through the sessions module. Issuer
  * `api-gateway` only, actor `user`, no organization (one the token may carry is ignored).
  */
 @Controller('internal/v1/sessions')
@@ -73,11 +73,14 @@ export class ReauthenticationController {
    * Method confirm
    *
    * @description
-   * Confirms the password: the window of recent authentication; `404 session.not-found`,
-   * `422 auth.password-incorrect`, `429 auth.account-locked` with `Retry-After`.
+   * Confirms the password or the code: the window of recent authentication; `400 request.invalid`
+   * for both or neither, `403 auth.reauthentication-required` for a password of an account with
+   * two-step verification, `404 session.not-found`, `409 auth.two-step-not-enabled`,
+   * `422 auth.password-incorrect` or `auth.two-step-code-invalid`, `429 auth.account-locked` or
+   * `auth.two-step-locked` with `Retry-After`.
    *
    * @param {ReauthenticatePath} path - The session of the request.
-   * @param {ReauthenticateBody} body - The password.
+   * @param {ReauthenticateBody} body - The password or the code.
    * @param {Response} response - The response, for `Retry-After`.
    * @returns {Promise<RecentAuthentication>} The recent authentication and when it ends.
    */
@@ -93,7 +96,8 @@ export class ReauthenticationController {
       this.reauthenticate.execute({
         actorUserId: actor,
         sessionId: path.sessionId,
-        password: body.password,
+        password: body.password ?? null,
+        code: body.code ?? null,
       }),
     );
     return {

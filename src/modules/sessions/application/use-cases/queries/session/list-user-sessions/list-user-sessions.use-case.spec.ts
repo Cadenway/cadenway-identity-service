@@ -86,6 +86,8 @@ function put(
       version: 1,
       signedInAt,
       authenticatedAt: signedInAt,
+      twoStepAuthenticatedAt: null,
+      inactivityTimeoutMinutes: 720,
       ...changes,
     },
     origin: {
@@ -188,6 +190,7 @@ describe('ListUserSessions', () => {
       ipAddress: '192.0.2.14',
       signedInAt: new Date('2026-11-09T07:42:00Z'),
       lastActiveAt: new Date('2026-11-09T11:20:00Z'),
+      inactivityTimeoutMinutes: 720,
       expiresAt: new Date('2026-12-09T07:42:00Z'),
     });
   });

@@ -1,3 +1,4 @@
+import type { TrustedDeviceGrant } from '../../models/sessions/trusted-device-grant.model.js';
 import type { OpenedSession } from '../../models/sessions/opened-session.model.js';
 import type { AccountView } from '../accounts/account-view.projection.js';
 
@@ -41,5 +42,17 @@ export interface SessionIssuedView {
    * @readonly
    */
   readonly deletionCancelled: boolean;
+
+  /**
+   * Property trustedDevice
+   *
+   * @description
+   * The browser made a trusted device by the answer of a challenge with `trustDevice`, `null`
+   * otherwise (P2c-2).
+   *
+   * @type {TrustedDeviceGrant | null}
+   * @readonly
+   */
+  readonly trustedDevice: TrustedDeviceGrant | null;
   // #endregion
 }

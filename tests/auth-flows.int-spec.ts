@@ -434,6 +434,8 @@ describe('identity-service authentication flows', () => {
       }),
     );
     vi.stubEnv('PASSWORD_PEPPER', pepper);
+    vi.stubEnv('WEBAUTHN_RP_ID', 'app.cadenway.localhost');
+    vi.stubEnv('WEBAUTHN_ORIGINS', 'http://app.cadenway.localhost');
 
     const config = loadConfig(appConfigSchema);
     app = await createApplication(AppModule, {
@@ -1621,6 +1623,7 @@ describe('identity-service authentication flows', () => {
             persistent: false,
             client,
             newDeviceNotice: null,
+            authentication: 'password',
           });
           throw new Error('the work fails after its writes');
         }),

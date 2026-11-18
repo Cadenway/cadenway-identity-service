@@ -18,5 +18,18 @@ export interface CheckSessionAuthenticationOutput {
    * @readonly
    */
   readonly status: 'recent' | 'stale' | 'not-found';
+
+  /**
+   * Property twoStepVerificationEnabled
+   *
+   * @description
+   * Whether the account has two-step verification, for the methods of a refusal: `[password]`
+   * without it, `[authenticator-app]` with it. With it, only a window opened by a second factor is
+   * `recent` (P2c-2).
+   *
+   * @type {boolean}
+   * @readonly
+   */
+  readonly twoStepVerificationEnabled: boolean;
   // #endregion
 }

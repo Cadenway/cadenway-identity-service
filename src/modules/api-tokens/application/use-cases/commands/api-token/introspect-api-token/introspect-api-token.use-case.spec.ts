@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import {
   FakeActiveMemberships,
   FakeApiTokenSecrets,
+  FakeOrganizationAccess,
   FakeRecentAuthentications,
   FixedClock,
   InMemoryApiTokens,
@@ -20,6 +21,7 @@ const DAY = 24 * 60 * 60_000;
 describe('IntrospectApiToken', () => {
   let store: InMemoryApiTokens;
   let memberships: FakeActiveMemberships;
+  let access: FakeOrganizationAccess;
   let clock: FixedClock;
   let introspect: IntrospectApiToken;
   let created: CreateApiTokenOutput;
@@ -29,7 +31,8 @@ describe('IntrospectApiToken', () => {
     memberships = new FakeActiveMemberships();
     clock = new FixedClock('2026-11-08T14:02:00Z');
     const secrets: FakeApiTokenSecrets = new FakeApiTokenSecrets();
-    introspect = new IntrospectApiToken(store, secrets, memberships, clock);
+    access = new FakeOrganizationAccess();
+    introspect = new IntrospectApiToken(store, secrets, memberships, clock, access);
     created = await new CreateApiToken(
       store,
       secrets,
@@ -60,6 +63,19 @@ describe('IntrospectApiToken', () => {
       role: 'member',
       scopes: ['tasks:read', 'members:read'],
       expiresAt: new Date('2026-12-08T14:02:00Z'),
+      withheldOrganizationId: null,
+    });
+  });
+
+  it('keeps a token active but acting on nothing while its organization is withheld', async () => {
+    access.withheldFrom.add(`${ATELIER_NORD}/${CAMILLE_ID}`);
+
+    await expect(introspect.execute({ token: created.secret })).resolves.toMatchObject({
+      active: true,
+      organizationId: ATELIER_NORD,
+      role: 'member',
+      scopes: [],
+      withheldOrganizationId: ATELIER_NORD,
     });
   });
 

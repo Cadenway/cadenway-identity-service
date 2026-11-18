@@ -86,5 +86,17 @@ export interface OpenSessionView {
    * @readonly
    */
   readonly expiresAt: Date;
+
+  /**
+   * Property inactivityTimeoutMinutes
+   *
+   * @description
+   * Minutes of inactivity after which the session closes, from the policy of its organization, 720
+   * without one (`OpenSession.inactivityTimeoutMinutes`).
+   *
+   * @type {number}
+   * @readonly
+   */
+  readonly inactivityTimeoutMinutes: number;
   // #endregion
 }

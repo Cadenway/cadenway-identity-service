@@ -183,7 +183,9 @@ export class ApiTokensController {
         throw new ProblemException({
           status: 403,
           code: 'auth.reauthentication-required',
-          details: { methods: ['password'] },
+          details: {
+            methods: error.twoStepVerificationEnabled ? ['authenticator-app'] : ['password'],
+          },
         });
       }
       if (error instanceof SessionNotFound) {

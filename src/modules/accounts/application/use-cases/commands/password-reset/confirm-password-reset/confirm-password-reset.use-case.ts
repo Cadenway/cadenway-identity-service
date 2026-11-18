@@ -18,6 +18,7 @@ import {
 } from '../../../../services/password/password-attempts.service.js';
 import type { ConfirmPasswordResetInput } from './confirm-password-reset.input.js';
 import type { ConfirmPasswordResetOutput } from './confirm-password-reset.output.js';
+import type { TrustedDevices } from '../../../../ports/outbound/identity/sessions/trusted-devices.port.js';
 
 /**
  * Class ConfirmPasswordReset
@@ -35,7 +36,9 @@ import type { ConfirmPasswordResetOutput } from './confirm-password-reset.output
  * `passwordChangedAt` with the next version, ends the lockout of the address, drops a pending
  * change of address, and either revokes every open session of the account
  * (`closeOtherSessions`, each with `session.revoked.v1`) or ends their recent authentication; the
- * personal API tokens stay and a scheduled deletion stays scheduled. It appends
+ * personal API tokens stay and a scheduled deletion stays scheduled. It voids the open challenge
+ * and every pending two-step setup and key registration of the account and forgets every trusted
+ * device of the account; the two-step verification stays (P2c-2). It appends
  * `user.password-changed.v1` (`method: reset`).
  */
 export class ConfirmPasswordReset {
@@ -116,6 +119,17 @@ export class ConfirmPasswordReset {
    * @readonly
    */
   private readonly clock: Clock;
+
+  /**
+   * Property trustedDevices
+   *
+   * @description
+   * The trusted devices of the account, forgotten by the reset.
+   *
+   * @type {TrustedDevices}
+   * @readonly
+   */
+  private readonly trustedDevices: TrustedDevices;
   // #endregion
 
   // #region Constructor
@@ -132,6 +146,7 @@ export class ConfirmPasswordReset {
    * @param {AccountSessions} sessions - The sessions of the account.
    * @param {DeviceReader} devices - Reads the device of the browser.
    * @param {Clock} clock - The time of the reset.
+   * @param {TrustedDevices} trustedDevices - The trusted devices of the account, forgotten by the reset.
    * @constructor
    */
   public constructor(
@@ -142,6 +157,7 @@ export class ConfirmPasswordReset {
     sessions: AccountSessions,
     devices: DeviceReader,
     clock: Clock,
+    trustedDevices: TrustedDevices,
   ) {
     this.unitOfWork = unitOfWork;
     this.hasher = hasher;
@@ -150,6 +166,7 @@ export class ConfirmPasswordReset {
     this.sessions = sessions;
     this.devices = devices;
     this.clock = clock;
+    this.trustedDevices = trustedDevices;
   }
   // #endregion
 
@@ -275,8 +292,11 @@ export class ConfirmPasswordReset {
     if (input.closeOtherSessions) {
       closedSessionCount = await this.sessions.revokeAll(changed.id, null);
     } else {
-      await this.sessions.endRecentAuthentication(changed.id, null);
+      await this.sessions.endRecentAuthentication(changed.id, null, 'every-window');
     }
+    await store.challenges.deleteOfUser(changed.id);
+    await store.pendingTwoStep.dropOfUser(changed.id);
+    await this.trustedDevices.forget(changed.id);
     await store.events.userPasswordChanged(
       changed,
       'reset',

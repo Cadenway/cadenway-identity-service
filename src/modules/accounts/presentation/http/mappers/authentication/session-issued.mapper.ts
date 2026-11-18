@@ -8,7 +8,9 @@ import { toUser } from '../accounts/user.mapper.js';
  *
  * @description
  * Maps a successful sign-in to `SessionIssued`. `token` leaves this service here only: the gateway
- * writes it into the cookie and never logs it.
+ * writes it into the cookie and never logs it. `trustedDevice`, only when the answer of a two-step
+ * challenge asked to trust the browser, carries the token of the cookie `__Host-cw_trusted_device`,
+ * a secret as well.
  *
  * @param {SessionIssuedView} view - The answer of the use case.
  * @returns {SessionIssued} The body of the response.
@@ -23,5 +25,13 @@ export function toSessionIssued(view: SessionIssuedView): SessionIssued {
     },
     user: toUser(view.user),
     deletionCancelled: view.deletionCancelled,
+    ...(view.trustedDevice === null
+      ? {}
+      : {
+          trustedDevice: {
+            token: view.trustedDevice.token,
+            expiresAt: view.trustedDevice.expiresAt.toISOString(),
+          },
+        }),
   };
 }

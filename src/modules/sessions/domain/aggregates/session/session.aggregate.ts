@@ -1,5 +1,6 @@
 import { InvalidSessionStateError } from '../../errors/session/invalid-session-state.error.js';
 import { SessionEndedError } from '../../errors/session/session-ended.error.js';
+import type { SessionAuthenticationMethod } from '../../value-objects/session/session-authentication-method.value-object.js';
 import type { SessionMembership } from '../../value-objects/session/session-membership.value-object.js';
 import type { SessionStart } from '../../value-objects/session/session-start.value-object.js';
 import type { SessionState } from '../../value-objects/session/session-state.value-object.js';
@@ -16,9 +17,10 @@ import type { SessionState } from '../../value-objects/session/session-state.val
  *   pendant 30 jours" the cookie lasts until then (`Max-Age`); without it the cookie ends with the
  *   browser, and this service keeps the same 30-day bound (decision of this service: the contract
  *   requires a bound for both and names none for a session cookie);
- * - either session also ends after 12 hours without activity, as the contract says for both; an
- *   active introspection is activity. Activity is recorded at most once a minute, so the 12 hours
- *   count from the last recorded minute;
+ * - either session also ends after the inactivity of the authentication policy of the organization
+ *   it names (1 hour, 12 hours, 7 days or 30 days; 12 hours without one, decision 8 of P2c), which
+ *   its state carries as it was read with it; an active introspection is activity. Activity is
+ *   recorded at most once a minute, so the inactivity counts from the last recorded minute;
  * - a revoked session never becomes active again; revoking a session that already ended changes
  *   nothing;
  * - a session acts on at most one organization, through a membership of its account (P2b plan,
@@ -28,11 +30,12 @@ import type { SessionState } from '../../value-objects/session/session-state.val
  *   organization only while that very membership is active: a removal ends it for good, since a
  *   person who joins again gets a new membership (`asyncapi/organization-service.yaml`);
  * - a session records when its person last proved who they are (decision 4 of P2c, "Recent
- *   authentication" of `openapi/internal/identity-service.yaml`): the sign-in that opened it, a
- *   confirmed password or the current password of a change. The change of address, the scheduling
- *   of the deletion and the creation of a personal API token require it within the last 10
- *   minutes. A change or a reset of the password ends it in the sessions it leaves open; the
- *   window belongs to one session.
+ *   authentication" of `openapi/internal/identity-service.yaml`), and how: `password` for a first
+ *   factor, `two-step` for a second one (P2c-2). A window opened by a password counts only for an
+ *   account without two-step verification; a sign-in on a trusted device opens none. The guarded
+ *   routes require it within the last 10 minutes. A change or a reset of the password ends it in
+ *   the sessions it leaves open, turning two-step verification on ends the windows opened by a
+ *   password; the window belongs to one session.
  */
 export class Session {
   // #region Properties
@@ -48,15 +51,27 @@ export class Session {
   public static readonly ABSOLUTE_LIFETIME_MS: number = 30 * 24 * 60 * 60_000;
 
   /**
-   * Property INACTIVITY_TIMEOUT_MS
+   * Property DEFAULT_INACTIVITY_TIMEOUT_MINUTES
    *
    * @description
-   * Time without activity after which a session ends: 12 hours, in milliseconds.
+   * Time without activity after which a session without an organization, or of an organization
+   * without a policy, ends: 12 hours, in minutes.
    *
    * @type {number}
    * @readonly
    */
-  public static readonly INACTIVITY_TIMEOUT_MS: number = 12 * 60 * 60_000;
+  public static readonly DEFAULT_INACTIVITY_TIMEOUT_MINUTES: number = 720;
+
+  /**
+   * Property LONGEST_INACTIVITY_TIMEOUT_MINUTES
+   *
+   * @description
+   * The longest inactivity a policy may set: 30 days, in minutes.
+   *
+   * @type {number}
+   * @readonly
+   */
+  public static readonly LONGEST_INACTIVITY_TIMEOUT_MINUTES: number = 43_200;
 
   /**
    * Property ACTIVITY_RESOLUTION_MS
@@ -172,6 +187,9 @@ export class Session {
    * @param {boolean} persistent - Whether the cookie outlives the browser.
    * @param {Date} now - When the sign-in succeeded.
    * @param {SessionMembership | null} membership - The membership the session starts in.
+   * @param {SessionAuthenticationMethod | null} authentication - The proof the sign-in brought,
+   * which opens the window of recent authentication; `null` for a sign-in on a trusted device of an
+   * account with two-step verification, which opens none.
    * @returns {SessionStart} The session to store.
    */
   public static start(
@@ -179,6 +197,7 @@ export class Session {
     persistent: boolean,
     now: Date,
     membership: SessionMembership | null = null,
+    authentication: SessionAuthenticationMethod | null = 'password',
   ): SessionStart {
     return {
       userId,
@@ -188,7 +207,8 @@ export class Session {
       lastActiveAt: now,
       expiresAt: new Date(now.getTime() + Session.ABSOLUTE_LIFETIME_MS),
       signedInAt: now,
-      authenticatedAt: now,
+      authenticatedAt: authentication === null ? null : now,
+      twoStepAuthenticatedAt: authentication === 'two-step' ? now : null,
       version: 1,
     };
   }
@@ -210,6 +230,9 @@ export class Session {
     if ((state.organizationId === null) !== (state.memberId === null)) {
       throw new InvalidSessionStateError('an organization comes with its membership');
     }
+    if (!Number.isInteger(state.inactivityTimeoutMinutes) || state.inactivityTimeoutMinutes < 1) {
+      throw new InvalidSessionStateError('the inactivity is a positive number of minutes');
+    }
     return new Session(state);
   }
 
@@ -218,25 +241,40 @@ export class Session {
    *
    * @description
    * Whether the session signs its browser in at `now`: not revoked, before its absolute expiry and
-   * less than 12 hours after its last activity.
+   * within the inactivity of its organization after its last activity.
    *
    * @param {Date} now - The instant of the check.
    * @returns {boolean} Whether the session is active.
    */
   public isActiveAt(now: Date): boolean {
-    const instant: number = now.getTime();
     return (
       this.state.revokedAt === null &&
-      instant < this.state.expiresAt.getTime() &&
-      instant < this.state.lastActiveAt.getTime() + Session.INACTIVITY_TIMEOUT_MS
+      now.getTime() < this.state.expiresAt.getTime() &&
+      !this.isIdleLongerThan(this.state.inactivityTimeoutMinutes, now)
     );
+  }
+
+  /**
+   * Method isIdleLongerThan
+   *
+   * @description
+   * Whether the session was idle for at least an inactivity at `now`: the rule the choice of an
+   * organization applies with the policy of the organization chosen ("choosing an organization
+   * never revives a session its own policy would have closed").
+   *
+   * @param {number} minutes - The inactivity, in minutes.
+   * @param {Date} now - The instant of the check.
+   * @returns {boolean} `true` when that inactivity closes the session.
+   */
+  public isIdleLongerThan(minutes: number, now: Date): boolean {
+    return now.getTime() >= this.state.lastActiveAt.getTime() + minutes * 60_000;
   }
 
   /**
    * Method recordActivity
    *
    * @description
-   * Records that the session was used at `now`, which starts its 12 hours of inactivity again. The
+   * Records that the session was used at `now`, which starts its inactivity again. The
    * same session is returned when the recorded activity is less than a minute old.
    *
    * @param {Date} now - The instant of the activity.
@@ -274,15 +312,22 @@ export class Session {
    *
    * @description
    * Makes an organization the current one of the session, through the active membership of its
-   * account there, with the next version. The same membership again returns this session.
+   * account there, with the next version; the session follows the inactivity of that organization
+   * from then. The same membership again returns this session.
    *
    * @param {SessionMembership} membership - The membership the session acts through from now.
    * @param {Date} now - When the organization is chosen.
+   * @param {number} inactivityTimeoutMinutes - The inactivity of the policy of that organization.
    * @returns {Session} The session to store, or this one when nothing changes.
-   * @throws {SessionEndedError} When the session is no longer active.
+   * @throws {SessionEndedError} When the session is no longer active, or was idle for longer than
+   * the inactivity of the organization chosen.
    */
-  public chooseOrganization(membership: SessionMembership, now: Date): Session {
-    if (!this.isActiveAt(now)) {
+  public chooseOrganization(
+    membership: SessionMembership,
+    now: Date,
+    inactivityTimeoutMinutes: number = this.state.inactivityTimeoutMinutes,
+  ): Session {
+    if (!this.isActiveAt(now) || this.isIdleLongerThan(inactivityTimeoutMinutes, now)) {
       throw new SessionEndedError();
     }
     if (this.isActingThrough(membership.memberId)) {
@@ -292,8 +337,24 @@ export class Session {
       ...this.state,
       organizationId: membership.organizationId,
       memberId: membership.memberId,
+      inactivityTimeoutMinutes,
       version: this.state.version + 1,
     });
+  }
+
+  /**
+   * Method closeForInactivity
+   *
+   * @description
+   * Closes a session that the inactivity of the organization it was about to choose would have
+   * closed, with the next version and without `session.revoked.v1`: a session that "closes for
+   * inactivity emits nothing" (`asyncapi/identity-service.yaml`).
+   *
+   * @param {Date} now - When it is closed.
+   * @returns {Session} The closed session.
+   */
+  public closeForInactivity(now: Date): Session {
+    return new Session({ ...this.state, revokedAt: now, version: this.state.version + 1 });
   }
 
   /**
@@ -317,16 +378,21 @@ export class Session {
    * Method isRecentlyAuthenticatedAt
    *
    * @description
-   * Whether the person of the session proved who they are within the 10 minutes before an instant.
+   * Whether the person of the session proved who they are within the 10 minutes before an instant,
+   * in a way that counts for the account: a second factor for an account with two-step
+   * verification, any proof otherwise. A window counts as a second factor while
+   * `twoStepAuthenticatedAt` is its very instant; any other window counts as a password.
    *
    * @param {Date} now - The instant.
-   * @returns {boolean} `true` inside the window.
+   * @param {boolean} twoStepRequired - Whether the account has two-step verification.
+   * @returns {boolean} `true` inside a window that counts.
    */
-  public isRecentlyAuthenticatedAt(now: Date): boolean {
+  public isRecentlyAuthenticatedAt(now: Date, twoStepRequired: boolean = false): boolean {
     const authenticatedAt: Date | null = this.state.authenticatedAt;
     return (
       authenticatedAt !== null &&
-      now.getTime() < authenticatedAt.getTime() + Session.RECENT_AUTHENTICATION_MS
+      now.getTime() < authenticatedAt.getTime() + Session.RECENT_AUTHENTICATION_MS &&
+      (!twoStepRequired || this.opensByTwoStep())
     );
   }
 
@@ -334,18 +400,23 @@ export class Session {
    * Method authenticate
    *
    * @description
-   * Records that the person of an active session proved who they are now, which opens its window
-   * of recent authentication.
+   * Records that the person of an active session proved who they are now, and how, which opens its
+   * window of recent authentication.
    *
    * @param {Date} now - When they proved it.
+   * @param {SessionAuthenticationMethod} method - A password or a second factor.
    * @returns {Session} The session with its recent authentication.
    * @throws {SessionEndedError} When the session is no longer active.
    */
-  public authenticate(now: Date): Session {
+  public authenticate(now: Date, method: SessionAuthenticationMethod = 'password'): Session {
     if (!this.isActiveAt(now)) {
       throw new SessionEndedError();
     }
-    return new Session({ ...this.state, authenticatedAt: now });
+    return new Session({
+      ...this.state,
+      authenticatedAt: now,
+      twoStepAuthenticatedAt: method === 'two-step' ? now : null,
+    });
   }
 
   /**
@@ -353,14 +424,42 @@ export class Session {
    *
    * @description
    * Ends the recent authentication of the session, as a change or a reset of the password does to
-   * the sessions it leaves open.
+   * the sessions it leaves open (`every-window`), or only a window opened by a password, as turning
+   * two-step verification on does to the other sessions (`password-windows`).
    *
-   * @returns {Session} The session without a recent authentication.
+   * @param {'every-window' | 'password-windows'} scope - Which windows end.
+   * @returns {Session} The session without that recent authentication, or this one.
    */
-  public endRecentAuthentication(): Session {
-    return this.state.authenticatedAt === null
-      ? this
-      : new Session({ ...this.state, authenticatedAt: null });
+  public endRecentAuthentication(
+    scope: 'every-window' | 'password-windows' = 'every-window',
+  ): Session {
+    if (
+      this.state.authenticatedAt === null ||
+      (scope === 'password-windows' && this.opensByTwoStep())
+    ) {
+      return this;
+    }
+    return new Session({ ...this.state, authenticatedAt: null, twoStepAuthenticatedAt: null });
+  }
+
+  /**
+   * Method opensByTwoStep
+   *
+   * @description
+   * Whether the current window was opened by a second factor: `twoStepAuthenticatedAt` is the
+   * instant of `authenticatedAt`. A later window of a password, by this version or a previous one,
+   * moves `authenticatedAt` alone and ends the match.
+   *
+   * @returns {boolean} `true` for a window of a second factor.
+   */
+  private opensByTwoStep(): boolean {
+    const authenticatedAt: Date | null = this.state.authenticatedAt;
+    const twoStepAt: Date | null = this.state.twoStepAuthenticatedAt;
+    return (
+      authenticatedAt !== null &&
+      twoStepAt !== null &&
+      authenticatedAt.getTime() === twoStepAt.getTime()
+    );
   }
   // #endregion
 }

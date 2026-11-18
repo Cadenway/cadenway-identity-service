@@ -90,6 +90,18 @@ export class InMemoryMemberships implements MembershipsUnitOfWork {
             ),
           ].sort(),
         ),
+      findActiveOfUser: (userId: string): Promise<Membership[]> =>
+        Promise.resolve(
+          latestActive(rows, (row: MembershipState) => row.userId === userId, 'organizationId'),
+        ),
+      listActiveOfOrganization: (organizationId: string): Promise<Membership[]> =>
+        Promise.resolve(
+          latestActive(
+            rows,
+            (row: MembershipState) => row.organizationId === organizationId,
+            'userId',
+          ),
+        ),
     };
     const result: TResult = await work(repository);
     this.rows = rows;
@@ -97,4 +109,32 @@ export class InMemoryMemberships implements MembershipsUnitOfWork {
     return result;
   }
   // #endregion
+}
+
+/**
+ * Function latestActive
+ *
+ * @description
+ * The active rows a filter keeps, the latest one per key, in the order of the key: what the
+ * `distinct on` reads of the repository return.
+ *
+ * @param {Map<string, MembershipState>} rows - The rows of the transaction.
+ * @param {(row: MembershipState) => boolean} keep - Which rows to read.
+ * @param {'organizationId' | 'userId'} key - The member a membership is unique by.
+ * @returns {Membership[]} The memberships.
+ */
+function latestActive(
+  rows: Map<string, MembershipState>,
+  keep: (row: MembershipState) => boolean,
+  key: 'organizationId' | 'userId',
+): Membership[] {
+  const latest: Map<string, MembershipState> = new Map<string, MembershipState>();
+  for (const row of rows.values()) {
+    if (keep(row) && row.removedAt === null) {
+      latest.set(row[key], row);
+    }
+  }
+  return [...latest.values()]
+    .sort((left: MembershipState, right: MembershipState) => left[key].localeCompare(right[key]))
+    .map((row: MembershipState) => Membership.restore(row));
 }

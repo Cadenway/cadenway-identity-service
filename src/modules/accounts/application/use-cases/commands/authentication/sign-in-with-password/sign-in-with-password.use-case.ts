@@ -11,10 +11,12 @@ import type { DeviceReader } from '../../../../ports/outbound/device/accounts/de
 import type { SessionOpener } from '../../../../ports/outbound/identity/sessions/session-opener.port.js';
 import type { PasswordHasher } from '../../../../ports/outbound/security/authentication/password-hasher.port.js';
 import type { AccountsUnitOfWork } from '../../../../ports/outbound/transactions/accounts/accounts-unit-of-work.port.js';
-import type { SessionIssuedView } from '../../../../projections/authentication/session-issued-view.projection.js';
-import { completeSignIn } from '../../../../services/authentication/sign-in-completion.service.js';
+import type { SignInOutcome } from '../../../../projections/authentication/sign-in-outcome.projection.js';
+import { completeFirstFactor } from '../../../../services/two-step/first-factor.service.js';
 import { settlePasswordCheck } from '../../../../services/password/password-attempts.service.js';
 import type { SignInWithPasswordInput } from './sign-in-with-password.input.js';
+import type { TrustedDevices } from '../../../../ports/outbound/identity/sessions/trusted-devices.port.js';
+import type { ChallengeTokens } from '../../../../ports/outbound/security/two-step/challenge-tokens.port.js';
 
 /**
  * Class SignInWithPassword
@@ -33,8 +35,10 @@ import type { SignInWithPasswordInput } from './sign-in-with-password.input.js';
  *    that used the last attempt.
  * 3. For the right password, a second transaction resets the count, locks the account and, for a
  *    verified one, opens the session (`completeSignIn`: "Nouvelle connexion", and the cancellation of
- *    a scheduled deletion); an unverified account answers `auth.email-not-verified`, and an account
- *    deleted meanwhile answers like a wrong password.
+ *    a scheduled deletion), or, for an account with two-step verification on a device it does not
+ *    trust, issues its challenge instead (`completeFirstFactor`, P2c-2); an unverified account
+ *    answers `auth.email-not-verified`, and an account deleted meanwhile answers like a wrong
+ *    password.
  */
 export class SignInWithPassword {
   // #region Properties
@@ -92,6 +96,28 @@ export class SignInWithPassword {
    * @readonly
    */
   private readonly devices: DeviceReader;
+
+  /**
+   * Property trustedDevices
+   *
+   * @description
+   * The trusted devices of the account, whose sign-ins skip the challenge.
+   *
+   * @type {TrustedDevices}
+   * @readonly
+   */
+  private readonly trustedDevices: TrustedDevices;
+
+  /**
+   * Property challengeTokens
+   *
+   * @description
+   * Draws the token of a two-step challenge.
+   *
+   * @type {ChallengeTokens}
+   * @readonly
+   */
+  private readonly challengeTokens: ChallengeTokens;
   // #endregion
 
   // #region Constructor
@@ -106,6 +132,8 @@ export class SignInWithPassword {
    * @param {SessionOpener} sessions - Opens the session.
    * @param {Clock} clock - The time of the sign-in.
    * @param {DeviceReader} devices - Reads the device of the browser.
+   * @param {TrustedDevices} trustedDevices - The trusted devices of the account, whose sign-ins skip the challenge.
+   * @param {ChallengeTokens} challengeTokens - Draws the token of a two-step challenge.
    * @constructor
    */
   public constructor(
@@ -114,12 +142,16 @@ export class SignInWithPassword {
     sessions: SessionOpener,
     clock: Clock,
     devices: DeviceReader,
+    trustedDevices: TrustedDevices,
+    challengeTokens: ChallengeTokens,
   ) {
     this.unitOfWork = unitOfWork;
     this.hasher = hasher;
     this.sessions = sessions;
     this.clock = clock;
     this.devices = devices;
+    this.trustedDevices = trustedDevices;
+    this.challengeTokens = challengeTokens;
   }
   // #endregion
 
@@ -131,11 +163,12 @@ export class SignInWithPassword {
    * Signs the account of the address in with its password.
    *
    * @param {SignInWithPasswordInput} input - The address, the password and the browser.
-   * @returns {Promise<SessionIssuedView>} The session, its token and the account.
+   * @returns {Promise<SignInOutcome>} The session, its token and the account, or the two-step
+   * challenge of an account with two-step verification on a device it does not trust.
    * @throws {AccountRefusal} `auth.account-locked`, `auth.invalid-credentials` or
    * `auth.email-not-verified`.
    */
-  public async execute(input: SignInWithPasswordInput): Promise<SessionIssuedView> {
+  public async execute(input: SignInWithPasswordInput): Promise<SignInOutcome> {
     const email: EmailAddress = EmailAddress.of(input.email);
     const now: Date = this.clock.now();
     const attempt: CountedAttempt | Refusal = await this.unitOfWork.run(
@@ -151,8 +184,8 @@ export class SignInWithPassword {
     const userId: string = attempt.user.id;
     const passwordHash: string | null = attempt.passwordHash;
     const failure: PasswordFailure = attempt.failure;
-    const outcome: SessionIssuedView | Refusal = await this.unitOfWork.run(
-      async (store: AccountsStore): Promise<SessionIssuedView | Refusal> => {
+    const outcome: SignInOutcome | Refusal = await this.unitOfWork.run(
+      async (store: AccountsStore): Promise<SignInOutcome | Refusal> => {
         const user: User | 'account-gone' | 'password-moved' = await settlePasswordCheck(
           store,
           userId,
@@ -165,13 +198,21 @@ export class SignInWithPassword {
         if (!user.isVerified) {
           return { reason: 'email-not-verified' };
         }
-        return completeSignIn(
+        return completeFirstFactor(
           store,
-          this.sessions,
-          this.devices,
+          {
+            sessions: this.sessions,
+            devices: this.devices,
+            trustedDevices: this.trustedDevices,
+            challengeTokens: this.challengeTokens,
+          },
           user,
-          input.rememberMe,
-          input.client,
+          {
+            persistent: input.rememberMe,
+            client: input.client,
+            trustedDeviceToken: input.trustedDeviceToken,
+          },
+          now,
         );
       },
     );

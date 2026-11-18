@@ -2,6 +2,7 @@ import type { User } from '../../../../../domain/aggregates/account/user.aggrega
 import type { EmailAddress } from '../../../../../domain/value-objects/email/email-address.value-object.js';
 import type { IssuedCode } from '../../../../models/authentication/issued-code.model.js';
 import type { IssuedResetLink } from '../../../../models/password-reset/issued-reset-link.model.js';
+import type { TwoStepSummary } from '../../../../models/two-step/two-step-summary.model.js';
 import type { ClientDescription } from '../../../../models/sessions/client-description.model.js';
 
 /**
@@ -141,5 +142,23 @@ export interface AccountEvents {
    * @returns {Promise<void>} Resolves once appended.
    */
   userDeleted(userId: string, version: number): Promise<void>;
+
+  /**
+   * Method userTwoStepVerificationChanged
+   *
+   * @description
+   * Appends `user.two-step-verification-changed.v1` (P2c-2), with the state after the change and no
+   * secret.
+   *
+   * @param {User} user - The account, with the version of the change.
+   * @param {TwoStepSummary} summary - The change and the state after it.
+   * @param {ClientDescription} client - The browser of the change.
+   * @returns {Promise<void>} Resolves once appended.
+   */
+  userTwoStepVerificationChanged(
+    user: User,
+    summary: TwoStepSummary,
+    client: ClientDescription,
+  ): Promise<void>;
   // #endregion
 }

@@ -63,12 +63,16 @@ const platformTables = [
 
 /**
  * The tables of the business modules: accounts (users, credentials, codes, throttles, lockout,
- * reset links, pending changes of address), sessions (sessions and the last organization each
- * account chose), memberships (the copy of the memberships) and api-tokens. Those with an
+ * reset links, pending changes of address, two-step verification), sessions (sessions, the last
+ * organization each account chose, trusted devices, the accounts with two-step verification and the
+ * authentication policies), memberships (the copy of the memberships) and api-tokens. Those with an
  * `organization_id` carry the forced policy of the kit.
  */
 const businessTables = [
   'api_tokens',
+  'authentication_policies',
+  'authenticator_app_setups',
+  'backup_codes',
   'code_requests',
   'email_changes',
   'memberships',
@@ -77,8 +81,14 @@ const businessTables = [
   'password_credentials',
   'password_reset_links',
   'password_reset_requests',
+  'security_key_registrations',
+  'security_keys',
   'sessions',
   'sign_in_attempts',
+  'sign_in_challenges',
+  'trusted_devices',
+  'two_step_enrollments',
+  'two_step_verifications',
   'users',
 ] as const;
 
@@ -86,7 +96,7 @@ const businessTables = [
 const allTables = [...platformTables, ...businessTables].sort();
 
 /** Migrations of `migrations/meta/_journal.json`. */
-const migrationCount = 5;
+const migrationCount = 6;
 
 /**
  * Runs `docker compose` on the throwaway project.
@@ -292,6 +302,8 @@ describe('identity-service wiring', () => {
       JSON.stringify({ 'api-gateway': [gateway.publicJwk] }),
     );
     vi.stubEnv('PASSWORD_PEPPER', 'integration-test-password-pepper-000000000000');
+    vi.stubEnv('WEBAUTHN_RP_ID', 'app.cadenway.localhost');
+    vi.stubEnv('WEBAUTHN_ORIGINS', 'http://app.cadenway.localhost');
 
     @Module({
       imports: [AppModule],
@@ -380,6 +392,7 @@ describe('identity-service wiring', () => {
     const withPolicy: readonly string[] = withOrganization.rows.map(({ table_name }) => table_name);
     expect(withPolicy).toEqual([
       'api_tokens',
+      'authentication_policies',
       'event_versions',
       'idempotency_keys',
       'memberships',
@@ -396,6 +409,10 @@ describe('identity-service wiring', () => {
     );
     expect(policies.rows).toEqual([
       { tablename: 'api_tokens', policyname: 'api_tokens_organization_isolation' },
+      {
+        tablename: 'authentication_policies',
+        policyname: 'authentication_policies_organization_isolation',
+      },
       { tablename: 'event_versions', policyname: 'event_versions_organization_isolation' },
       { tablename: 'idempotency_keys', policyname: 'idempotency_keys_organization_isolation' },
       { tablename: 'memberships', policyname: 'memberships_organization_isolation' },

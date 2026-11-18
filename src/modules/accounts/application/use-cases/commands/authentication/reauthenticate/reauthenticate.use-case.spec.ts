@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { User } from '../../../../../domain/aggregates/account/user.aggregate.js';
+import { TwoStepVerification } from '../../../../../domain/aggregates/two-step/two-step-verification.aggregate.js';
 import {
   FakeAccountSessions,
   FakeDeviceReader,
@@ -9,6 +10,12 @@ import {
   FixedClock,
   InMemoryAccounts,
 } from '../../../../models/accounts/accounts.fixture.js';
+import {
+  FakeAuthenticatorAppSecrets,
+  FakeChallengeTokens,
+  FakeTotp,
+  FakeTrustedDevices,
+} from '../../../../models/two-step/two-step.fixture.js';
 import type { RecentAuthentication } from '../../../../models/sessions/recent-authentication.model.js';
 import { SignInWithPassword } from '../sign-in-with-password/sign-in-with-password.use-case.js';
 import { Reauthenticate } from './reauthenticate.use-case.js';
@@ -46,7 +53,14 @@ describe('Reauthenticate', () => {
     clock = new FixedClock('2026-11-09T13:12:00Z');
     hasher = new FakePasswordHasher();
     sessions = new FakeAccountSessions(clock);
-    reauthenticate = new Reauthenticate(accounts, hasher, sessions, clock);
+    reauthenticate = new Reauthenticate(
+      accounts,
+      hasher,
+      sessions,
+      new FakeAuthenticatorAppSecrets(),
+      new FakeTotp(),
+      clock,
+    );
     camille = accounts.seedUser('camille.martin@ateliernord.fr', true, `hashed:${PASSWORD}`);
     sessions.seed(SESSION_ID, camille.id, null);
   });
@@ -56,6 +70,7 @@ describe('Reauthenticate', () => {
       actorUserId: camille.id,
       sessionId: SESSION_ID,
       password: PASSWORD,
+      code: null,
     });
 
     expect(recent).toEqual({
@@ -80,6 +95,7 @@ describe('Reauthenticate', () => {
         actorUserId: camille.id,
         sessionId: SESSION_ID,
         password: PASSWORD,
+        code: null,
       }),
     ).rejects.toMatchObject({ refusal: { reason: 'password-incorrect', remainingAttempts: 4 } });
     await expect(sessions.check(camille.id, SESSION_ID)).resolves.toBe('stale');
@@ -97,7 +113,12 @@ describe('Reauthenticate', () => {
       '019a6a2e-4b1c-7d3e-8f5a-000000000098',
     ]) {
       await expect(
-        reauthenticate.execute({ actorUserId: camille.id, sessionId, password: PASSWORD }),
+        reauthenticate.execute({
+          actorUserId: camille.id,
+          sessionId,
+          password: PASSWORD,
+          code: null,
+        }),
       ).rejects.toMatchObject({ refusal: { reason: 'session-not-found' } });
     }
     expect(accounts.state.lockouts.size).toBe(0);
@@ -109,6 +130,7 @@ describe('Reauthenticate', () => {
         actorUserId: camille.id,
         sessionId: SESSION_ID,
         password: 'not-the-password',
+        code: null,
       }),
     ).rejects.toMatchObject({ refusal: { reason: 'password-incorrect', remainingAttempts: 4 } });
 
@@ -123,6 +145,8 @@ describe('Reauthenticate', () => {
       new FakeSessionOpener(accounts),
       clock,
       new FakeDeviceReader(),
+      new FakeTrustedDevices(),
+      new FakeChallengeTokens(),
     );
     for (let attempt: number = 0; attempt < 3; attempt += 1) {
       await expect(
@@ -135,10 +159,20 @@ describe('Reauthenticate', () => {
       ).rejects.toMatchObject({ refusal: { reason: 'invalid-credentials' } });
     }
     await expect(
-      reauthenticate.execute({ actorUserId: camille.id, sessionId: SESSION_ID, password: 'wrong' }),
+      reauthenticate.execute({
+        actorUserId: camille.id,
+        sessionId: SESSION_ID,
+        password: 'wrong',
+        code: null,
+      }),
     ).rejects.toMatchObject({ refusal: { reason: 'password-incorrect', remainingAttempts: 1 } });
     await expect(
-      reauthenticate.execute({ actorUserId: camille.id, sessionId: SESSION_ID, password: 'wrong' }),
+      reauthenticate.execute({
+        actorUserId: camille.id,
+        sessionId: SESSION_ID,
+        password: 'wrong',
+        code: null,
+      }),
     ).rejects.toMatchObject({
       refusal: { reason: 'account-locked', lockedUntil: new Date('2026-11-09T13:27:00Z') },
     });
@@ -147,6 +181,7 @@ describe('Reauthenticate', () => {
         actorUserId: camille.id,
         sessionId: SESSION_ID,
         password: PASSWORD,
+        code: null,
       }),
     ).rejects.toMatchObject({ refusal: { reason: 'account-locked' } });
     await expect(sessions.countOpen(camille.id)).resolves.toBe(1);
@@ -154,15 +189,126 @@ describe('Reauthenticate', () => {
 
   it('ends the count of the failed passwords with the right one', async () => {
     await expect(
-      reauthenticate.execute({ actorUserId: camille.id, sessionId: SESSION_ID, password: 'wrong' }),
+      reauthenticate.execute({
+        actorUserId: camille.id,
+        sessionId: SESSION_ID,
+        password: 'wrong',
+        code: null,
+      }),
     ).rejects.toBeDefined();
 
     await reauthenticate.execute({
       actorUserId: camille.id,
       sessionId: SESSION_ID,
       password: PASSWORD,
+      code: null,
     });
 
     expect(accounts.state.lockouts.has(camille.email.value)).toBe(false);
+  });
+  describe('with two-step verification', () => {
+    const SECRET: string = 'JBSWY3DPEHPK3PXP';
+
+    beforeEach(() => {
+      accounts.state.twoStep.set(
+        camille.id,
+        TwoStepVerification.enable(
+          camille.id,
+          `sealed:${camille.id}:${SECRET}`,
+          FakeTotp.stepAt(new Date('2026-11-09T13:00:00Z')),
+          'handle-1',
+          new Date('2026-11-09T13:00:00Z'),
+        ),
+      );
+      sessions.enrolled.add(camille.id);
+    });
+
+    it('refuses the password, neither checked nor counted, and asks for the app', async () => {
+      await expect(
+        reauthenticate.execute({
+          actorUserId: camille.id,
+          sessionId: SESSION_ID,
+          password: PASSWORD,
+          code: null,
+        }),
+      ).rejects.toMatchObject({
+        refusal: { reason: 'reauthentication-required', methods: ['authenticator-app'] },
+      });
+      expect(accounts.state.lockouts.size).toBe(0);
+      await expect(sessions.check(camille.id, SESSION_ID)).resolves.toBe('stale');
+    });
+
+    it('records a recent authentication by a second factor for a right code, accepted once', async () => {
+      const code: string = FakeTotp.codeOf(SECRET, FakeTotp.stepAt(clock.now()));
+
+      await expect(
+        reauthenticate.execute({
+          actorUserId: camille.id,
+          sessionId: SESSION_ID,
+          password: null,
+          code,
+        }),
+      ).resolves.toEqual({
+        authenticatedAt: new Date('2026-11-09T13:12:00Z'),
+        expiresAt: new Date('2026-11-09T13:22:00Z'),
+      });
+      expect(sessions.sessions.get(SESSION_ID)?.method).toBe('two-step');
+      await expect(sessions.check(camille.id, SESSION_ID)).resolves.toBe('recent');
+      await expect(
+        reauthenticate.execute({
+          actorUserId: camille.id,
+          sessionId: SESSION_ID,
+          password: null,
+          code,
+        }),
+      ).rejects.toMatchObject({
+        refusal: { reason: 'two-step-code-invalid', remainingAttempts: 4 },
+      });
+    });
+
+    it('locks the second factor for 15 minutes after 5 wrong codes, the right one included', async () => {
+      for (let attempt: number = 1; attempt < 5; attempt += 1) {
+        await expect(
+          reauthenticate.execute({
+            actorUserId: camille.id,
+            sessionId: SESSION_ID,
+            password: null,
+            code: '000000',
+          }),
+        ).rejects.toMatchObject({
+          refusal: { reason: 'two-step-code-invalid', remainingAttempts: 5 - attempt },
+        });
+      }
+      await expect(
+        reauthenticate.execute({
+          actorUserId: camille.id,
+          sessionId: SESSION_ID,
+          password: null,
+          code: '000000',
+        }),
+      ).rejects.toMatchObject({
+        refusal: { reason: 'two-step-locked', lockedUntil: new Date('2026-11-09T13:27:00Z') },
+      });
+      await expect(
+        reauthenticate.execute({
+          actorUserId: camille.id,
+          sessionId: SESSION_ID,
+          password: null,
+          code: FakeTotp.codeOf(SECRET, FakeTotp.stepAt(clock.now())),
+        }),
+      ).rejects.toMatchObject({ refusal: { reason: 'two-step-locked' } });
+      await expect(sessions.check(camille.id, SESSION_ID)).resolves.toBe('stale');
+    });
+  });
+
+  it('refuses a code for an account without two-step verification', async () => {
+    await expect(
+      reauthenticate.execute({
+        actorUserId: camille.id,
+        sessionId: SESSION_ID,
+        password: null,
+        code: '261845',
+      }),
+    ).rejects.toMatchObject({ refusal: { reason: 'two-step-not-enabled' } });
   });
 });

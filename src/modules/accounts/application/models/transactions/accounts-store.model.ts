@@ -1,3 +1,8 @@
+import type { BackupCodeRepository } from '../../ports/outbound/persistence/two-step/backup-code-repository.port.js';
+import type { PendingTwoStepRepository } from '../../ports/outbound/persistence/two-step/pending-two-step-repository.port.js';
+import type { SecurityKeyRepository } from '../../ports/outbound/persistence/two-step/security-key-repository.port.js';
+import type { SignInChallengeRepository } from '../../ports/outbound/persistence/two-step/sign-in-challenge-repository.port.js';
+import type { TwoStepVerificationRepository } from '../../ports/outbound/persistence/two-step/two-step-verification-repository.port.js';
 import type { AccountDeletionQueue } from '../../ports/outbound/jobs/accounts/account-deletion-queue.port.js';
 import type { AccountEvents } from '../../ports/outbound/messaging/accounts/account-events.port.js';
 import type { CodeRequestRepository } from '../../ports/outbound/persistence/accounts/code-request-repository.port.js';
@@ -126,5 +131,60 @@ export interface AccountsStore {
    * @readonly
    */
   readonly deletionQueue: AccountDeletionQueue;
+
+  /**
+   * Property twoStep
+   *
+   * @description
+   * The two-step verification of the accounts.
+   *
+   * @type {TwoStepVerificationRepository}
+   * @readonly
+   */
+  readonly twoStep: TwoStepVerificationRepository;
+
+  /**
+   * Property backupCodes
+   *
+   * @description
+   * Their backup codes, as keyed hashes.
+   *
+   * @type {BackupCodeRepository}
+   * @readonly
+   */
+  readonly backupCodes: BackupCodeRepository;
+
+  /**
+   * Property securityKeys
+   *
+   * @description
+   * Their security keys.
+   *
+   * @type {SecurityKeyRepository}
+   * @readonly
+   */
+  readonly securityKeys: SecurityKeyRepository;
+
+  /**
+   * Property pendingTwoStep
+   *
+   * @description
+   * Their pending setups of an app and registrations of a key.
+   *
+   * @type {PendingTwoStepRepository}
+   * @readonly
+   */
+  readonly pendingTwoStep: PendingTwoStepRepository;
+
+  /**
+   * Property challenges
+   *
+   * @description
+   * Their open sign-in challenges.
+   *
+   * @type {SignInChallengeRepository}
+   * @readonly
+   */
+  readonly challenges: SignInChallengeRepository;
   // #endregion
 }
