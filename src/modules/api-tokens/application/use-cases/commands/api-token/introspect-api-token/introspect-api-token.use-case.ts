@@ -1,6 +1,7 @@
 import type { ApiToken } from '../../../../../domain/aggregates/api-token/api-token.aggregate.js';
 import type { ActiveMembership } from '../../../../models/api-token/active-membership.model.js';
 import type { ActiveMemberships } from '../../../../ports/outbound/memberships/api-token/active-memberships.port.js';
+import type { OrganizationAccess } from '../../../../ports/outbound/sessions/api-token/organization-access.port.js';
 import type { ApiTokenRepository } from '../../../../ports/outbound/persistence/api-token/api-token-repository.port.js';
 import type { ApiTokenSecrets } from '../../../../ports/outbound/security/api-token/api-token-secrets.port.js';
 import type { Clock } from '../../../../ports/outbound/time/api-token/clock.port.js';
@@ -19,7 +20,9 @@ import type { IntrospectApiTokenOutput } from './introspect-api-token.output.js'
  * one or a session token included, answers `active: false`, never an error. An active answer
  * records the use, at most once a minute, without a lock: a concurrent later write wins. It runs in
  * one system transaction, which the reading of the memberships joins; calling it twice has the
- * effect of calling it once.
+ * effect of calling it once. While the policy of its organization requires two-step verification
+ * for the role of its user, who has none, the token stays active but acts on nothing: `scopes` is
+ * empty and `withheldOrganizationId` names the organization (decision 8 of P2c).
  */
 export class IntrospectApiToken {
   // #region Properties
@@ -66,6 +69,17 @@ export class IntrospectApiToken {
    * @readonly
    */
   private readonly clock: Clock;
+
+  /**
+   * Property access
+   *
+   * @description
+   * The authentication policy of the organization of the token.
+   *
+   * @type {OrganizationAccess}
+   * @readonly
+   */
+  private readonly access: OrganizationAccess;
   // #endregion
 
   // #region Constructor
@@ -79,6 +93,7 @@ export class IntrospectApiToken {
    * @param {ApiTokenSecrets} secrets - Hashes the presented token.
    * @param {ActiveMemberships} memberships - The copy of the memberships.
    * @param {Clock} clock - The time of the request.
+   * @param {OrganizationAccess} access - The authentication policy of the organization.
    * @constructor
    */
   public constructor(
@@ -86,11 +101,13 @@ export class IntrospectApiToken {
     secrets: ApiTokenSecrets,
     memberships: ActiveMemberships,
     clock: Clock,
+    access: OrganizationAccess,
   ) {
     this.unitOfWork = unitOfWork;
     this.secrets = secrets;
     this.memberships = memberships;
     this.clock = clock;
+    this.access = access;
   }
   // #endregion
 
@@ -124,6 +141,11 @@ export class IntrospectApiToken {
         if (membership === null) {
           return { active: false };
         }
+        const withheld: boolean = await this.access.isWithheld(
+          organizationId,
+          userId,
+          membership.role,
+        );
         const used: ApiToken = token.recordUse(now);
         if (used !== token) {
           await tokens.recordUse(used);
@@ -135,8 +157,9 @@ export class IntrospectApiToken {
           userId,
           organizationId,
           role: membership.role,
-          scopes,
+          scopes: withheld ? [] : scopes,
           expiresAt,
+          withheldOrganizationId: withheld ? organizationId : null,
         };
       },
     );

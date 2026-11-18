@@ -1,4 +1,5 @@
 import { ApiToken } from '../../../../domain/aggregates/api-token/api-token.aggregate.js';
+import type { OrganizationAccess } from '../../../ports/outbound/sessions/api-token/organization-access.port.js';
 import type { ApiTokenDraft } from '../../../../domain/value-objects/api-token/api-token-draft.value-object.js';
 import type { ApiTokenState } from '../../../../domain/value-objects/api-token/api-token-state.value-object.js';
 import type { ActiveMembership } from '../../../models/api-token/active-membership.model.js';
@@ -373,6 +374,17 @@ export class FakeRecentAuthentications implements RecentAuthentications {
   public checks: number = 0;
 
   /**
+   * Property twoStepUsers
+   *
+   * @description
+   * The accounts with two-step verification.
+   *
+   * @type {Set<string>}
+   * @readonly
+   */
+  public readonly twoStepUsers: Set<string>;
+
+  /**
    * Property fallback
    *
    * @description
@@ -395,6 +407,7 @@ export class FakeRecentAuthentications implements RecentAuthentications {
    * @constructor
    */
   public constructor(fallback: 'recent' | 'stale' | 'not-found' = 'not-found') {
+    this.twoStepUsers = new Set<string>();
     this.fallback = fallback;
   }
   // #endregion
@@ -422,11 +435,58 @@ export class FakeRecentAuthentications implements RecentAuthentications {
    *
    * @param {string} userId - The person.
    * @param {string} sessionId - The session.
-   * @returns {Promise<'recent' | 'stale' | 'not-found'>} Its status.
+   * @returns {Promise<{ readonly status: 'recent' | 'stale' | 'not-found'; readonly twoStepVerificationEnabled: boolean }>}
+   * Its status; the account has two-step verification when `twoStepUsers` holds it.
    */
-  public check(userId: string, sessionId: string): Promise<'recent' | 'stale' | 'not-found'> {
+  public check(
+    userId: string,
+    sessionId: string,
+  ): Promise<{
+    readonly status: 'recent' | 'stale' | 'not-found';
+    readonly twoStepVerificationEnabled: boolean;
+  }> {
     this.checks += 1;
-    return Promise.resolve(this.statuses.get(`${userId}/${sessionId}`) ?? this.fallback);
+    return Promise.resolve({
+      status: this.statuses.get(`${userId}/${sessionId}`) ?? this.fallback,
+      twoStepVerificationEnabled: this.twoStepUsers.has(userId),
+    });
+  }
+  // #endregion
+}
+
+/**
+ * Class FakeOrganizationAccess
+ *
+ * @description
+ * A fake authentication policy: the organization is withheld from the accounts it lists.
+ */
+export class FakeOrganizationAccess implements OrganizationAccess {
+  // #region Properties
+  /**
+   * Property withheldFrom
+   *
+   * @description
+   * The accounts whose organization is withheld, by `<organizationId>/<userId>`.
+   *
+   * @type {Set<string>}
+   * @readonly
+   */
+  public readonly withheldFrom: Set<string> = new Set<string>();
+  // #endregion
+
+  // #region Methods
+  /**
+   * Method isWithheld
+   *
+   * @description
+   * Whether the organization is withheld from the account.
+   *
+   * @param {string} organizationId - The organization.
+   * @param {string} userId - The account.
+   * @returns {Promise<boolean>} `true` when listed.
+   */
+  public isWithheld(organizationId: string, userId: string): Promise<boolean> {
+    return Promise.resolve(this.withheldFrom.has(`${organizationId}/${userId}`));
   }
   // #endregion
 }

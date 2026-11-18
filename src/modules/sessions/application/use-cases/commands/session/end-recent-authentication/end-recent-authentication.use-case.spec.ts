@@ -79,6 +79,8 @@ function put(
       version: 1,
       signedInAt,
       authenticatedAt: signedInAt,
+      twoStepAuthenticatedAt: null,
+      inactivityTimeoutMinutes: 720,
       ...changes,
     },
     origin: {
@@ -122,7 +124,7 @@ describe('EndRecentAuthentication', () => {
   });
 
   it('ends the recent authentication of the other sessions of the person, keeping one', async () => {
-    await end.execute({ userId: CAMILLE_ID, exceptSessionId: sessionId(1) });
+    await end.execute({ userId: CAMILLE_ID, exceptSessionId: sessionId(1), scope: 'every-window' });
 
     expect(store.sessions.get(sessionId(1))?.state.authenticatedAt).toEqual(NOW);
     expect(store.sessions.get(sessionId(2))?.state.authenticatedAt).toBeNull();
@@ -131,7 +133,7 @@ describe('EndRecentAuthentication', () => {
   });
 
   it('ends it in every session of the person when none is kept, as a reset does', async () => {
-    await end.execute({ userId: CAMILLE_ID, exceptSessionId: null });
+    await end.execute({ userId: CAMILLE_ID, exceptSessionId: null, scope: 'every-window' });
 
     expect(store.sessions.get(sessionId(1))?.state.authenticatedAt).toBeNull();
     expect(store.sessions.get(sessionId(2))?.state.authenticatedAt).toBeNull();

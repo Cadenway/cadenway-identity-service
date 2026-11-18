@@ -54,5 +54,18 @@ export interface SessionRequest {
    * @readonly
    */
   readonly newDeviceNotice: NewDeviceNotice | null;
+
+  /**
+   * Property authentication
+   *
+   * @description
+   * The proof the sign-in brought, which opens the window of recent authentication of the session:
+   * `password` for an account without two-step verification, `two-step` for the answer of a
+   * challenge, `null` for a sign-in on a trusted device (P2c-2).
+   *
+   * @type {'password' | 'two-step' | null}
+   * @readonly
+   */
+  readonly authentication: 'password' | 'two-step' | null;
   // #endregion
 }

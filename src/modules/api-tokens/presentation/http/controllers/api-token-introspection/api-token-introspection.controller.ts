@@ -73,6 +73,14 @@ export class ApiTokenIntrospectionController {
       role: view.role,
       scopes: [...view.scopes],
       expiresAt: view.expiresAt?.toISOString() ?? null,
+      ...(view.withheldOrganizationId === null
+        ? {}
+        : {
+            withheldOrganization: {
+              organizationId: view.withheldOrganizationId,
+              code: 'organization.mfa-required',
+            },
+          }),
     };
   }
   // #endregion

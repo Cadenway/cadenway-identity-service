@@ -12,12 +12,21 @@ export interface RecentAuthentications {
    *
    * @description
    * Says whether a session is an open session of the person acting on the organization of the
-   * request, and whether its person proved who they are in the last 10 minutes.
+   * request, whether its person proved who they are in the last 10 minutes in a way that counts for
+   * the account (a second factor with two-step verification), and whether the account has two-step
+   * verification, which gives the methods of a refusal.
    *
    * @param {string} userId - The person, the actor.
    * @param {string} sessionId - The session of the request.
-   * @returns {Promise<'recent' | 'stale' | 'not-found'>} The status of the session.
+   * @returns {Promise<{ readonly status: 'recent' | 'stale' | 'not-found'; readonly twoStepVerificationEnabled: boolean }>}
+   * The status of the session and whether the account has two-step verification.
    */
-  check(userId: string, sessionId: string): Promise<'recent' | 'stale' | 'not-found'>;
+  check(
+    userId: string,
+    sessionId: string,
+  ): Promise<{
+    readonly status: 'recent' | 'stale' | 'not-found';
+    readonly twoStepVerificationEnabled: boolean;
+  }>;
   // #endregion
 }

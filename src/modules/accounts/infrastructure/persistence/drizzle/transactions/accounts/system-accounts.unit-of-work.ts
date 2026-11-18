@@ -15,6 +15,11 @@ import { DrizzleOneTimeCodeRepository } from '../../repositories/authentication/
 import { DrizzleEmailChangeRepository } from '../../repositories/email-change/drizzle-email-change.repository.js';
 import { DrizzlePasswordResetLinkRepository } from '../../repositories/password-reset/drizzle-password-reset-link.repository.js';
 import { DrizzlePasswordResetRequestRepository } from '../../repositories/password-reset/drizzle-password-reset-request.repository.js';
+import { DrizzleBackupCodeRepository } from '../../repositories/two-step/drizzle-backup-code.repository.js';
+import { DrizzlePendingTwoStepRepository } from '../../repositories/two-step/drizzle-pending-two-step.repository.js';
+import { DrizzleSecurityKeyRepository } from '../../repositories/two-step/drizzle-security-key.repository.js';
+import { DrizzleSignInChallengeRepository } from '../../repositories/two-step/drizzle-sign-in-challenge.repository.js';
+import { DrizzleTwoStepVerificationRepository } from '../../repositories/two-step/drizzle-two-step-verification.repository.js';
 
 /**
  * Class SystemAccountsUnitOfWork
@@ -135,6 +140,11 @@ export class SystemAccountsUnitOfWork implements AccountsUnitOfWork {
           resetLinks: new DrizzlePasswordResetLinkRepository(transaction.db),
           resetRequests: new DrizzlePasswordResetRequestRepository(transaction.db),
           emailChanges: new DrizzleEmailChangeRepository(transaction.db),
+          twoStep: new DrizzleTwoStepVerificationRepository(transaction.db),
+          backupCodes: new DrizzleBackupCodeRepository(transaction.db),
+          securityKeys: new DrizzleSecurityKeyRepository(transaction.db),
+          pendingTwoStep: new DrizzlePendingTwoStepRepository(transaction.db),
+          challenges: new DrizzleSignInChallengeRepository(transaction.db),
           deletionQueue: new JobsAccountDeletionQueue(transaction, this.jobs),
           events: new OutboxAccountEvents(transaction, this.outbox, (): void => {
             appends.count += 1;

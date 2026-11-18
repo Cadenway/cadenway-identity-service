@@ -12,6 +12,7 @@ import {
   FixedClock,
   InMemoryAccounts,
 } from '../../../../models/accounts/accounts.fixture.js';
+import { FakeTrustedDevices } from '../../../../models/two-step/two-step.fixture.js';
 import { RequestPasswordReset } from '../request-password-reset/request-password-reset.use-case.js';
 import type { ConfirmPasswordResetInput } from './confirm-password-reset.input.js';
 import { ConfirmPasswordReset } from './confirm-password-reset.use-case.js';
@@ -35,6 +36,7 @@ describe('ConfirmPasswordReset', () => {
   let accounts: InMemoryAccounts;
   let clock: FixedClock;
   let sessions: FakeAccountSessions;
+  let trustedDevices: FakeTrustedDevices;
   let confirm: ConfirmPasswordReset;
   let camille: User;
 
@@ -43,6 +45,7 @@ describe('ConfirmPasswordReset', () => {
     clock = new FixedClock('2026-11-09T13:10:00Z');
     const secrets: FakeResetLinkSecrets = new FakeResetLinkSecrets();
     sessions = new FakeAccountSessions(clock);
+    trustedDevices = new FakeTrustedDevices();
     confirm = new ConfirmPasswordReset(
       accounts,
       new FakePasswordHasher(),
@@ -51,6 +54,7 @@ describe('ConfirmPasswordReset', () => {
       sessions,
       new FakeDeviceReader(),
       clock,
+      trustedDevices,
     );
     camille = accounts.seedUser(
       'camille.martin@ateliernord.fr',

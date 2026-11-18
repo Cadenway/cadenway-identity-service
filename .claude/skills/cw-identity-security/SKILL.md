@@ -42,7 +42,7 @@ verified. A value below is changed here first, then in code.
 - Hashing: argon2id with m = 19 456 KiB, t = 2, p = 1, through `crypto.argon2` of Node; no
   third-party binary. The pepper (`PASSWORD_PEPPER`, 32 characters at least) is kept outside the
   database; the secret key of argon2id is derived from it by HKDF-SHA-256 under its own label, apart
-  from the key of the code hashes. The stored PHC string holds the parameters and the salt, never
+  from the keys of the code hashes, of the sealing of the authenticator apps and of the backup codes. The stored PHC string holds the parameters and the salt, never
   the pepper. The password is normalized to NFC before hashing. Without an account, a sign-in still
   checks a decoy hash, so its time does not tell.
 - The hash is checked outside any transaction: the attempt is first counted as a failure in a
@@ -53,11 +53,42 @@ verified. A value below is changed here first, then in code.
 
 ## Second factors
 
-- **TOTP** (`otplib`): `epochTolerance: 30`; the last accepted time step is stored and passed as
-  `afterTimeStep`, so a code cannot be replayed. The secret is encrypted at rest.
-- **Security keys** (`@simplewebauthn/server`): `residentKey: 'preferred'`; transports and flags of
-  each credential are stored, so passkeys can be enabled later without a migration.
-- **Recovery codes**: 80 bits each, stored as HMAC-SHA-256, single use, shown once.
+- **TOTP** (`otplib`, RFC 6238): SHA-1, 6 digits, 30-second steps, `epochTolerance: 30` (one step
+  either way); the last accepted time step is stored and passed as `afterTimeStep`, so a code works
+  once, in the sign-in challenge as in the re-authentication. The secret is 160 random bits in
+  base32, sealed at rest with AES-256-GCM under a key derived from the pepper by HKDF-SHA-256 under
+  its own label, a 96-bit nonce per seal and the account id as associated data, stored as
+  `k1.<nonce>.<ciphertext>.<tag>`: `k1` is the key version, so a later key opens the old rows while
+  a backfill seals them again (the accounts `MODULE.md` says what a rotation needs). A setup lasts
+  15 minutes and belongs to the session that started it.
+- **Security keys** (`@simplewebauthn/server`): `residentKey: 'preferred'`, user verification
+  `preferred` and not required (a second factor after the password), attestation `none`, ES256,
+  EdDSA and RS256; transports and flags of each credential are stored, so passkeys can be enabled
+  later without a migration. The relying party is `WEBAUTHN_RP_ID`, the host of the web application
+  (`app.${DOMAIN}`, `app.cadenway.localhost` locally); `clientDataJSON.origin` is compared exactly
+  with `WEBAUTHN_ORIGINS`, and a cross-origin answer or one with a `topOrigin` is refused before the
+  library runs. A credential id belongs to one account; `userHandle`, when present, must be the
+  handle of the account (256 random bits, kept while two-step verification stays on). Options last
+  5 minutes; 10 keys at most per account.
+- **Backup codes**: 10 codes `XXXX-XXXX` of digits and capital letters drawn with
+  `crypto.randomInt`, typed with or without the dash, in any case; 8 symbols of 36 give about
+  41.4 bits each (8 × log2 36), not 80. That suffices because they are a second factor behind the
+  password and share the lockout of the answers: 5 wrong answers per account, then 15 minutes, so at
+  most 480 guesses a day against 10 codes out of 36^8, under one chance in 500 million a day. Stored
+  as HMAC-SHA-256 under their own key derived from the pepper, bound to the account; single use;
+  shown once, at the enabling and at each regeneration.
+- **Two-step challenge**: the right first factor of an account with two-step verification answers
+  `202` with a challenge token of 256 random bits (only its SHA-256 is stored), valid 10 minutes,
+  one open per account; its answer opens the session. The wrong answers of the challenges and of
+  the re-authentications by code count per account: `remainingAttempts` from 4 to 1, then the
+  fifth locks them 15 minutes (`auth.two-step-locked`), the right one included.
+- **Trusted device**: `trustDevice` makes the browser skip the challenge for 30 days with a token of
+  256 random bits in the cookie `__Host-cw_trusted_device`, only its SHA-256 stored; a change or a
+  reset of the password, "Déconnecter les autres", the disabling and the deletion forget every
+  device of the account.
+- **Recent authentication with two-step verification**: only a proof by a second factor counts (the
+  code of the app, or the answer of a challenge); a password is refused without being checked or
+  counted (`details.methods: [authenticator-app]`).
 
 ## Single sign-on
 
@@ -104,8 +135,9 @@ verified. A value below is changed here first, then in code.
   unless unticked (and ends their recent authentication otherwise), keeps the API tokens and never
   signs in.
 - Recent authentication: a session records when its person last proved who they are (the sign-in,
-  a confirmed password, the current password of a change); the change of address, the scheduling
-  of the deletion and the creation of a personal API token require it within 10 minutes
+  a confirmed password or code, the current password of a change, the answer of a challenge); the
+  change of address, the scheduling of the deletion, the creation of a personal API token, the
+  changes of two-step verification and of an authentication policy require it within 10 minutes
   (`403 auth.reauthentication-required`). The failed passwords of the re-authentication and of the
   change count with the failed sign-ins of the address of the account.
 
@@ -122,4 +154,6 @@ verified. A value below is changed here first, then in code.
   `Argon2PasswordHasher` run it on Node 24.18.
 - The provenance of the full list of compromised passwords: a short repository-authored list stands
   in for it behind the `CompromisedPasswords` port.
-- The pepper has no rotation: changing it makes every stored password and pending code unusable.
+- The pepper has no rotation: changing it makes every stored password, pending code, backup code
+  and sealed secret of an app unusable. The sealing key of the apps alone can rotate through its key
+  version.

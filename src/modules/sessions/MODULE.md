@@ -18,12 +18,25 @@ The sign-in sessions of the browsers:
   personal API token require within 10 minutes;
 - the current organization of a session (P2b plan, decision 2): its choice, the last organization
   each account chose, where its next sessions start, and the organization, the role and the scopes
-  of the introspection.
+  of the introspection;
+- how each recent authentication was made (`password` or `two-step`) and which accounts have
+  two-step verification (`two_step_enrollments`, written by the accounts module in its
+  transaction), since a password never counts as recent for an account with it (P2c-2);
+- the trusted devices of the two-step verification (decision 7 of P2c, "Faire confiance à cet
+  appareil pendant 30 jours"): a browser that answered a challenge with `trustDevice` skips the
+  challenge of the sign-ins of its account for 30 days, until a change or a reset of the password,
+  "Déconnecter les autres", the disabling of two-step verification or the deletion forgets it;
+- the authentication policy of each organization (decision 8 of P2c, Organisation › Sécurité et
+  SSO): who must have two-step verification (`nobody`, `admins`, `everyone`) and after how long
+  without activity a session acting on it ends (1 hour, 12 hours, 7 days or 30 days); both
+  introspections withhold the organization from a member the policy requires two-step
+  verification of, who has none.
 
-It does not own accounts, passwords or codes (the accounts module), nor the cookie, which the API
-gateway sets from the token, nor the memberships, which it reads through the
-`FindActiveMembership` provider of the memberships module behind its own `ActiveMemberships`
-port.
+It does not own accounts, passwords, codes or the factors of two-step verification (the accounts
+module), nor the cookies, which the API gateway sets from the tokens, nor the memberships, which it
+reads through the `FindActiveMembership` and `FindUserMemberships` providers of the memberships
+module behind its own `ActiveMemberships` port, and through `FindOrganizationMember` and
+`ListOrganizationMembers` behind its `OrganizationMembers` port.
 
 ## Public entry points
 
@@ -38,6 +51,12 @@ port.
 | `public/session/count-open-sessions`                       | accounts             |
 | `public/session/erase-user-sessions`                       | accounts             |
 | `public/session/check-organization-session-authentication` | api-tokens           |
+| `public/session/record-two-step-verification`              | accounts             |
+| `public/trusted-device/trust-device`                       | accounts             |
+| `public/trusted-device/check-trusted-device`               | accounts             |
+| `public/trusted-device/forget-trusted-devices`             | accounts             |
+| `public/authentication-policy/find-two-step-requirements`  | accounts             |
+| `public/authentication-policy/check-organization-access`   | api-tokens           |
 
 `SessionsModule` exports the providers `OpenSession`, `CheckSessionAuthentication`,
 `AuthenticateSession`, `EndRecentAuthentication`, `RevokeUserSessions`, `CountOpenSessions`,
@@ -47,12 +66,26 @@ types. Accounts binds the first to its session opener port and the next six to i
 accounts use case that calls them. Api-tokens binds the last to its `RecentAuthentications` port; it
 runs in the tenant runner and joins the tenant transaction of the creation of a token.
 
+For two-step verification (P2c-2), `SessionsModule` also exports `RecordTwoStepVerification`,
+which accounts binds to its `TwoStepEnrollments` port; `TrustDevice`, `CheckTrustedDevice` and
+`ForgetTrustedDevices`, bound to its `TrustedDevices` port; and `FindTwoStepRequirements`, bound
+to its `TwoStepRequirements` port. All five run in the system runner and join the system
+transaction of the accounts use case that calls them. Api-tokens binds `CheckOrganizationAccess`
+to its `OrganizationAccess` port; it joins the system transaction of the introspection of a
+personal API token. `AuthenticateSession` takes the method of the recent authentication and
+`EndRecentAuthentication` its scope (every window, or the windows of a password);
+`CheckSessionAuthentication` and `CheckOrganizationSessionAuthentication` say whether the account
+has two-step verification.
+
 ## Owned tables
 
-| Table                  | Key                       | Organization scoping                                        |
-| ---------------------- | ------------------------- | ----------------------------------------------------------- |
-| `sessions`             | `id`, unique `token_hash` | `organization_id`, the current one or `null`; policy forced |
-| `organization_choices` | `user_id`                 | `organization_id`, the last one chosen; policy forced       |
+| Table                     | Key                       | Organization scoping                                        |
+| ------------------------- | ------------------------- | ----------------------------------------------------------- |
+| `sessions`                | `id`, unique `token_hash` | `organization_id`, the current one or `null`; policy forced |
+| `organization_choices`    | `user_id`                 | `organization_id`, the last one chosen; policy forced       |
+| `trusted_devices`         | `id`, unique `token_hash` | none: a device of an account                                |
+| `two_step_enrollments`    | `user_id`                 | none: a fact of an account                                  |
+| `authentication_policies` | `organization_id`         | `organization_id`, tenant table; policy forced              |
 
 `sessions` was created by `migrations/0001_accounts_and_sessions.sql`; its `organization_id` and
 `member_id` (the membership it acts through, both `null` together) and `organization_choices` by
@@ -67,22 +100,46 @@ the list) and `authenticated_at` (the recent authentication) come from
 `operating_system` and `device_type` keep labels for the record only; the device shown is read from
 `user_agent`.
 
+`migrations/0005_two_step_verification.sql` adds `sessions.two_step_authenticated_at`, the instant
+of `authenticated_at` when a second factor opened that window, `null` otherwise and for the rows
+written before it, and creates `trusted_devices` (the SHA-256 of the token
+of the cookie `__Host-cw_trusted_device`, its expiry, read by token hash and pruned by account
+through the index on `user_id`), `two_step_enrollments` (one row per account with two-step
+verification) and `authentication_policies` (one row per organization whose policy was patched,
+the default row inserted by the first patch, even one that moves nothing; none reads as `nobody`
+and 720 minutes), whose forced policy the migration writes by hand, as for
+every `organization_id`. `user_id` names an account and `organization_id` an organization of
+another service, without a foreign key.
+
 ## API
 
 From `openapi/internal/identity-service.yaml` of the installed `@cadenway/contracts`; issuer
 `api-gateway` only, no organization (one the internal token carries is ignored).
 
-| Route                                                  | Actor    | Success                     | Refusals                                                   |
-| ------------------------------------------------------ | -------- | --------------------------- | ---------------------------------------------------------- |
-| `POST /internal/v1/tokens/introspect`                  | `system` | 200, `active` true or false | 400                                                        |
-| `DELETE /internal/v1/sessions/{sessionId}`             | `user`   | 204                         | 400, 404 `session.not-found`                               |
-| `PUT /internal/v1/sessions/{sessionId}/organization`   | `user`   | 200, organization and role  | 400, 404 `session.not-found`, 404 `organization.not-found` |
-| `POST /internal/v1/sessions/{sessionId}/revoke-others` | `user`   | 200, `revokedCount`         | 400, 404 `session.not-found`                               |
-| `GET /internal/v1/users/{userId}/sessions`             | `user`   | 200, one page               | 400, 404 `user.not-found`, 404 `session.not-found`         |
+| Route                                                   | Actor    | Success                     | Refusals                                                        |
+| ------------------------------------------------------- | -------- | --------------------------- | --------------------------------------------------------------- |
+| `POST /internal/v1/tokens/introspect`                   | `system` | 200, `active` true or false | 400                                                             |
+| `DELETE /internal/v1/sessions/{sessionId}`              | `user`   | 204                         | 400, 404 `session.not-found`                                    |
+| `PUT /internal/v1/sessions/{sessionId}/organization`    | `user`   | 200, organization and role  | 400, 404 `session.not-found`, 404 `organization.not-found`      |
+| `POST /internal/v1/sessions/{sessionId}/revoke-others`  | `user`   | 200, `revokedCount`         | 400, 404 `session.not-found`                                    |
+| `GET /internal/v1/users/{userId}/sessions`              | `user`   | 200, one page               | 400, 404 `user.not-found`, 404 `session.not-found`              |
+| `GET /internal/v1/organization/authentication-policy`   | `user`   | 200, policy and `ETag`      | 403 `organization.role-forbidden`, 404 `organization.not-found` |
+| `PATCH /internal/v1/organization/authentication-policy` | `user`   | 200, policy and `ETag`      | 400, 403, 404, 409 `auth.two-step-not-enabled`, 412             |
 
 `POST /internal/v1/sessions/{sessionId}/reauthentication` is served by the accounts module, which
-owns the password and its lockout, and records the recent authentication through
-`AuthenticateSession`.
+owns the password, the authenticator app and their lockouts, and records the recent authentication
+through `AuthenticateSession`.
+
+The two routes of the authentication policy require the organization of the internal token, the
+current one of the session, and run in its tenant transaction; only its owner and its admins read
+or change it (`organization.role-forbidden`). `PATCH` is a JSON Merge Patch with `If-Match`
+(`412 request.version-mismatch` with the current version), refused when it would require two-step
+verification for the role of the actor, who has none (`409 auth.two-step-not-enabled`), and
+without a recent authentication of the session that counts for the actor
+(`403 auth.reauthentication-required` with `details.methods`). `PUT .../organization` also answers
+`403 organization.mfa-required` with `details.organizationId` when the policy of the organization
+requires two-step verification for the role of the person, who has none; the introspection of a
+session acting on such an organization answers `withheldOrganization` with no organization.
 
 Every route also answers the 401 and 403 of the internal token guard.
 
@@ -113,14 +170,22 @@ passes in; never the token nor the `User-Agent`.
 
 None directly. A `member.removed.v1` reaches the sessions through the copy of the memberships (the
 memberships module): the introspection answers no organization for a session whose membership was
-removed.
+removed. The change of a role (`member.role-changed.v1`) reaches the policy decisions the same way:
+the role of the copy is the one each decision reads.
+
+The change of an authentication policy, the trust and the forgetting of a device emit nothing: the
+contract declares no event for them. `user.two-step-verification-changed.v1` belongs to the
+accounts module.
 
 ## Invariants
 
 - A session ends at `expiresAt`, 30 days after the sign-in, whatever its activity; the cookie lasts
   until then with "Rester connecté pendant 30 jours", until the browser closes without it.
 - Either session also ends after 12 hours without activity, as `openapi/public/auth.yaml` states for
-  both; an active introspection is activity, recorded at most once a minute.
+  both, or after the inactivity timeout of the policy of its current organization (1 hour,
+  12 hours, 7 days or 30 days); an active introspection is activity, recorded at most once a minute.
+  Choosing an organization whose timeout the session already exceeded closes it, without an event,
+  and answers `session.not-found`.
 - A malformed, unknown, expired, inactive or revoked token introspects as `active: false`; so
   does a personal API token, introspected by its own route.
 - A session acts on at most one organization, through a membership of its account in the copy of
@@ -146,9 +211,30 @@ removed.
   `current` for the session of the request, which must be one of them; another account answers
   `user.not-found`.
 - "Déconnecter les autres" revokes every open session of the actor but the one of the request,
-  which must be open; it says how many.
+  which must be open; it says how many. It also closes, without an event and without counting
+  them, the sessions already idle beyond the inactivity of their organization, as a reset and the
+  scheduling of the deletion do: a later, longer inactivity of a policy then cannot bring back a
+  session the person ended.
 - Two devices are the same for "Nouvelle connexion" when their type, browser and operating system
   are, whatever their versions and addresses.
+- For an account with two-step verification, only a recent authentication by a second factor
+  (`two_step_authenticated_at = authenticated_at`) is recent; turning it on ends the windows the other
+  sessions opened with a password, a change of the password ends every window but the one of the
+  request, a reset every window.
+- A trusted device lasts 30 days from the answer that trusted it; its token is 256 random bits,
+  returned once, of which only the SHA-256 is stored; a change or a reset of the password,
+  "Déconnecter les autres" (the device of the request included), the disabling of two-step
+  verification and the deletion of the account forget every device of the account; an account
+  keeps the 10 devices it trusted last.
+- A policy that requires two-step verification for a role withholds its organization from the
+  members of that role without it: the introspection of their sessions and of their personal API
+  tokens answers `withheldOrganization`, for a session with no organization and no role, for a
+  token with no scope (its organization and role kept), and the choice of it answers
+  `organization.mfa-required`. Their membership stays; turning two-step verification on
+  ends the withholding at the next introspection.
+- Nobody saves a policy that would withhold their own organization from themselves, and the policy
+  of an organization with no row is `nobody` and 720 minutes; each saved change takes the next
+  version of the policy, and a patch that moves nothing keeps it.
 
 ## Transactions
 
@@ -176,6 +262,20 @@ reads in one system transaction. `CheckOrganizationSessionAuthentication` runs i
 and locks the session it checks: the scheduling of the deletion locks the open sessions before it
 revokes the tokens, so it either waits for that token and revokes it, or revokes the session first
 and the creation finds it ended.
+
+`RecordTwoStepVerification`, `TrustDevice`, `CheckTrustedDevice`, `ForgetTrustedDevices` and
+`FindTwoStepRequirements` join the system transaction of the accounts use case that calls them: a
+challenge answered, two-step verification turned on or off, a password changed or reset commit
+with their trusted devices and their enrollment, or not at all. `UpdateAuthenticationPolicy` runs
+in the tenant transaction of the organization of the token: it reads the role of the actor in the
+copy of the memberships, locks the policy (inserting the default row first when the organization
+has none, so two first changes serialize), checks the enrollment of the actor, then locks the
+session of the request, which must act on that organization, and saves the policy with the next
+version. `GetAuthenticationPolicy` reads in the tenant transaction; the counts of the members
+without two-step verification read the active memberships of the organization and their
+enrollments in two queries. The introspection reads the inactivity of the policy of the current
+organization with the session, in the same query, then, for a session acting through an active
+membership, the policy and the enrollment of the account by their keys, for the withholding.
 
 ## Decisions
 
@@ -249,6 +349,50 @@ and the creation finds it ended.
   ran slower than the index on `user_id` (0.9 ms against 0.4 ms), since revoked and idle sessions
   dominate; every sign-in would have paid for it. The work grows with the sessions an account ever
   opened until closed sessions are purged.
+- The trusted devices, the enrollments and the policies live here rather than in the accounts
+  module (P2c-2): the introspection, the choice of an organization and "Déconnecter les autres" use
+  them, and the sessions module cannot depend on the accounts module, which already depends on it.
+  The accounts module writes them through public operations that join its transaction;
+  `two_step_enrollments` is the one fact of two-step verification the sessions need, so the
+  factors themselves stay in the accounts module.
+- The inactivity timeout of a session follows the policy of the organization its row names
+  (`organization_id`), read in the query that finds the session (a correlated subquery, without a
+  join that `FOR UPDATE` would refuse), whatever the state of its membership: a removed member's
+  session still ends with that organization's timeout until it chooses another. The contract says
+  720 minutes for a session without an organization; this stricter reading is an open point for
+  cadenway-api-contracts, since honoring the membership there would make the session query read
+  the copy of the memberships, a table of another module.
+- A window counts as a second factor only while `two_step_authenticated_at` equals
+  `authenticated_at`, rather than through a method column: the previous release, running beside
+  this one during a rollout, records a password window by writing `authenticated_at` alone, which
+  ends the match, so it can never extend a second-factor proof; the rows written before 0005 have
+  no `two_step_authenticated_at` and count as a password (no account had two-step verification).
+  While that previous release still runs, it serves the sign-ins of accounts with two-step
+  verification with the password alone and does not withhold organizations: those sessions are not
+  revoked by the roll-forward.
+- `TrustDevice` deletes the expired devices of the account in the same transaction, and the oldest
+  beyond the 10 it keeps, so a browser that trusts itself again and again does not make the rows
+  grow; a forgotten device is deleted at once.
+- A policy change that moves nothing answers the same version, but still requires a recent
+  authentication: the check order of the contract puts the recent authentication before the write.
+  Its lock inserts the default row when the organization has none, which then stays.
+- The check of the enrollment of the actor by a policy change and the policies read by the disabling
+  of the same person in another browser take no common lock: both can commit at once and withhold the
+  organization from that person. It is recoverable, the routes of the account staying served, and
+  accepted rather than serializing every disabling behind the policies of the organizations.
+- Inactivity is computed at each reading from the current policy, not stored: lengthening it makes
+  a session idle under the previous value active again, as the contract states that the sessions
+  follow the new policy from the next introspection; the revocations close idle sessions so that
+  this never brings back one the person ended.
+- `PUT .../organization` checks the membership before the policy, so a non-member never learns the
+  policy of an organization; it closes a session idle beyond the timeout of the chosen organization,
+  without `session.revoked.v1`, since the contract says a session closing for inactivity emits
+  nothing.
+- The counts of members without two-step verification grow with the members of the organization
+  (two queries, then a count in the use case); the policy screen is read by owners and admins only.
+- `tests/two-step-verification.int-spec.ts` proves, on real PostgreSQL and NATS, the policy change,
+  the withheld organization of a member in both introspections, the trusted device skipping the
+  challenge and forgotten after a change of the password, and the windows by method.
 - `tests/account-security.int-spec.ts` proves the list (device, address, current, order, cursor,
   another account, an ended session of the request), "Déconnecter les autres", the windows of
   recent authentication, and "Nouvelle connexion" (first session, known device, new device, a

@@ -1,4 +1,5 @@
 import type { ActiveMembership } from '../../../../models/session/active-membership.model.js';
+import type { UserMembership } from '../../../../models/session/user-membership.model.js';
 
 /**
  * Interface ActiveMemberships
@@ -21,5 +22,16 @@ export interface ActiveMemberships {
    * member there, or not yet known as one.
    */
   find(organizationId: string, userId: string): Promise<ActiveMembership | null>;
+
+  /**
+   * Method listOfUser
+   *
+   * @description
+   * The active memberships of an account, one per organization.
+   *
+   * @param {string} userId - The account.
+   * @returns {Promise<readonly UserMembership[]>} Its memberships, ordered by organization.
+   */
+  listOfUser(userId: string): Promise<readonly UserMembership[]>;
   // #endregion
 }

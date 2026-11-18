@@ -25,6 +25,7 @@ export function toOpenSession(view: OpenSessionView): OpenSession {
     ipAddress: view.ipAddress,
     signedInAt: view.signedInAt.toISOString(),
     lastActiveAt: view.lastActiveAt.toISOString(),
+    inactivityTimeoutMinutes: view.inactivityTimeoutMinutes,
     expiresAt: view.expiresAt.toISOString(),
   };
 }

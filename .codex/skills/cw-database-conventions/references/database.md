@@ -54,12 +54,16 @@ as `migrations/0000_platform_tables.sql` does.
 ## Tables without an organization, and the system runner
 
 The tables of an account (`users`, `password_credentials`, `one_time_codes`, `code_requests`,
-`sign_in_attempts`, `password_reset_links`, `password_reset_requests` and `email_changes` of the
-accounts module) carry no `organization_id`: the contracts give an account, its codes, its links
-and its lockout no organization. They have no policy and nothing to force; their
+`sign_in_attempts`, `password_reset_links`, `password_reset_requests`, `email_changes` and the
+tables of two-step verification, `two_step_verifications`, `backup_codes`, `security_keys`,
+`authenticator_app_setups`, `security_key_registrations` and `sign_in_challenges`, of the accounts
+module; `trusted_devices` and `two_step_enrollments` of the sessions module) carry no
+`organization_id`: the contracts give an account, its codes, its links, its factors and its
+lockout no organization. They have no policy and nothing to force; their
 MODULE.md says so, and every query names its row by key or by the verified actor.
 
-Four tables carry an `organization_id` and the forced policy of the kit (migration 0003):
+Five tables carry an `organization_id` and the forced policy of the kit (migration 0003, and 0005
+for `authentication_policies`):
 
 - `memberships` (memberships module) and `api_tokens` (api-tokens module), tenant data: written in
   the tenant transaction of their organization (the handler of a member event, the routes of a
@@ -73,7 +77,11 @@ Four tables carry an `organization_id` and the forced policy of the kit (migrati
   organization each account chose), of the sessions module: rows of an account that name an
   organization, read and written in system transactions, by id, token hash or account. The one
   tenant read is the check of the recent authentication of the session that creates a personal API
-  token, which joins the tenant transaction of the creation and locks that session.
+  token, which joins the tenant transaction of the creation and locks that session;
+- `authentication_policies` (sessions module), tenant data: read and written in the tenant
+  transaction of its organization by the routes of the policy; in a system transaction, by
+  organization only, for the introspections, the choice of an organization and the policies that
+  require two-step verification of an account.
 
 The use cases that serve a route or an event without an organization run in the system runner: the
 kit README reserves it for "events or routes without an organization" but also says "never use it

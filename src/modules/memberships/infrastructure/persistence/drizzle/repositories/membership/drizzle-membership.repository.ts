@@ -161,5 +161,46 @@ export class DrizzleMembershipRepository implements MembershipRepository {
       .orderBy(memberships.organizationId);
     return rows.map((row: { organizationId: string }) => row.organizationId);
   }
+
+  /**
+   * Method findActiveOfUser
+   *
+   * @description
+   * Reads the active memberships of an account through the index on `user_id`, one per
+   * organization (`distinct on` the organization, the latest first), in a system transaction: the
+   * requirements of two-step verification of the account read its roles across organizations.
+   *
+   * @param {string} userId - The account.
+   * @returns {Promise<Membership[]>} Its memberships, by organization id.
+   */
+  public async findActiveOfUser(userId: string): Promise<Membership[]> {
+    const rows: MembershipRow[] = await this.db
+      .selectDistinctOn([memberships.organizationId])
+      .from(memberships)
+      .where(and(eq(memberships.userId, userId), isNull(memberships.removedAt)))
+      .orderBy(memberships.organizationId, desc(memberships.createdAt), desc(memberships.id));
+    return rows.map(toMembership);
+  }
+
+  /**
+   * Method listActiveOfOrganization
+   *
+   * @description
+   * Reads the active memberships of an organization through the index on
+   * `(organization_id, user_id)`, one per account (`distinct on` the account, the latest first), in
+   * the tenant transaction of that organization. The work grows with the members of the
+   * organization: the policy routes count its members without two-step verification from it.
+   *
+   * @param {string} organizationId - The organization.
+   * @returns {Promise<Membership[]>} Its memberships, by account id.
+   */
+  public async listActiveOfOrganization(organizationId: string): Promise<Membership[]> {
+    const rows: MembershipRow[] = await this.db
+      .selectDistinctOn([memberships.userId])
+      .from(memberships)
+      .where(and(eq(memberships.organizationId, organizationId), isNull(memberships.removedAt)))
+      .orderBy(memberships.userId, desc(memberships.createdAt), desc(memberships.id));
+    return rows.map(toMembership);
+  }
   // #endregion
 }

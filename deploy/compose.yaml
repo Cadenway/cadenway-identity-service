@@ -6,7 +6,10 @@
 # NATS password and the password pepper) are referenced by name; they live in cadenway-ops, which
 # documents every variable below in docs/service-environment.md. A variable added here must exist
 # on the host before the release that reads it: the GitOps agent refuses a commit that leaves one
-# unset (IDENTITY_PASSWORD_PEPPER is there since cadenway-ops #19).
+# unset (IDENTITY_PASSWORD_PEPPER is there since cadenway-ops #19). WEBAUTHN_RP_ID and
+# WEBAUTHN_ORIGINS, the relying party of the security keys, come from DOMAIN and PUBLIC_SCHEME,
+# which every host has, in the form cadenway-ops documents (docs/service-environment.md, #29); the
+# release that reads them ships after that pull request.
 #
 # INTERNAL_TOKEN_TRUSTED_ISSUERS lists who may call this service: the API gateway and the realtime
 # gateway (ticket redemption). The folded scalar gives the service one line of JSON.
@@ -29,6 +32,8 @@ services:
         {"api-gateway": [${API_GATEWAY_INTERNAL_TOKEN_PUBLIC_JWKS}],
         "realtime-gateway": [${REALTIME_GATEWAY_INTERNAL_TOKEN_PUBLIC_JWKS}]}
       PASSWORD_PEPPER: ${IDENTITY_PASSWORD_PEPPER}
+      WEBAUTHN_RP_ID: app.${DOMAIN}
+      WEBAUTHN_ORIGINS: ${PUBLIC_SCHEME:-https}://app.${DOMAIN}
     networks:
       - internal
     healthcheck:

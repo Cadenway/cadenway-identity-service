@@ -16,6 +16,7 @@ import {
   issueOneTimeCode,
 } from '../../../../services/authentication/one-time-codes.service.js';
 import type { RequestEmailChangeInput } from './request-email-change.input.js';
+import { reauthenticationRequired } from '../../../../services/two-step/recent-authentication.service.js';
 
 /**
  * Class RequestEmailChange
@@ -139,10 +140,11 @@ export class RequestEmailChange {
         input.userId,
         input.sessionId,
       );
-      if (authentication !== 'recent') {
-        throw new AccountRefusal({
-          reason: authentication === 'stale' ? 'reauthentication-required' : 'session-not-found',
-        });
+      if (authentication === 'not-found') {
+        throw new AccountRefusal({ reason: 'session-not-found' });
+      }
+      if (authentication === 'stale') {
+        throw new AccountRefusal(await reauthenticationRequired(store, user.id));
       }
       RequestEmailChange.assertNewEmail(user, email);
       if ((await store.users.findByEmail(email, false))?.isVerified === true) {

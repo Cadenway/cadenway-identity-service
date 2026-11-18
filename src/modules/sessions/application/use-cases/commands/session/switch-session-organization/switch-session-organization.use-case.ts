@@ -1,5 +1,7 @@
+import type { AuthenticationPolicy } from '../../../../../domain/aggregates/authentication-policy/authentication-policy.aggregate.js';
 import type { Session } from '../../../../../domain/aggregates/session/session.aggregate.js';
 import type { ActiveMembership } from '../../../../models/session/active-membership.model.js';
+import { OrganizationMfaRequired } from '../../../../models/session/organization-mfa-required.model.js';
 import { OrganizationNotFound } from '../../../../models/session/organization-not-found.model.js';
 import { SessionNotFound } from '../../../../models/session/session-not-found.model.js';
 import type { SessionsStore } from '../../../../models/session/sessions-store.model.js';
@@ -24,6 +26,12 @@ import type { SwitchSessionOrganizationOutput } from './switch-session-organizat
  *   service yet, is refused (`organization.not-found`); the web application retries.
  * - Choosing the membership the session already acts through leaves the session unchanged; the
  *   choice is still the last one of the account, where its next sessions start.
+ * - Once the membership is found, an organization whose policy requires two-step verification for
+ *   the role of the actor, who has none, is refused (`organization.mfa-required`) and nothing is
+ *   written (decision 8 of P2c).
+ * - A session idle, before this request, for longer than the inactivity of the policy of the
+ *   organization chosen is closed instead, without an event (a session that closes for inactivity
+ *   emits nothing), and answers `session.not-found`: the close commits, then the refusal.
  */
 export class SwitchSessionOrganization {
   // #region Properties
@@ -91,13 +99,15 @@ export class SwitchSessionOrganization {
    * @returns {Promise<SwitchSessionOrganizationOutput>} The organization and the role of the actor.
    * @throws {SessionNotFound} When no active session with this id belongs to the actor.
    * @throws {OrganizationNotFound} When the actor is not a member of the organization.
+   * @throws {OrganizationMfaRequired} When the policy of the organization requires two-step
+   * verification for the role of the actor, who has none.
    */
   public async execute(
     input: SwitchSessionOrganizationInput,
   ): Promise<SwitchSessionOrganizationOutput> {
     const now: Date = this.clock.now();
-    return this.unitOfWork.run(
-      async (store: SessionsStore): Promise<SwitchSessionOrganizationOutput> => {
+    const outcome: SwitchSessionOrganizationOutput | 'closed' = await this.unitOfWork.run(
+      async (store: SessionsStore): Promise<SwitchSessionOrganizationOutput | 'closed'> => {
         const session: Session | null = await store.sessions.findForUpdate(input.sessionId);
         if (session?.userId !== input.actorUserId || !session.isActiveAt(now)) {
           throw new SessionNotFound();
@@ -109,7 +119,16 @@ export class SwitchSessionOrganization {
         if (membership === null) {
           throw new OrganizationNotFound();
         }
-        const chosen: Session = session.chooseOrganization(membership, now);
+        const policy: AuthenticationPolicy = await store.policies.find(membership.organizationId);
+        if (policy.withholds(membership.role, await store.enrollments.isEnrolled(session.userId))) {
+          throw new OrganizationMfaRequired(membership.organizationId);
+        }
+        const inactivity: number = policy.snapshot.sessionInactivityTimeoutMinutes;
+        if (session.isIdleLongerThan(inactivity, now)) {
+          await store.sessions.revoke(session.closeForInactivity(now));
+          return 'closed';
+        }
+        const chosen: Session = session.chooseOrganization(membership, now, inactivity);
         if (chosen !== session) {
           await store.sessions.chooseOrganization(chosen);
         }
@@ -117,6 +136,10 @@ export class SwitchSessionOrganization {
         return { organizationId: membership.organizationId, role: membership.role };
       },
     );
+    if (outcome === 'closed') {
+      throw new SessionNotFound();
+    }
+    return outcome;
   }
   // #endregion
 }

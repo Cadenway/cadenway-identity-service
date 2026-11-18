@@ -79,6 +79,8 @@ function put(
       version: 1,
       signedInAt,
       authenticatedAt: signedInAt,
+      twoStepAuthenticatedAt: null,
+      inactivityTimeoutMinutes: 720,
       ...changes,
     },
     origin: {

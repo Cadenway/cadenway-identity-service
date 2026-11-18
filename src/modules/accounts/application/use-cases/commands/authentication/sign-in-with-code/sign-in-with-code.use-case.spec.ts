@@ -10,6 +10,11 @@ import {
 } from '../../../../models/accounts/accounts.fixture.js';
 import type { RecordedEvent } from '../../../../models/accounts/accounts.fixture.js';
 import type { CodeVerificationInput } from '../../../../models/authentication/code-verification-input.model.js';
+import {
+  FakeChallengeTokens,
+  FakeTrustedDevices,
+  signedIn,
+} from '../../../../models/two-step/two-step.fixture.js';
 import type { SessionIssuedView } from '../../../../projections/authentication/session-issued-view.projection.js';
 import { RequestSignInCode } from '../request-sign-in-code/request-sign-in-code.use-case.js';
 import { SignInWithCode } from './sign-in-with-code.use-case.js';
@@ -34,20 +39,35 @@ describe('SignInWithCode', () => {
   let clock: FixedClock;
   let sessions: FakeSessionOpener;
   let signIn: SignInWithCode;
+  let trustedDevices: FakeTrustedDevices;
+  let challengeTokens: FakeChallengeTokens;
   let camille: User;
 
+  const signInView = async (input: CodeVerificationInput): Promise<SessionIssuedView> =>
+    signedIn(await signIn.execute(input));
+
   beforeEach(async () => {
+    trustedDevices = new FakeTrustedDevices();
+    challengeTokens = new FakeChallengeTokens();
     accounts = new InMemoryAccounts();
     clock = new FixedClock('2026-11-08T13:07:00Z');
     sessions = new FakeSessionOpener(accounts);
     const secrets: FakeCodeSecrets = new FakeCodeSecrets(['482913']);
-    signIn = new SignInWithCode(accounts, secrets, sessions, clock, new FakeDeviceReader());
+    signIn = new SignInWithCode(
+      accounts,
+      secrets,
+      sessions,
+      clock,
+      new FakeDeviceReader(),
+      trustedDevices,
+      challengeTokens,
+    );
     camille = accounts.seedUser(CODE_SIGN_IN.email, true, 'hashed:x');
     await new RequestSignInCode(accounts, secrets, clock).execute({ email: CODE_SIGN_IN.email });
   });
 
   it('opens a session for the right code, once', async () => {
-    const issued: SessionIssuedView = await signIn.execute(CODE_SIGN_IN);
+    const issued: SessionIssuedView = await signInView(CODE_SIGN_IN);
 
     expect(issued.user.id).toBe(camille.id);
     expect(sessions.opened).toEqual([
@@ -56,6 +76,7 @@ describe('SignInWithCode', () => {
           userId: camille.id,
           persistent: true,
           client: CODE_SIGN_IN.client,
+          authentication: 'password',
           newDeviceNotice: {
             email: 'camille.martin@ateliernord.fr',
             name: 'Camille Martin',
@@ -101,12 +122,20 @@ describe('SignInWithCode', () => {
       new Date('2026-12-09T15:30:00Z'),
     );
     const secrets: FakeCodeSecrets = new FakeCodeSecrets(['731406']);
-    signIn = new SignInWithCode(accounts, secrets, sessions, clock, new FakeDeviceReader());
+    signIn = new SignInWithCode(
+      accounts,
+      secrets,
+      sessions,
+      clock,
+      new FakeDeviceReader(),
+      trustedDevices,
+      challengeTokens,
+    );
     clock.advance(30_000);
     await new RequestSignInCode(accounts, secrets, clock).execute({
       email: 'lea.petit@ateliernord.fr',
     });
-    const issued: SessionIssuedView = await signIn.execute({
+    const issued: SessionIssuedView = await signInView({
       ...CODE_SIGN_IN,
       email: 'lea.petit@ateliernord.fr',
       code: '731406',
@@ -125,7 +154,7 @@ describe('SignInWithCode', () => {
   });
 
   it('cancels nothing for an account without a scheduled deletion', async () => {
-    const issued: SessionIssuedView = await signIn.execute(CODE_SIGN_IN);
+    const issued: SessionIssuedView = await signInView(CODE_SIGN_IN);
 
     expect(issued.deletionCancelled).toBe(false);
     expect(issued.user.version).toBe(camille.version);

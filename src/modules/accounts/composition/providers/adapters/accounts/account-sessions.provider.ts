@@ -53,17 +53,22 @@ export const accountSessionsProvider: FactoryProvider<AccountSessions> = {
     authenticate: async (
       userId: string,
       sessionId: string,
+      method: 'password' | 'two-step',
     ): Promise<RecentAuthentication | null> => {
       const recent: AuthenticateSessionOutput | null = await authenticateSession.execute({
         userId,
         sessionId,
+        method,
       });
       return recent === null
         ? null
         : { authenticatedAt: recent.authenticatedAt, expiresAt: recent.expiresAt };
     },
-    endRecentAuthentication: (userId: string, exceptSessionId: string | null): Promise<void> =>
-      endRecentAuthentication.execute({ userId, exceptSessionId }),
+    endRecentAuthentication: (
+      userId: string,
+      exceptSessionId: string | null,
+      scope: 'every-window' | 'password-windows',
+    ): Promise<void> => endRecentAuthentication.execute({ userId, exceptSessionId, scope }),
     revokeAll: async (userId: string, exceptSessionId: string | null): Promise<number> => {
       const revoked: RevokeUserSessionsOutput = await revokeUserSessions.execute({
         userId,

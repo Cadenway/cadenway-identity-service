@@ -211,6 +211,7 @@ describe('VerifySignUp', () => {
           userId: user?.id,
           persistent: false,
           client: VERIFICATION.client,
+          authentication: 'password',
           newDeviceNotice: null,
         },
         inTransaction: true,

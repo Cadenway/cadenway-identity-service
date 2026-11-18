@@ -433,6 +433,8 @@ describe('identity-service redelivery of the member events', () => {
       JSON.stringify({ 'api-gateway': [trustedIssuerKey()] }),
     );
     vi.stubEnv('PASSWORD_PEPPER', 'integration-test-password-pepper-redelivery-000');
+    vi.stubEnv('WEBAUTHN_RP_ID', 'app.cadenway.localhost');
+    vi.stubEnv('WEBAUTHN_ORIGINS', 'http://app.cadenway.localhost');
 
     // AppModule as main.ts assembles it, without the HTTP formats of `createApplication`, which no
     // delivery goes through, and with the schedule of the test.

@@ -38,6 +38,7 @@ describe('OpenSession', () => {
       userId: CAMILLE_ID,
       persistent: true,
       client: CLIENT,
+      authentication: 'password',
       newDeviceNotice: null,
     });
 
@@ -76,6 +77,7 @@ describe('OpenSession', () => {
       userId: CAMILLE_ID,
       persistent: false,
       client: CLIENT,
+      authentication: 'password',
       newDeviceNotice: null,
     });
 
@@ -93,6 +95,7 @@ describe('OpenSession', () => {
       userId: CAMILLE_ID,
       persistent: false,
       client: CLIENT,
+      authentication: 'password',
       newDeviceNotice: null,
     });
 
@@ -174,6 +177,8 @@ function earlier(
       version: 2,
       signedInAt: lastActiveAt,
       authenticatedAt: null,
+      twoStepAuthenticatedAt: null,
+      inactivityTimeoutMinutes: 720,
     },
     origin: {
       tokenHash: 'hash:earlier',
@@ -210,6 +215,7 @@ describe('OpenSession on a new device', () => {
       userId: CAMILLE_ID,
       persistent: false,
       client: CLIENT,
+      authentication: 'password',
       newDeviceNotice: NOTICE,
     });
 
@@ -224,6 +230,7 @@ describe('OpenSession on a new device', () => {
       userId: CAMILLE_ID,
       persistent: false,
       client: CLIENT,
+      authentication: 'password',
       newDeviceNotice: null,
     });
 
@@ -235,6 +242,7 @@ describe('OpenSession on a new device', () => {
       userId: CAMILLE_ID,
       persistent: false,
       client: CLIENT,
+      authentication: 'password',
       newDeviceNotice: NOTICE,
     });
 
@@ -260,6 +268,7 @@ describe('OpenSession on a new device', () => {
       userId: CAMILLE_ID,
       persistent: false,
       client: CLIENT,
+      authentication: 'password',
       newDeviceNotice: NOTICE,
     });
 
@@ -273,6 +282,7 @@ describe('OpenSession on a new device', () => {
       userId: CAMILLE_ID,
       persistent: false,
       client: CLIENT,
+      authentication: 'password',
       newDeviceNotice: NOTICE,
     });
 
@@ -294,6 +304,7 @@ describe('OpenSession on a new device', () => {
       userId: CAMILLE_ID,
       persistent: false,
       client: CLIENT,
+      authentication: 'password',
       newDeviceNotice: NOTICE,
     });
 
@@ -311,6 +322,7 @@ describe('OpenSession on a new device', () => {
         userAgent:
           'Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) Version/18.1 Safari/604.1',
       },
+      authentication: 'password',
       newDeviceNotice: NOTICE,
     });
 

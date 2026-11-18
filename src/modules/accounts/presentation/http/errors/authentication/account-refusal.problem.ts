@@ -80,7 +80,41 @@ function shapeOf(refusal: Refusal): ProblemShape {
     case 'sign-up-replaced':
     case 'reset-link-expired':
     case 'email-unchanged':
+    case 'challenge-expired':
+    case 'two-step-setup-expired':
       return { status: 422, code: `auth.${refusal.reason}` };
+    case 'two-step-code-invalid':
+    case 'security-key-refused':
+      return {
+        status: 422,
+        code: `auth.${refusal.reason}`,
+        ...(refusal.remainingAttempts === null
+          ? {}
+          : { details: { remainingAttempts: refusal.remainingAttempts } }),
+      };
+    case 'two-step-not-enabled':
+      return { status: 409, code: 'auth.two-step-not-enabled' };
+    case 'security-key-limit-reached':
+      return {
+        status: 409,
+        code: 'auth.security-key-limit-reached',
+        details: { maxSecurityKeys: refusal.maxSecurityKeys },
+      };
+    case 'mfa-required-by-organization':
+      return {
+        status: 409,
+        code: 'auth.mfa-required-by-organization',
+        details: { organizationIds: [...refusal.organizationIds] },
+      };
+    case 'security-key-not-found':
+      return { status: 404, code: 'security-key.not-found' };
+    case 'two-step-locked':
+      return {
+        status: 429,
+        code: 'auth.two-step-locked',
+        details: { lockedUntil: refusal.lockedUntil.toISOString() },
+        retryAt: refusal.lockedUntil,
+      };
     case 'password-incorrect':
       return {
         status: 422,
@@ -91,7 +125,7 @@ function shapeOf(refusal: Refusal): ProblemShape {
       return {
         status: 403,
         code: 'auth.reauthentication-required',
-        details: { methods: ['password'] },
+        details: { methods: [...refusal.methods] },
       };
     case 'reset-throttled':
       return {
@@ -155,7 +189,8 @@ function shapeOf(refusal: Refusal): ProblemShape {
  * @description
  * Runs a use case and turns its `AccountRefusal` into the problem of the contract; any other error
  * passes through to the `ProblemFilter` of the kit. A 429 also sets `Retry-After`, in whole seconds,
- * 1 at least, as the contract declares on `AccountLocked` and `CodeThrottled`.
+ * 1 at least, as the contract declares on `AccountLocked`, `CodeThrottled`, `ResetThrottled` and
+ * `TwoStepLocked`.
  *
  * @param {Response} response - The response, for `Retry-After`.
  * @param {() => Promise<TResult>} work - The call of the use case.

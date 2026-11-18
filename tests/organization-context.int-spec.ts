@@ -325,9 +325,13 @@ describe('identity-service organization context', () => {
    * @returns The id of the session and its token.
    */
   async function openSession(userId: string): Promise<{ id: string; token: string }> {
-    const opened = await app
-      .get(OpenSession, { strict: false })
-      .execute({ userId, persistent: false, client, newDeviceNotice: null });
+    const opened = await app.get(OpenSession, { strict: false }).execute({
+      userId,
+      persistent: false,
+      client,
+      newDeviceNotice: null,
+      authentication: 'password',
+    });
     secrets.push(opened.token);
     return { id: opened.id, token: opened.token };
   }
@@ -454,6 +458,8 @@ describe('identity-service organization context', () => {
       JSON.stringify({ 'api-gateway': [apiGateway.publicJwk] }),
     );
     vi.stubEnv('PASSWORD_PEPPER', 'integration-test-password-pepper-organization-00');
+    vi.stubEnv('WEBAUTHN_RP_ID', 'app.cadenway.localhost');
+    vi.stubEnv('WEBAUTHN_ORIGINS', 'http://app.cadenway.localhost');
 
     const config = loadConfig(appConfigSchema);
     app = await createApplication(AppModule, {

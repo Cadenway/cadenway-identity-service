@@ -136,15 +136,15 @@ export class CreateApiToken {
     );
     const token: ApiToken = await this.unitOfWork.run(
       async (tokens: ApiTokenRepository): Promise<ApiToken> => {
-        const status: 'recent' | 'stale' | 'not-found' = await this.recentAuthentications.check(
-          input.actorUserId,
-          sessionId,
-        );
-        if (status === 'not-found') {
+        const checked: {
+          readonly status: 'recent' | 'stale' | 'not-found';
+          readonly twoStepVerificationEnabled: boolean;
+        } = await this.recentAuthentications.check(input.actorUserId, sessionId);
+        if (checked.status === 'not-found') {
           throw new SessionNotFound();
         }
-        if (status === 'stale') {
-          throw new ReauthenticationRequired();
+        if (checked.status === 'stale') {
+          throw new ReauthenticationRequired(checked.twoStepVerificationEnabled);
         }
         return tokens.insert(draft, issued.tokenHash);
       },

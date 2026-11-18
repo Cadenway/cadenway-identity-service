@@ -62,7 +62,10 @@ export async function lockOpenSessionOf(
  * @description
  * Revokes the open sessions of a person, but one, each with `session.revoked.v1` credited to the
  * person: "Déconnecter les autres", a password reset with "Fermer mes autres sessions", and the
- * scheduling of the deletion of the account. The sessions are locked first.
+ * scheduling of the deletion of the account. Every session neither revoked nor expired is locked
+ * first, in the order of their ids; one idle beyond the inactivity of its organization is closed as
+ * well, without an event and without being counted ("closes for inactivity emits nothing"), so that
+ * a later, longer inactivity of a policy cannot bring it back after the person ended it.
  *
  * @param {SessionsStore} store - The repositories of the transaction.
  * @param {string} userId - The person.
@@ -76,15 +79,20 @@ export async function revokeOpenSessions(
   exceptSessionId: string | null,
   now: Date,
 ): Promise<number> {
-  const open: Session[] = await store.sessions.lockOpenOfUser(userId, now);
+  const unended: Session[] = await store.sessions.lockUnendedOfUser(userId, now);
   let revoked: number = 0;
-  for (const session of open) {
-    if (session.id !== exceptSessionId && session.isActiveAt(now)) {
-      const ended: Session = session.revoke(now);
-      await store.sessions.revoke(ended);
-      await store.events.sessionRevoked(ended, userId);
-      revoked += 1;
+  for (const session of unended) {
+    if (session.id === exceptSessionId) {
+      continue;
     }
+    if (!session.isActiveAt(now)) {
+      await store.sessions.revoke(session.closeForInactivity(now));
+      continue;
+    }
+    const ended: Session = session.revoke(now);
+    await store.sessions.revoke(ended);
+    await store.events.sessionRevoked(ended, userId);
+    revoked += 1;
   }
   return revoked;
 }

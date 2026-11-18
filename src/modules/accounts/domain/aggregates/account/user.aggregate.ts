@@ -574,6 +574,22 @@ export class User {
   }
 
   /**
+   * Method changeTwoStepVerification
+   *
+   * @description
+   * Records a change of the two-step verification of the account (turned on or off, its app
+   * replaced, its backup codes regenerated, a key added or removed) with the next version, the
+   * `version` of `user.two-step-verification-changed.v1` ("A change of ... the two-step
+   * verification ... makes it the next one", `User.version` of the contract). The factors
+   * themselves are credentials, kept apart.
+   *
+   * @returns {User} The account after the change.
+   */
+  public changeTwoStepVerification(): User {
+    return new User({ ...this.state, version: this.state.version + 1 });
+  }
+
+  /**
    * Method changePassword
    *
    * @description

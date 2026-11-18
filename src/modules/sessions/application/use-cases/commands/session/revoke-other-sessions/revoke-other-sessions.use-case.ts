@@ -16,7 +16,8 @@ import type { RevokeOtherSessionsOutput } from './revoke-other-sessions.output.j
  * @description
  * Revokes every open session of the actor except the one of the request ("Déconnecter les autres",
  * `POST /internal/v1/sessions/{sessionId}/revoke-others`), each with `session.revoked.v1`, and says
- * how many. The personal API tokens stay. A session of another person, an unknown or an ended one
+ * how many, and forgets every trusted device of the account, the one of the request included
+ * (P2c-2). The personal API tokens stay. A session of another person, an unknown or an ended one
  * answers `session.not-found` and revokes nothing. One system transaction locks the session of the
  * request, then the others.
  */
@@ -85,9 +86,14 @@ export class RevokeOtherSessions {
       if (current === null) {
         throw new SessionNotFound();
       }
-      return {
-        revokedCount: await revokeOpenSessions(store, input.actorUserId, current.id, now),
-      };
+      const revokedCount: number = await revokeOpenSessions(
+        store,
+        input.actorUserId,
+        current.id,
+        now,
+      );
+      await store.trustedDevices.deleteOfUser(input.actorUserId);
+      return { revokedCount };
     });
   }
   // #endregion

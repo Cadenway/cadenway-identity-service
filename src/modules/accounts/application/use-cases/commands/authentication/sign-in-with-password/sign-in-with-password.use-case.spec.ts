@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { User } from '../../../../../domain/aggregates/account/user.aggregate.js';
+import { TwoStepVerification } from '../../../../../domain/aggregates/two-step/two-step-verification.aggregate.js';
 import {
   FakeDeviceReader,
   FakePasswordHasher,
@@ -9,7 +10,14 @@ import {
   InMemoryAccounts,
 } from '../../../../models/accounts/accounts.fixture.js';
 import type { RecordedEvent } from '../../../../models/accounts/accounts.fixture.js';
+import {
+  FakeChallengeTokens,
+  FakeTrustedDevices,
+  challenged,
+  signedIn,
+} from '../../../../models/two-step/two-step.fixture.js';
 import type { SessionIssuedView } from '../../../../projections/authentication/session-issued-view.projection.js';
+import type { SignInChallengeView } from '../../../../projections/two-step/sign-in-challenge-view.projection.js';
 import type { SignInWithPasswordInput } from './sign-in-with-password.input.js';
 import { SignInWithPassword } from './sign-in-with-password.use-case.js';
 
@@ -34,19 +42,34 @@ describe('SignInWithPassword', () => {
   let hasher: FakePasswordHasher;
   let sessions: FakeSessionOpener;
   let signIn: SignInWithPassword;
+  let trustedDevices: FakeTrustedDevices;
+  let challengeTokens: FakeChallengeTokens;
   let camille: User;
 
+  const signInView = async (input: SignInWithPasswordInput): Promise<SessionIssuedView> =>
+    signedIn(await signIn.execute(input));
+
   beforeEach(() => {
+    trustedDevices = new FakeTrustedDevices();
+    challengeTokens = new FakeChallengeTokens();
     accounts = new InMemoryAccounts();
     clock = new FixedClock('2026-11-08T13:07:00Z');
     hasher = new FakePasswordHasher();
     sessions = new FakeSessionOpener(accounts);
-    signIn = new SignInWithPassword(accounts, hasher, sessions, clock, new FakeDeviceReader());
+    signIn = new SignInWithPassword(
+      accounts,
+      hasher,
+      sessions,
+      clock,
+      new FakeDeviceReader(),
+      trustedDevices,
+      challengeTokens,
+    );
     camille = accounts.seedUser(SIGN_IN.email, true, 'hashed:atelier-nord-sprint-14');
   });
 
   it('opens a persistent session for the right password, inside the transaction', async () => {
-    const issued: SessionIssuedView = await signIn.execute({
+    const issued: SessionIssuedView = await signInView({
       ...SIGN_IN,
       email: 'Camille.Martin@AtelierNord.fr',
     });
@@ -59,6 +82,7 @@ describe('SignInWithPassword', () => {
           userId: camille.id,
           persistent: true,
           client: SIGN_IN.client,
+          authentication: 'password',
           newDeviceNotice: {
             email: 'camille.martin@ateliernord.fr',
             name: 'Camille Martin',
@@ -154,7 +178,7 @@ describe('SignInWithPassword', () => {
       new Date('2026-12-09T15:30:00Z'),
     );
 
-    const issued: SessionIssuedView = await signIn.execute({
+    const issued: SessionIssuedView = await signInView({
       ...SIGN_IN,
       email: 'lea.petit@ateliernord.fr',
     });
@@ -172,7 +196,7 @@ describe('SignInWithPassword', () => {
   });
 
   it('cancels nothing for an account without a scheduled deletion', async () => {
-    const issued: SessionIssuedView = await signIn.execute(SIGN_IN);
+    const issued: SessionIssuedView = await signInView(SIGN_IN);
 
     expect(issued.deletionCancelled).toBe(false);
     expect(issued.user.version).toBe(camille.version);
@@ -181,5 +205,69 @@ describe('SignInWithPassword', () => {
         (event: RecordedEvent) => event.name === 'user.deletion-cancelled.v1',
       ),
     ).toEqual([]);
+  });
+  describe('with two-step verification', () => {
+    beforeEach(() => {
+      accounts.state.twoStep.set(
+        camille.id,
+        TwoStepVerification.enable(
+          camille.id,
+          `sealed:${camille.id}:JBSWY3DPEHPK3PXP`,
+          1,
+          'handle-1',
+          new Date('2026-11-01T09:00:00Z'),
+        ),
+      );
+    });
+
+    it('answers a challenge for the right password, without a session', async () => {
+      const challenge: SignInChallengeView = challenged(await signIn.execute(SIGN_IN));
+
+      expect(challenge).toEqual({
+        token: 'challenge-1',
+        expiresAt: new Date('2026-11-08T13:17:00Z'),
+        email: 'camille.martin@ateliernord.fr',
+        name: 'Camille Martin',
+        methods: ['authenticator-app'],
+        securityKeyNames: [],
+        backupCodesRemaining: 0,
+        lockedUntil: null,
+      });
+      expect(sessions.opened).toEqual([]);
+      expect(accounts.state.challenges.get(camille.id)).toMatchObject({
+        tokenHash: 'hash:challenge-1',
+        persistent: true,
+      });
+    });
+
+    it('replaces the open challenge of the account with the next sign-in', async () => {
+      challenged(await signIn.execute(SIGN_IN));
+      challenged(await signIn.execute(SIGN_IN));
+
+      expect(accounts.state.challenges.size).toBe(1);
+      expect(accounts.state.challenges.get(camille.id)?.tokenHash).toBe('hash:challenge-2');
+    });
+
+    it('skips the challenge on a device the account trusts, without a recent authentication', async () => {
+      const grant: { readonly token: string } = await trustedDevices.trust(camille.id);
+
+      const issued: SessionIssuedView = await signInView({
+        ...SIGN_IN,
+        trustedDeviceToken: grant.token,
+      });
+
+      expect(issued.user.id).toBe(camille.id);
+      expect(sessions.opened.at(-1)?.request.authentication).toBeNull();
+    });
+
+    it('answers a challenge for a device another account trusts', async () => {
+      const grant: { readonly token: string } = await trustedDevices.trust(
+        '019a5f3c-0000-7000-8000-000000000000',
+      );
+
+      challenged(await signIn.execute({ ...SIGN_IN, trustedDeviceToken: grant.token }));
+
+      expect(sessions.opened).toEqual([]);
+    });
   });
 });

@@ -9,6 +9,7 @@ import {
   FixedClock,
   InMemoryAccounts,
 } from '../../../../models/accounts/accounts.fixture.js';
+import { FakeTrustedDevices } from '../../../../models/two-step/two-step.fixture.js';
 import type { ScheduleAccountDeletionInput } from './schedule-account-deletion.input.js';
 import { ScheduleAccountDeletion } from './schedule-account-deletion.use-case.js';
 
@@ -48,6 +49,7 @@ describe('ScheduleAccountDeletion', () => {
   let sessions: FakeAccountSessions;
   let apiTokens: FakeAccountApiTokens;
   let owned: FakeOwnedOrganizations;
+  let trustedDevices: FakeTrustedDevices;
   let schedule: ScheduleAccountDeletion;
   let camille: User;
   let input: ScheduleAccountDeletionInput;
@@ -58,7 +60,15 @@ describe('ScheduleAccountDeletion', () => {
     sessions = new FakeAccountSessions(clock);
     apiTokens = new FakeAccountApiTokens();
     owned = new FakeOwnedOrganizations();
-    schedule = new ScheduleAccountDeletion(accounts, sessions, apiTokens, owned, clock);
+    trustedDevices = new FakeTrustedDevices();
+    schedule = new ScheduleAccountDeletion(
+      accounts,
+      sessions,
+      apiTokens,
+      owned,
+      clock,
+      trustedDevices,
+    );
     camille = accounts.seedUser('camille.martin@ateliernord.fr', true, 'hashed:x');
     sessions.seed(SESSION_ID, camille.id, new Date('2026-11-09T15:25:00Z'));
     sessions.seed(STALE_SESSION_ID, camille.id, null);

@@ -26,7 +26,12 @@ import {
  * service to the millisecond so the cursor of the list is exact, and `authenticated_at` the last time
  * its person proved who they are (migration 0004, which backfills `signed_in_at` from `created_at`
  * for the sessions not revoked or expired and leaves `authenticated_at` empty, so a session opened
- * before asks for the password again).
+ * before asks for the password again). `two_step_authenticated_at` (migration 0005) is the instant
+ * of `authenticated_at` when a second factor opened that window (the answer of a challenge, a code
+ * of the app, the confirmation of the app), `null` otherwise; a window counts as a second factor only
+ * while both are equal, so a password window a previous version writes during a rollout, which moves
+ * `authenticated_at` alone, never passes for one. The inactivity of a session follows the
+ * policy of the organization it names (`authentication_policies`), 12 hours without one.
  * `browser`, `operating_system` and `device_type` are written for the record only: the list reads the
  * device from `user_agent`.
  */
@@ -53,6 +58,7 @@ export default pgTable(
       .notNull()
       .default(sql`date_trunc('milliseconds', now())`),
     authenticatedAt: timestamp('authenticated_at', { withTimezone: true }),
+    twoStepAuthenticatedAt: timestamp('two_step_authenticated_at', { withTimezone: true }),
     version: integer('version').notNull().default(1),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),

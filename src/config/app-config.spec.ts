@@ -18,6 +18,8 @@ describe('appConfigSchema', () => {
     INTERNAL_TOKEN_AUDIENCE: 'identity-service',
     INTERNAL_TOKEN_TRUSTED_ISSUERS: trustedIssuers,
     PASSWORD_PEPPER: 'local-development-password-pepper-0000000000',
+    WEBAUTHN_RP_ID: 'app.cadenway.localhost',
+    WEBAUTHN_ORIGINS: 'http://app.cadenway.localhost',
   };
 
   it('reads the variables of the service with the defaults of the kit', () => {
@@ -42,6 +44,8 @@ describe('appConfigSchema', () => {
         ],
       },
       PASSWORD_PEPPER: 'local-development-password-pepper-0000000000',
+      WEBAUTHN_RP_ID: 'app.cadenway.localhost',
+      WEBAUTHN_ORIGINS: ['http://app.cadenway.localhost'],
     });
   });
 
@@ -54,7 +58,7 @@ describe('appConfigSchema', () => {
     expect(() => loadConfig(migrationConfigSchema, example)).not.toThrow();
   });
 
-  it('refuses to start without the database, the broker, the audience, the issuers or the pepper', () => {
+  it('refuses to start without the database, the broker, the audience, the issuers, the pepper or the relying party', () => {
     expect(() => loadConfig(appConfigSchema, { PORT: '3010' })).toThrow(ConfigError);
     try {
       loadConfig(appConfigSchema, { PORT: '3010' });
@@ -67,6 +71,8 @@ describe('appConfigSchema', () => {
           'INTERNAL_TOKEN_AUDIENCE',
           'INTERNAL_TOKEN_TRUSTED_ISSUERS',
           'PASSWORD_PEPPER',
+          'WEBAUTHN_RP_ID',
+          'WEBAUTHN_ORIGINS',
         ]),
       );
     }
@@ -111,6 +117,38 @@ describe('appConfigSchema', () => {
     expect(() => loadConfig(appConfigSchema, { ...complete, PASSWORD_PEPPER: secret })).not.toThrow(
       /s3cret/u,
     );
+  });
+
+  it('reads several comma-separated WebAuthn origins, trimmed', () => {
+    expect(
+      loadConfig(appConfigSchema, {
+        ...complete,
+        WEBAUTHN_RP_ID: 'app.cadenway.com',
+        WEBAUTHN_ORIGINS: 'https://app.cadenway.com, https://app.cadenway.com:8443',
+      }).WEBAUTHN_ORIGINS,
+    ).toEqual(['https://app.cadenway.com', 'https://app.cadenway.com:8443']);
+  });
+
+  it('refuses a relying party with a scheme, a port or capitals', () => {
+    for (const rpId of ['https://app.cadenway.com', 'app.cadenway.com:443', 'App.Cadenway.com']) {
+      expect(() => loadConfig(appConfigSchema, { ...complete, WEBAUTHN_RP_ID: rpId })).toThrow(
+        /WEBAUTHN_RP_ID/u,
+      );
+    }
+  });
+
+  it('refuses an origin with a path, another scheme or outside the relying party', () => {
+    for (const origins of [
+      'http://app.cadenway.localhost/',
+      'ftp://app.cadenway.localhost',
+      'http://evil.localhost',
+      'http://app.cadenway.localhost.evil.example',
+      '',
+    ]) {
+      expect(() => loadConfig(appConfigSchema, { ...complete, WEBAUTHN_ORIGINS: origins })).toThrow(
+        /WEBAUTHN_ORIGINS/u,
+      );
+    }
   });
 
   it('does not read the migrator URL: the running service never needs it', () => {

@@ -223,6 +223,8 @@ describe('identity-service profile', () => {
       JSON.stringify({ 'api-gateway': [apiGateway.publicJwk] }),
     );
     vi.stubEnv('PASSWORD_PEPPER', 'integration-test-password-pepper-profile-000000');
+    vi.stubEnv('WEBAUTHN_RP_ID', 'app.cadenway.localhost');
+    vi.stubEnv('WEBAUTHN_ORIGINS', 'http://app.cadenway.localhost');
 
     const config = loadConfig(appConfigSchema);
     app = await createApplication(AppModule, {

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { User } from '../../../../../domain/aggregates/account/user.aggregate.js';
+import { TwoStepVerification } from '../../../../../domain/aggregates/two-step/two-step-verification.aggregate.js';
 import { EmailAddress } from '../../../../../domain/value-objects/email/email-address.value-object.js';
 import {
   FakeAccountSessions,
@@ -11,6 +12,7 @@ import {
   InMemoryAccounts,
 } from '../../../../models/accounts/accounts.fixture.js';
 import type { RecordedEvent } from '../../../../models/accounts/accounts.fixture.js';
+import { FakeTrustedDevices } from '../../../../models/two-step/two-step.fixture.js';
 import type { AccountView } from '../../../../projections/accounts/account-view.projection.js';
 import type { ChangePasswordInput } from './change-password.input.js';
 import { ChangePassword } from './change-password.use-case.js';
@@ -52,6 +54,7 @@ describe('ChangePassword', () => {
   let accounts: InMemoryAccounts;
   let clock: FixedClock;
   let sessions: FakeAccountSessions;
+  let trustedDevices: FakeTrustedDevices;
   let change: ChangePassword;
   let camille: User;
   let input: ChangePasswordInput;
@@ -60,6 +63,7 @@ describe('ChangePassword', () => {
     accounts = new InMemoryAccounts();
     clock = new FixedClock('2026-11-09T13:16:00Z');
     sessions = new FakeAccountSessions(clock);
+    trustedDevices = new FakeTrustedDevices();
     change = new ChangePassword(
       accounts,
       new FakePasswordHasher(),
@@ -67,6 +71,7 @@ describe('ChangePassword', () => {
       sessions,
       new FakeDeviceReader(),
       clock,
+      trustedDevices,
     );
     camille = accounts.seedUser(
       'camille.martin@ateliernord.fr',
@@ -147,6 +152,7 @@ describe('ChangePassword', () => {
       sessions,
       new FakeDeviceReader(),
       clock,
+      trustedDevices,
     );
 
     await expect(racing.execute(input)).rejects.toMatchObject({
@@ -155,6 +161,42 @@ describe('ChangePassword', () => {
     expect(accounts.state.credentials.get(camille.id)).toBe('hashed:reset-by-camille-2026');
     expect(accounts.userByEmail(camille.email.value)?.version).toBe(camille.version);
     await expect(sessions.check(camille.id, SESSION_ID)).resolves.toBe('stale');
+  });
+
+  it('refuses the change when two-step verification turns on during the check of the password', async () => {
+    const hasher: FakePasswordHasher = new FakePasswordHasher();
+    const verify: FakePasswordHasher['verify'] = hasher.verify.bind(hasher);
+    vi.spyOn(hasher, 'verify').mockImplementation(
+      async (password: string, passwordHash: string | null): Promise<boolean> => {
+        const matches: boolean = await verify(password, passwordHash);
+        accounts.state.twoStep.set(
+          camille.id,
+          TwoStepVerification.enable(
+            camille.id,
+            `sealed:${camille.id}:JBSWY3DPEHPK3PXP`,
+            1,
+            'handle-1',
+            new Date('2026-11-09T13:15:30Z'),
+          ),
+        );
+        sessions.enrolled.add(camille.id);
+        return matches;
+      },
+    );
+    const racing: ChangePassword = new ChangePassword(
+      accounts,
+      hasher,
+      new FakeCompromisedPasswords(),
+      sessions,
+      new FakeDeviceReader(),
+      clock,
+      trustedDevices,
+    );
+
+    await expect(racing.execute(input)).rejects.toMatchObject({
+      refusal: { reason: 'reauthentication-required', methods: ['authenticator-app'] },
+    });
+    expect(accounts.state.credentials.get(camille.id)).toBe('hashed:atelier-nord-sprint-14');
   });
 
   it('checks the new password first, without counting an attempt', async () => {
@@ -184,5 +226,61 @@ describe('ChangePassword', () => {
     await change.execute(input);
 
     expect(accounts.state.lockouts.has(camille.email.value)).toBe(false);
+  });
+  it('forgets every trusted device and voids the challenge and the setups of other sessions', async () => {
+    await trustedDevices.trust(camille.id);
+    accounts.state.setups.set(camille.id, {
+      sessionId: OTHER_SESSION_ID,
+      value: 'sealed-secret',
+      expiresAt: new Date('2026-11-09T13:30:00Z'),
+    });
+
+    await change.execute(input);
+
+    expect(trustedDevices.forgotten).toEqual([camille.id]);
+    await expect(trustedDevices.isTrusted(camille.id, 'device-1')).resolves.toBe(false);
+    expect(accounts.state.setups.has(camille.id)).toBe(false);
+  });
+
+  describe('with two-step verification', () => {
+    beforeEach(() => {
+      accounts.state.twoStep.set(
+        camille.id,
+        TwoStepVerification.enable(
+          camille.id,
+          `sealed:${camille.id}:JBSWY3DPEHPK3PXP`,
+          1,
+          'handle-1',
+          new Date('2026-11-01T09:00:00Z'),
+        ),
+      );
+      sessions.enrolled.add(camille.id);
+    });
+
+    it('requires a recent proof by the app before the current password is checked', async () => {
+      await expect(change.execute(input)).rejects.toMatchObject({
+        refusal: { reason: 'reauthentication-required', methods: ['authenticator-app'] },
+      });
+      expect(accounts.state.lockouts.size).toBe(0);
+      expect(accounts.state.credentials.get(camille.id)).toBe('hashed:atelier-nord-sprint-14');
+    });
+
+    it('checks the new password before the two-step proof', async () => {
+      await expect(change.execute({ ...input, newPassword: 'court' })).rejects.toMatchObject({
+        refusal: { reason: 'password-too-short' },
+      });
+    });
+
+    it('changes the password in a session with a recent proof by the app, which keeps it', async () => {
+      sessions.seed(SESSION_ID, camille.id, new Date('2026-11-09T13:14:00Z'), 'two-step');
+
+      await change.execute(input);
+
+      expect(accounts.state.credentials.get(camille.id)).toBe('hashed:nord-atelier-sprint-15');
+      expect(sessions.sessions.get(SESSION_ID)).toMatchObject({
+        authenticatedAt: new Date('2026-11-09T13:14:00Z'),
+        method: 'two-step',
+      });
+    });
   });
 });

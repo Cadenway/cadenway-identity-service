@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
+import { AuthenticationPolicy } from '../../../../../domain/aggregates/authentication-policy/authentication-policy.aggregate.js';
 import type { SessionState } from '../../../../../domain/value-objects/session/session-state.value-object.js';
 import { SessionNotFound } from '../../../../models/session/session-not-found.model.js';
 import { RevokeOtherSessions } from './revoke-other-sessions.use-case.js';
@@ -80,6 +81,8 @@ function put(
       version: 1,
       signedInAt,
       authenticatedAt: signedInAt,
+      twoStepAuthenticatedAt: null,
+      inactivityTimeoutMinutes: 720,
       ...changes,
     },
     origin: {
@@ -130,6 +133,29 @@ describe('RevokeOtherSessions', () => {
 
     expect(store.sessions.get(sessionId(1))?.state.revokedAt).toBeNull();
     expect(store.sessions.get(sessionId(4))?.state.revokedAt).toBeNull();
+    expect(store.revoked.map(({ session }) => session.id)).toEqual([sessionId(2), sessionId(3)]);
+  });
+
+  it('also closes, silently and uncounted, a session idle beyond the inactivity of its organization', async () => {
+    put(store, sessionId(5), CAMILLE_ID, {
+      organizationId: '019a5f3c-8d2e-7c4a-9b1f-3e5d7a9c1b2f',
+      memberId: '019a6b10-0000-7000-8000-000000000001',
+      lastActiveAt: new Date('2026-11-09T11:00:00Z'),
+      signedInAt: new Date('2026-11-09T11:00:00Z'),
+      inactivityTimeoutMinutes: 60,
+    });
+    store.policies.set(
+      '019a5f3c-8d2e-7c4a-9b1f-3e5d7a9c1b2f',
+      AuthenticationPolicy.defaultFor('019a5f3c-8d2e-7c4a-9b1f-3e5d7a9c1b2f').apply({
+        sessionInactivityTimeoutMinutes: 60,
+      }),
+    );
+
+    await expect(
+      revokeOthers.execute({ actorUserId: CAMILLE_ID, sessionId: sessionId(1) }),
+    ).resolves.toEqual({ revokedCount: 2 });
+
+    expect(store.sessions.get(sessionId(5))?.state.revokedAt).toEqual(NOW);
     expect(store.revoked.map(({ session }) => session.id)).toEqual([sessionId(2), sessionId(3)]);
   });
 

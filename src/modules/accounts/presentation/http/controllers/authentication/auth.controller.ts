@@ -1,6 +1,7 @@
 import type {
   CodeSent,
   SessionIssued,
+  SignInChallenge,
   SignInMethods,
 } from '@cadenway/contracts/types/internal/identity-service';
 import { InternalAccess } from '@cadenway/nest-common';
@@ -13,6 +14,7 @@ import { SignInWithCode } from '../../../../application/use-cases/commands/authe
 import { SignInWithPassword } from '../../../../application/use-cases/commands/authentication/sign-in-with-password/sign-in-with-password.use-case.js';
 import { SignUp } from '../../../../application/use-cases/commands/authentication/sign-up/sign-up.use-case.js';
 import { VerifySignUp } from '../../../../application/use-cases/commands/authentication/verify-sign-up/verify-sign-up.use-case.js';
+import type { SignInOutcome } from '../../../../application/projections/authentication/sign-in-outcome.projection.js';
 import { DiscoverSignInMethods } from '../../../../application/use-cases/queries/authentication/discover-sign-in-methods/discover-sign-in-methods.use-case.js';
 import { PasswordSignInBody } from '../../dto/input/authentication/password-sign-in-body.dto.js';
 import { ResendSignUpCodeBody } from '../../dto/input/authentication/resend-sign-up-code-body.dto.js';
@@ -24,6 +26,29 @@ import { VerifySignUpBody } from '../../dto/input/authentication/verify-sign-up-
 import { answerRefusals } from '../../errors/authentication/account-refusal.problem.js';
 import { toCodeSent } from '../../mappers/authentication/code-sent.mapper.js';
 import { toSessionIssued } from '../../mappers/authentication/session-issued.mapper.js';
+import { toSignInChallenge } from '../../mappers/two-step/sign-in-challenge.mapper.js';
+
+/**
+ * Function answerOutcome
+ *
+ * @description
+ * The answer of a right first factor: `200` with the session, or `202` with the two-step
+ * challenge of an account with two-step verification, without a token or a session.
+ *
+ * @param {Response} response - The response, whose status a challenge sets.
+ * @param {SignInOutcome} outcome - The outcome of the first factor.
+ * @returns {SessionIssued | SignInChallenge} The body.
+ */
+function answerOutcome(
+  response: Response,
+  outcome: SignInOutcome,
+): SessionIssued | SignInChallenge {
+  if (outcome.kind === 'challenge') {
+    response.status(202);
+    return toSignInChallenge(outcome.challenge);
+  }
+  return toSessionIssued(outcome.issued);
+}
 
 /**
  * Class AuthController
@@ -237,19 +262,23 @@ export class AuthController {
    * Method signIn
    *
    * @description
-   * `POST /internal/v1/auth/sign-in`: `200` with the session; `403`, `422` or `429` otherwise.
+   * `POST /internal/v1/auth/sign-in`: `200` with the session; `202` with a two-step challenge for
+   * an account with two-step verification, unless `trustedDeviceToken` names a device it trusts;
+   * `403`, `422` or `429` otherwise.
    *
-   * @param {PasswordSignInBody} body - The address, the password and the browser.
-   * @param {Response} response - The response, for `Retry-After`.
-   * @returns {Promise<SessionIssued>} The session, its token and the account.
+   * @param {PasswordSignInBody} body - The address, the password, the browser and its trusted
+   * device token.
+   * @param {Response} response - The response, for the `202` and `Retry-After`.
+   * @returns {Promise<SessionIssued | SignInChallenge>} The session, or the challenge.
    */
   @Post('sign-in')
   @HttpCode(200)
   public async signIn(
     @Body() body: PasswordSignInBody,
     @Res({ passthrough: true }) response: Response,
-  ): Promise<SessionIssued> {
-    return toSessionIssued(
+  ): Promise<SessionIssued | SignInChallenge> {
+    return answerOutcome(
+      response,
       await answerRefusals(response, () => this.signInWithPassword.execute(body)),
     );
   }
@@ -278,20 +307,24 @@ export class AuthController {
    * Method signInCode
    *
    * @description
-   * `POST /internal/v1/auth/sign-in/code/verification`: `200` with the session; `422` for a refused
-   * code.
+   * `POST /internal/v1/auth/sign-in/code/verification`: `200` with the session; `202` with a
+   * two-step challenge for an account with two-step verification, unless `trustedDeviceToken`
+   * names a device it trusts; `422` for a refused code.
    *
-   * @param {SignInWithCodeBody} body - The code and the browser.
-   * @param {Response} response - The response of the refusals.
-   * @returns {Promise<SessionIssued>} The session, its token and the account.
+   * @param {SignInWithCodeBody} body - The code, the browser and its trusted device token.
+   * @param {Response} response - The response of the `202` and of the refusals.
+   * @returns {Promise<SessionIssued | SignInChallenge>} The session, or the challenge.
    */
   @Post('sign-in/code/verification')
   @HttpCode(200)
   public async signInCode(
     @Body() body: SignInWithCodeBody,
     @Res({ passthrough: true }) response: Response,
-  ): Promise<SessionIssued> {
-    return toSessionIssued(await answerRefusals(response, () => this.signInWithCode.execute(body)));
+  ): Promise<SessionIssued | SignInChallenge> {
+    return answerOutcome(
+      response,
+      await answerRefusals(response, () => this.signInWithCode.execute(body)),
+    );
   }
   // #endregion
 }

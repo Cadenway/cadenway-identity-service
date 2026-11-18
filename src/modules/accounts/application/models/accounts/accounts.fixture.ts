@@ -6,17 +6,23 @@ import { OneTimeCode } from '../../../domain/aggregates/one-time-codes/one-time-
 import type { PasswordResetLinkIssue } from '../../../domain/aggregates/password-reset/password-reset-link-issue.aggregate.js';
 import type { PasswordResetLinkState } from '../../../domain/aggregates/password-reset/password-reset-link-state.aggregate.js';
 import { PasswordResetLink } from '../../../domain/aggregates/password-reset/password-reset-link.aggregate.js';
+import type { SignInChallengeIssue } from '../../../domain/aggregates/two-step/sign-in-challenge-issue.aggregate.js';
+import type { SignInChallengeState } from '../../../domain/aggregates/two-step/sign-in-challenge-state.aggregate.js';
+import { SignInChallenge } from '../../../domain/aggregates/two-step/sign-in-challenge.aggregate.js';
+import type { TwoStepVerification } from '../../../domain/aggregates/two-step/two-step-verification.aggregate.js';
 import { CodeRequestThrottle } from '../../../domain/policies/one-time-codes/code-request-throttle.policy.js';
 import { PasswordResetThrottle } from '../../../domain/policies/password-reset/password-reset-throttle.policy.js';
 import { PasswordLockout } from '../../../domain/policies/password/password-lockout.policy.js';
 import type { PendingEmailChange } from '../../../domain/value-objects/email-change/pending-email-change.value-object.js';
 import { EmailAddress } from '../../../domain/value-objects/email/email-address.value-object.js';
 import type { OneTimeCodePurpose } from '../../../domain/value-objects/one-time-code-purpose/one-time-code-purpose.value-object.js';
+import type { PendingTwoStepStart } from '../../../domain/value-objects/two-step/pending-two-step-start.value-object.js';
 import type { Clock } from '../../ports/outbound/clock/accounts/clock.port.js';
 import type { DeviceReader } from '../../ports/outbound/device/accounts/device-reader.port.js';
 import type { AccountApiTokens } from '../../ports/outbound/identity/api-tokens/account-api-tokens.port.js';
 import type { AccountSessions } from '../../ports/outbound/identity/sessions/account-sessions.port.js';
 import type { SessionOpener } from '../../ports/outbound/identity/sessions/session-opener.port.js';
+import type { TwoStepEnrollments } from '../../ports/outbound/identity/sessions/two-step-enrollments.port.js';
 import type { AccountDeletionQueue } from '../../ports/outbound/jobs/accounts/account-deletion-queue.port.js';
 import type { OwnedOrganizations } from '../../ports/outbound/memberships/accounts/owned-organizations.port.js';
 import type { AccountEvents } from '../../ports/outbound/messaging/accounts/account-events.port.js';
@@ -28,6 +34,11 @@ import type { PasswordResetLinkRepository } from '../../ports/outbound/persisten
 import type { PasswordResetRequestRepository } from '../../ports/outbound/persistence/accounts/password-reset-request-repository.port.js';
 import type { SignInAttemptRepository } from '../../ports/outbound/persistence/accounts/sign-in-attempt-repository.port.js';
 import type { UserRepository } from '../../ports/outbound/persistence/accounts/user-repository.port.js';
+import type { BackupCodeRepository } from '../../ports/outbound/persistence/two-step/backup-code-repository.port.js';
+import type { PendingTwoStepRepository } from '../../ports/outbound/persistence/two-step/pending-two-step-repository.port.js';
+import type { SecurityKeyRepository } from '../../ports/outbound/persistence/two-step/security-key-repository.port.js';
+import type { SignInChallengeRepository } from '../../ports/outbound/persistence/two-step/sign-in-challenge-repository.port.js';
+import type { TwoStepVerificationRepository } from '../../ports/outbound/persistence/two-step/two-step-verification-repository.port.js';
 import type { CompromisedPasswords } from '../../ports/outbound/security/authentication/compromised-passwords.port.js';
 import type { OneTimeCodeSecrets } from '../../ports/outbound/security/authentication/one-time-code-secrets.port.js';
 import type { PasswordHasher } from '../../ports/outbound/security/authentication/password-hasher.port.js';
@@ -45,6 +56,9 @@ import type { RecentAuthentication } from '../sessions/recent-authentication.mod
 import type { SessionAuthentication } from '../sessions/session-authentication.model.js';
 import type { SessionRequest } from '../sessions/session-request.model.js';
 import type { AccountsStore } from '../transactions/accounts-store.model.js';
+import type { SecurityKeyRecord } from '../two-step/security-key-record.model.js';
+import type { TwoStepSummary } from '../two-step/two-step-summary.model.js';
+import type { VerifiedRegistration } from '../two-step/verified-registration.model.js';
 
 /**
  * Type RecordedEvent
@@ -85,7 +99,13 @@ export type RecordedEvent =
       readonly sessionId: string;
       readonly client: ClientDescription;
     }
-  | { readonly name: 'user.deleted.v1'; readonly userId: string; readonly version: number };
+  | { readonly name: 'user.deleted.v1'; readonly userId: string; readonly version: number }
+  | {
+      readonly name: 'user.two-step-verification-changed.v1';
+      readonly user: User;
+      readonly summary: TwoStepSummary;
+      readonly client: ClientDescription;
+    };
 
 /**
  * Interface AccountsState
@@ -216,6 +236,76 @@ interface AccountsState {
    * @readonly
    */
   readonly deletionChecks: Map<string, Date>;
+
+  /**
+   * Property twoStep
+   *
+   * @description
+   * Two-step verifications by account.
+   *
+   * @type {Map<string, TwoStepVerification>}
+   * @readonly
+   */
+  readonly twoStep: Map<string, TwoStepVerification>;
+
+  /**
+   * Property backupCodes
+   *
+   * @description
+   * Backup codes, as keyed hashes, with when each was used.
+   *
+   * @type {{ readonly userId: string; readonly codeHash: string; readonly usedAt: Date | null }[]}
+   * @readonly
+   */
+  readonly backupCodes: {
+    readonly userId: string;
+    readonly codeHash: string;
+    readonly usedAt: Date | null;
+  }[];
+
+  /**
+   * Property securityKeys
+   *
+   * @description
+   * Security keys, with their account.
+   *
+   * @type {(SecurityKeyRecord & { readonly userId: string })[]}
+   * @readonly
+   */
+  readonly securityKeys: (SecurityKeyRecord & { readonly userId: string })[];
+
+  /**
+   * Property setups
+   *
+   * @description
+   * Pending setups of an authenticator app by account.
+   *
+   * @type {Map<string, PendingTwoStepStart>}
+   * @readonly
+   */
+  readonly setups: Map<string, PendingTwoStepStart>;
+
+  /**
+   * Property registrations
+   *
+   * @description
+   * Pending registrations of a security key by account.
+   *
+   * @type {Map<string, PendingTwoStepStart>}
+   * @readonly
+   */
+  readonly registrations: Map<string, PendingTwoStepStart>;
+
+  /**
+   * Property challenges
+   *
+   * @description
+   * Open two-step challenges by account.
+   *
+   * @type {Map<string, SignInChallengeState>}
+   * @readonly
+   */
+  readonly challenges: Map<string, SignInChallengeState>;
   // #endregion
 }
 
@@ -242,6 +332,12 @@ function copyState(state: AccountsState): AccountsState {
     emailChanges: new Map(state.emailChanges),
     deletionJobs: [...state.deletionJobs],
     deletionChecks: new Map(state.deletionChecks),
+    twoStep: new Map(state.twoStep),
+    backupCodes: [...state.backupCodes],
+    securityKeys: [...state.securityKeys],
+    setups: new Map(state.setups),
+    registrations: new Map(state.registrations),
+    challenges: new Map(state.challenges),
   };
 }
 
@@ -287,6 +383,12 @@ export class InMemoryAccounts implements AccountsUnitOfWork {
     emailChanges: new Map(),
     deletionJobs: [],
     deletionChecks: new Map(),
+    twoStep: new Map(),
+    backupCodes: [],
+    securityKeys: [],
+    setups: new Map(),
+    registrations: new Map(),
+    challenges: new Map(),
   };
 
   /**
@@ -619,6 +721,14 @@ export class InMemoryAccounts implements AccountsUnitOfWork {
         draft.events.push({ name: 'user.deleted.v1', userId, version });
         return Promise.resolve();
       },
+      userTwoStepVerificationChanged: (
+        user: User,
+        summary: TwoStepSummary,
+        client: ClientDescription,
+      ): Promise<void> => {
+        draft.events.push({ name: 'user.two-step-verification-changed.v1', user, summary, client });
+        return Promise.resolve();
+      },
     };
     const resetLinks: PasswordResetLinkRepository = {
       findByTokenHash: (tokenHash: string): Promise<PasswordResetLink | null> => {
@@ -688,6 +798,200 @@ export class InMemoryAccounts implements AccountsUnitOfWork {
         return Promise.resolve(true);
       },
     };
+    const twoStep: TwoStepVerificationRepository = {
+      find: (userId: string): Promise<TwoStepVerification | null> =>
+        Promise.resolve(draft.twoStep.get(userId) ?? null),
+      lock: (userId: string): Promise<TwoStepVerification | null> =>
+        Promise.resolve(draft.twoStep.get(userId) ?? null),
+      insert: (verification: TwoStepVerification): Promise<void> => {
+        if (draft.twoStep.has(verification.userId)) {
+          return Promise.reject(new Error('The account already has two-step verification.'));
+        }
+        draft.twoStep.set(verification.userId, verification);
+        return Promise.resolve();
+      },
+      update: (verification: TwoStepVerification): Promise<void> => {
+        draft.twoStep.set(verification.userId, verification);
+        return Promise.resolve();
+      },
+      delete: (userId: string): Promise<void> => {
+        draft.twoStep.delete(userId);
+        return Promise.resolve();
+      },
+    };
+    const backupCodes: BackupCodeRepository = {
+      replaceAll: (userId: string, codeHashes: readonly string[]): Promise<void> => {
+        draft.backupCodes.splice(
+          0,
+          draft.backupCodes.length,
+          ...draft.backupCodes.filter(
+            (code: { readonly userId: string }) => code.userId !== userId,
+          ),
+          ...codeHashes.map((codeHash: string) => ({ userId, codeHash, usedAt: null })),
+        );
+        return Promise.resolve();
+      },
+      countUnused: (userId: string): Promise<number> =>
+        Promise.resolve(
+          draft.backupCodes.filter(
+            (code: { readonly userId: string; readonly usedAt: Date | null }) =>
+              code.userId === userId && code.usedAt === null,
+          ).length,
+        ),
+      use: (userId: string, codeHash: string, now: Date): Promise<boolean> => {
+        const index: number = draft.backupCodes.findIndex(
+          (code: {
+            readonly userId: string;
+            readonly codeHash: string;
+            readonly usedAt: Date | null;
+          }) => code.userId === userId && code.codeHash === codeHash && code.usedAt === null,
+        );
+        if (index < 0) {
+          return Promise.resolve(false);
+        }
+        draft.backupCodes[index] = { userId, codeHash, usedAt: now };
+        return Promise.resolve(true);
+      },
+      deleteOfUser: (userId: string): Promise<void> => {
+        draft.backupCodes.splice(
+          0,
+          draft.backupCodes.length,
+          ...draft.backupCodes.filter(
+            (code: { readonly userId: string }) => code.userId !== userId,
+          ),
+        );
+        return Promise.resolve();
+      },
+    };
+    const securityKeys: SecurityKeyRepository = {
+      listOfUser: (userId: string): Promise<SecurityKeyRecord[]> =>
+        Promise.resolve(
+          draft.securityKeys.filter((key: { readonly userId: string }) => key.userId === userId),
+        ),
+      findOfUser: (userId: string, id: string): Promise<SecurityKeyRecord | null> =>
+        Promise.resolve(
+          draft.securityKeys.find(
+            (key: SecurityKeyRecord & { readonly userId: string }) =>
+              key.userId === userId && key.id === id,
+          ) ?? null,
+        ),
+      credentialExists: (credentialId: string): Promise<boolean> =>
+        Promise.resolve(
+          draft.securityKeys.some((key: SecurityKeyRecord) => key.credentialId === credentialId),
+        ),
+      insert: (
+        userId: string,
+        name: string,
+        credential: VerifiedRegistration,
+      ): Promise<SecurityKeyRecord> => {
+        this.ids += 1;
+        const key: SecurityKeyRecord & { readonly userId: string } = {
+          id: fakeId(this.ids),
+          userId,
+          name,
+          credentialId: credential.credentialId,
+          publicKey: credential.publicKey,
+          counter: credential.counter,
+          transports: credential.transports,
+          createdAt: new Date('2026-11-09T13:12:00Z'),
+          lastUsedAt: null,
+        };
+        draft.securityKeys.push(key);
+        return Promise.resolve(key);
+      },
+      recordUse: (id: string, counter: number, now: Date): Promise<void> => {
+        const index: number = draft.securityKeys.findIndex(
+          (key: SecurityKeyRecord) => key.id === id,
+        );
+        const key: (SecurityKeyRecord & { readonly userId: string }) | undefined =
+          draft.securityKeys[index];
+        if (key !== undefined) {
+          draft.securityKeys[index] = { ...key, counter, lastUsedAt: now };
+        }
+        return Promise.resolve();
+      },
+      delete: (id: string): Promise<void> => {
+        draft.securityKeys.splice(
+          0,
+          draft.securityKeys.length,
+          ...draft.securityKeys.filter((key: SecurityKeyRecord) => key.id !== id),
+        );
+        return Promise.resolve();
+      },
+      deleteOfUser: (userId: string): Promise<void> => {
+        draft.securityKeys.splice(
+          0,
+          draft.securityKeys.length,
+          ...draft.securityKeys.filter((key: { readonly userId: string }) => key.userId !== userId),
+        );
+        return Promise.resolve();
+      },
+    };
+    const pendingTwoStep: PendingTwoStepRepository = {
+      putSetup: (userId: string, pending: PendingTwoStepStart): Promise<void> => {
+        draft.setups.set(userId, pending);
+        return Promise.resolve();
+      },
+      findSetup: (userId: string): Promise<PendingTwoStepStart | null> =>
+        Promise.resolve(draft.setups.get(userId) ?? null),
+      putRegistration: (userId: string, pending: PendingTwoStepStart): Promise<void> => {
+        draft.registrations.set(userId, pending);
+        return Promise.resolve();
+      },
+      findRegistration: (userId: string): Promise<PendingTwoStepStart | null> =>
+        Promise.resolve(draft.registrations.get(userId) ?? null),
+      deleteSetup: (userId: string): Promise<void> => {
+        draft.setups.delete(userId);
+        return Promise.resolve();
+      },
+      deleteRegistration: (userId: string): Promise<void> => {
+        draft.registrations.delete(userId);
+        return Promise.resolve();
+      },
+      dropOfOtherSessions: (userId: string, sessionId: string): Promise<void> => {
+        if (draft.setups.get(userId)?.sessionId !== sessionId) {
+          draft.setups.delete(userId);
+        }
+        if (draft.registrations.get(userId)?.sessionId !== sessionId) {
+          draft.registrations.delete(userId);
+        }
+        return Promise.resolve();
+      },
+      dropOfUser: (userId: string): Promise<void> => {
+        draft.setups.delete(userId);
+        draft.registrations.delete(userId);
+        return Promise.resolve();
+      },
+    };
+    const challenges: SignInChallengeRepository = {
+      replace: (issue: SignInChallengeIssue): Promise<SignInChallenge> => {
+        this.ids += 1;
+        const state: SignInChallengeState = {
+          ...issue,
+          id: fakeId(this.ids),
+          assertionChallenge: null,
+          assertionExpiresAt: null,
+        };
+        draft.challenges.set(issue.userId, state);
+        return Promise.resolve(SignInChallenge.restore(state));
+      },
+      findByTokenHash: (tokenHash: string): Promise<SignInChallenge | null> => {
+        const found: SignInChallengeState | undefined = [...draft.challenges.values()].find(
+          (challenge: SignInChallengeState) => challenge.tokenHash === tokenHash,
+        );
+        return Promise.resolve(found === undefined ? null : SignInChallenge.restore(found));
+      },
+      saveAssertion: (challenge: SignInChallenge): Promise<void> => {
+        if (draft.challenges.get(challenge.userId)?.id === challenge.id) {
+          draft.challenges.set(challenge.userId, challenge.snapshot);
+        }
+        return Promise.resolve();
+      },
+      deleteOfUser: (userId: string): Promise<void> => {
+        draft.challenges.delete(userId);
+        return Promise.resolve();
+      },
+    };
     return {
       users,
       credentials,
@@ -699,6 +1003,11 @@ export class InMemoryAccounts implements AccountsUnitOfWork {
       emailChanges,
       events,
       deletionQueue,
+      twoStep,
+      backupCodes,
+      securityKeys,
+      pendingTwoStep,
+      challenges,
     };
   }
   // #endregion
@@ -1089,20 +1398,36 @@ export class FakeResetLinkSecrets implements ResetLinkSecrets {
  * The sessions of the accounts, in memory: each session names its person, whether it is open and
  * when its person last proved who they are.
  */
-export class FakeAccountSessions implements AccountSessions {
+export class FakeAccountSessions implements AccountSessions, TwoStepEnrollments {
   // #region Properties
   /**
    * Property sessions
    *
    * @description
-   * Sessions by id.
+   * Sessions by id, with the method of their last recent authentication.
    *
-   * @type {Map<string, { userId: string; open: boolean; authenticatedAt: Date | null }>}
+   * @type {Map<string, { userId: string; open: boolean; authenticatedAt: Date | null; method: 'password' | 'two-step' | null }>}
    */
   public readonly sessions = new Map<
     string,
-    { userId: string; open: boolean; authenticatedAt: Date | null }
+    {
+      userId: string;
+      open: boolean;
+      authenticatedAt: Date | null;
+      method: 'password' | 'two-step' | null;
+    }
   >();
+
+  /**
+   * Property enrolled
+   *
+   * @description
+   * The accounts the sessions module knows with two-step verification: a recent authentication
+   * of theirs counts only by a second factor.
+   *
+   * @type {Set<string>}
+   */
+  public readonly enrolled = new Set<string>();
 
   /**
    * Property erased
@@ -1151,9 +1476,34 @@ export class FakeAccountSessions implements AccountSessions {
    * @param {string} id - Id of the session.
    * @param {string} userId - Its person.
    * @param {Date | null} authenticatedAt - Its last proof of who the person is.
+   * @param {'password' | 'two-step' | null} method - How, by password when it has one.
    */
-  public seed(id: string, userId: string, authenticatedAt: Date | null): void {
-    this.sessions.set(id, { userId, open: true, authenticatedAt });
+  public seed(
+    id: string,
+    userId: string,
+    authenticatedAt: Date | null,
+    method: 'password' | 'two-step' | null = authenticatedAt === null ? null : 'password',
+  ): void {
+    this.sessions.set(id, { userId, open: true, authenticatedAt, method });
+  }
+
+  /**
+   * Method record
+   *
+   * @description
+   * Records whether an account has two-step verification (`TwoStepEnrollments`).
+   *
+   * @param {string} userId - The account.
+   * @param {boolean} enabled - Whether it is on.
+   * @returns {Promise<void>} Resolves at once.
+   */
+  public record(userId: string, enabled: boolean): Promise<void> {
+    if (enabled) {
+      this.enrolled.add(userId);
+    } else {
+      this.enrolled.delete(userId);
+    }
+    return Promise.resolve();
   }
 
   /**
@@ -1167,14 +1517,21 @@ export class FakeAccountSessions implements AccountSessions {
    * @returns {Promise<SessionAuthentication>} Its status.
    */
   public check(userId: string, sessionId: string): Promise<SessionAuthentication> {
-    const session: { userId: string; open: boolean; authenticatedAt: Date | null } | undefined =
-      this.sessions.get(sessionId);
+    const session:
+      | {
+          userId: string;
+          open: boolean;
+          authenticatedAt: Date | null;
+          method: 'password' | 'two-step' | null;
+        }
+      | undefined = this.sessions.get(sessionId);
     if (session?.userId !== userId || !session.open) {
       return Promise.resolve('not-found');
     }
     const recent: boolean =
       session.authenticatedAt !== null &&
-      this.clock.now().getTime() < session.authenticatedAt.getTime() + 10 * 60_000;
+      this.clock.now().getTime() < session.authenticatedAt.getTime() + 10 * 60_000 &&
+      (!this.enrolled.has(userId) || session.method === 'two-step');
     return Promise.resolve(recent ? 'recent' : 'stale');
   }
 
@@ -1186,17 +1543,19 @@ export class FakeAccountSessions implements AccountSessions {
    *
    * @param {string} userId - The person.
    * @param {string} sessionId - The session.
+   * @param {'password' | 'two-step'} method - How.
    * @returns {Promise<RecentAuthentication | null>} The window, or `null`.
    */
   public async authenticate(
     userId: string,
     sessionId: string,
+    method: 'password' | 'two-step',
   ): Promise<RecentAuthentication | null> {
     if ((await this.check(userId, sessionId)) === 'not-found') {
       return null;
     }
     const now: Date = this.clock.now();
-    this.sessions.set(sessionId, { userId, open: true, authenticatedAt: now });
+    this.sessions.set(sessionId, { userId, open: true, authenticatedAt: now, method });
     return { authenticatedAt: now, expiresAt: new Date(now.getTime() + 10 * 60_000) };
   }
 
@@ -1208,12 +1567,22 @@ export class FakeAccountSessions implements AccountSessions {
    *
    * @param {string} userId - The person.
    * @param {string | null} exceptSessionId - The session that keeps its own.
+   * @param {'every-window' | 'password-windows'} scope - Every window, or those of a password.
    * @returns {Promise<void>} Resolves at once.
    */
-  public endRecentAuthentication(userId: string, exceptSessionId: string | null): Promise<void> {
+  public endRecentAuthentication(
+    userId: string,
+    exceptSessionId: string | null,
+    scope: 'every-window' | 'password-windows',
+  ): Promise<void> {
     for (const [id, session] of this.sessions) {
-      if (session.userId === userId && session.open && id !== exceptSessionId) {
-        this.sessions.set(id, { ...session, authenticatedAt: null });
+      if (
+        session.userId === userId &&
+        session.open &&
+        id !== exceptSessionId &&
+        (scope === 'every-window' || session.method !== 'two-step')
+      ) {
+        this.sessions.set(id, { ...session, authenticatedAt: null, method: null });
       }
     }
     return Promise.resolve();

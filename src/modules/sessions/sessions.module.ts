@@ -1,6 +1,22 @@
 import { Module } from '@nestjs/common';
 
 import { MembershipsModule } from '../memberships/memberships.module.js';
+import { organizationMembersProvider } from './composition/providers/adapters/authentication-policy/organization-members.provider.js';
+import { updateAuthenticationPolicyProvider } from './composition/providers/use-cases/authentication-policy/update-authentication-policy.provider.js';
+import { checkOrganizationAccessProvider } from './composition/providers/use-cases/authentication-policy/check-organization-access.provider.js';
+import { findTwoStepRequirementsProvider } from './composition/providers/use-cases/authentication-policy/find-two-step-requirements.provider.js';
+import { getAuthenticationPolicyProvider } from './composition/providers/use-cases/authentication-policy/get-authentication-policy.provider.js';
+import { recordTwoStepVerificationProvider } from './composition/providers/use-cases/session/record-two-step-verification.provider.js';
+import { checkTrustedDeviceProvider } from './composition/providers/use-cases/trusted-device/check-trusted-device.provider.js';
+import { forgetTrustedDevicesProvider } from './composition/providers/use-cases/trusted-device/forget-trusted-devices.provider.js';
+import { trustDeviceProvider } from './composition/providers/use-cases/trusted-device/trust-device.provider.js';
+import { AuthenticationPolicyController } from './presentation/http/controllers/authentication-policy/authentication-policy.controller.js';
+import { CheckOrganizationAccess } from './public/authentication-policy/check-organization-access.js';
+import { FindTwoStepRequirements } from './public/authentication-policy/find-two-step-requirements.js';
+import { RecordTwoStepVerification } from './public/session/record-two-step-verification.js';
+import { CheckTrustedDevice } from './public/trusted-device/check-trusted-device.js';
+import { ForgetTrustedDevices } from './public/trusted-device/forget-trusted-devices.js';
+import { TrustDevice } from './public/trusted-device/trust-device.js';
 import { activeMembershipsProvider } from './composition/providers/adapters/session/active-memberships.provider.js';
 import { sessionClockProvider } from './composition/providers/adapters/session/clock.provider.js';
 import { deviceReaderProvider } from './composition/providers/adapters/session/device-reader.provider.js';
@@ -47,7 +63,12 @@ import { RevokeUserSessions } from './public/session/revoke-user-sessions.js';
  */
 @Module({
   imports: [MembershipsModule],
-  controllers: [TokensController, SessionsController, UserSessionsController],
+  controllers: [
+    TokensController,
+    SessionsController,
+    UserSessionsController,
+    AuthenticationPolicyController,
+  ],
   providers: [
     sessionsUnitOfWorkProvider,
     tenantSessionsUnitOfWorkProvider,
@@ -68,6 +89,15 @@ import { RevokeUserSessions } from './public/session/revoke-user-sessions.js';
     revokeUserSessionsProvider,
     countOpenSessionsProvider,
     eraseUserSessionsProvider,
+    organizationMembersProvider,
+    recordTwoStepVerificationProvider,
+    trustDeviceProvider,
+    checkTrustedDeviceProvider,
+    forgetTrustedDevicesProvider,
+    findTwoStepRequirementsProvider,
+    checkOrganizationAccessProvider,
+    getAuthenticationPolicyProvider,
+    updateAuthenticationPolicyProvider,
   ],
   exports: [
     OpenSession,
@@ -78,6 +108,12 @@ import { RevokeUserSessions } from './public/session/revoke-user-sessions.js';
     RevokeUserSessions,
     CountOpenSessions,
     EraseUserSessions,
+    RecordTwoStepVerification,
+    TrustDevice,
+    CheckTrustedDevice,
+    ForgetTrustedDevices,
+    FindTwoStepRequirements,
+    CheckOrganizationAccess,
   ],
 })
 export class SessionsModule {}

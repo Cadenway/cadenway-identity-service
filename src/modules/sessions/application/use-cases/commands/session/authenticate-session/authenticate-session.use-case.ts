@@ -81,7 +81,7 @@ export class AuthenticateSession {
         if (session === null) {
           return null;
         }
-        await store.sessions.saveAuthentication(session.authenticate(now));
+        await store.sessions.saveAuthentication(session.authenticate(now, input.method));
         return {
           authenticatedAt: now,
           expiresAt: new Date(now.getTime() + Session.RECENT_AUTHENTICATION_MS),

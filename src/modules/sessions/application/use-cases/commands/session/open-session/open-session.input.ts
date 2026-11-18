@@ -57,5 +57,18 @@ export interface OpenSessionInput {
     readonly language: string;
     readonly timeZone: string;
   } | null;
+
+  /**
+   * Property authentication
+   *
+   * @description
+   * The proof the sign-in brought, which opens the window of recent authentication of the session:
+   * `password` for the sign-in of an account without two-step verification, `two-step` for the
+   * answer of a challenge, `null` for a sign-in on a trusted device, which opens none.
+   *
+   * @type {'password' | 'two-step' | null}
+   * @readonly
+   */
+  readonly authentication: 'password' | 'two-step' | null;
   // #endregion
 }

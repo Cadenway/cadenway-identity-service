@@ -106,6 +106,20 @@ export interface SessionRepository {
   lockOpenOfUser(userId: string, now: Date): Promise<Session[]>;
 
   /**
+   * Method lockUnendedOfUser
+   *
+   * @description
+   * Reads and locks the sessions of an account that are neither revoked nor expired at an instant,
+   * idle ones included, in the order of their ids: the sessions a revocation of every other session
+   * must end, so that a later, longer inactivity of a policy cannot bring an idle one back.
+   *
+   * @param {string} userId - The account.
+   * @param {Date} now - The instant.
+   * @returns {Promise<Session[]>} The unended sessions.
+   */
+  lockUnendedOfUser(userId: string, now: Date): Promise<Session[]>;
+
+  /**
    * Method countOpen
    *
    * @description

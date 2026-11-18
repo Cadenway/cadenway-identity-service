@@ -4,8 +4,11 @@ import type { OutboxRelay, OutboxWriter } from '@cadenway/nest-messaging/outbox'
 import type { SessionsStore } from '../../../../../application/models/session/sessions-store.model.js';
 import type { SessionsUnitOfWork } from '../../../../../application/ports/outbound/transactions/session/sessions-unit-of-work.port.js';
 import { OutboxSessionEvents } from '../../../../messaging/outbox/session/outbox-session-events.adapter.js';
+import { DrizzleAuthenticationPolicyRepository } from '../../repositories/authentication-policy/drizzle-authentication-policy.repository.js';
 import { DrizzleOrganizationChoiceRepository } from '../../repositories/session/drizzle-organization-choice.repository.js';
 import { DrizzleSessionRepository } from '../../repositories/session/drizzle-session.repository.js';
+import { DrizzleTrustedDeviceRepository } from '../../repositories/session/drizzle-trusted-device.repository.js';
+import { DrizzleTwoStepEnrollmentRepository } from '../../repositories/session/drizzle-two-step-enrollment.repository.js';
 
 /**
  * Class SystemSessionsUnitOfWork
@@ -94,6 +97,9 @@ export class SystemSessionsUnitOfWork implements SessionsUnitOfWork {
         work({
           sessions: new DrizzleSessionRepository(transaction.db),
           organizationChoices: new DrizzleOrganizationChoiceRepository(transaction.db),
+          policies: new DrizzleAuthenticationPolicyRepository(transaction.db),
+          trustedDevices: new DrizzleTrustedDeviceRepository(transaction.db),
+          enrollments: new DrizzleTwoStepEnrollmentRepository(transaction.db),
           events: new OutboxSessionEvents(transaction, this.outbox, (): void => {
             appends.count += 1;
           }),

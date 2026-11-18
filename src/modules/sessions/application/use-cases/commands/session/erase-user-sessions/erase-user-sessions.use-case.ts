@@ -7,7 +7,8 @@ import type { EraseUserSessionsInput } from './erase-user-sessions.input.js';
  *
  * @description
  * Deletes every session of a deleted account, with the address and the `User-Agent` of its
- * browser, and the last organization the account chose (`user.deleted.v1`, decision 9 of P2c).
+ * browser, the last organization the account chose, its trusted devices and its two-step
+ * enrollment (`user.deleted.v1`, decision 9 of P2c; P2c-2).
  * The sessions were revoked when the deletion was scheduled, so nothing is revoked here and no
  * event is emitted. Runs in the system transaction of the deletion and joins it.
  */
@@ -54,6 +55,8 @@ export class EraseUserSessions {
     await this.unitOfWork.run(async (store: SessionsStore): Promise<void> => {
       await store.sessions.eraseOfUser(input.userId);
       await store.organizationChoices.erase(input.userId);
+      await store.trustedDevices.deleteOfUser(input.userId);
+      await store.enrollments.unenroll(input.userId);
     });
   }
   // #endregion

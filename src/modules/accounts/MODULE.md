@@ -17,11 +17,18 @@ Who the person is and how they prove it, before and after a session exists:
 - the seven authentication flows, the reading of an account and the update of its profile;
 - the security of the account (P2c-1): the change and the reset of the password, the confirmation of
   the password in a session (re-authentication), the change of address, and the scheduling, the
-  cancellation (by a sign-in) and the completion (by a durable job) of the deletion of the account.
+  cancellation (by a sign-in) and the completion (by a durable job) of the deletion of the account;
+- the two-step verification of the account (P2c-2, decisions 7 and 8 of P2c; Mfa and Compte ›
+  Sécurité of the mockup): the authenticator app (TOTP, RFC 6238), its secret sealed at rest; the
+  10 backup codes, stored as keyed hashes; up to 10 security keys (WebAuthn); the two-step challenge
+  of the sign-ins, answered with the app, a backup code or a key; the re-authentication with a code
+  of the app; and the disabling, refused while the policy of an organization requires it.
 
 It does not own sessions: a successful sign-in opens one through the sessions module, which owns
-them, their introspection, their list, their revocation and their recent authentication; nor the
-personal API tokens (the api-tokens module) nor the memberships (the memberships module).
+them, their introspection, their list, their revocation and their recent authentication, the
+trusted devices, the fact that an account has two-step verification, and the authentication
+policies of the organizations; nor the personal API tokens (the api-tokens module) nor the
+memberships (the memberships module).
 
 ## Public entry points
 
@@ -39,23 +46,33 @@ providers they export, in `composition/providers/adapters/accounts/`:
   `erase-user-sessions` of `sessions/public/session/`;
 - `AccountApiTokens` to `revoke-user-api-tokens` and `erase-user-api-tokens` of
   `api-tokens/public/api-token/`;
-- `OwnedOrganizations` to `memberships/public/membership/find-owned-organizations`.
+- `OwnedOrganizations` to `memberships/public/membership/find-owned-organizations`;
+- in `composition/providers/adapters/two-step/`, `TrustedDevices` to `trust-device`,
+  `check-trusted-device` and `forget-trusted-devices` of `sessions/public/trusted-device/`,
+  `TwoStepEnrollments` to `sessions/public/session/record-two-step-verification`, and
+  `TwoStepRequirements` to `sessions/public/authentication-policy/find-two-step-requirements`.
 
 Each of them runs in the system runner of the kit and joins the system transaction of the accounts
 use case that calls it.
 
 ## Owned tables
 
-| Table                     | Key                                    | Organization scoping                            |
-| ------------------------- | -------------------------------------- | ----------------------------------------------- |
-| `users`                   | `id`, unique `email`                   | None: an account belongs to a person, no policy |
-| `password_credentials`    | `user_id` (cascade)                    | None: follows its account, no policy            |
-| `one_time_codes`          | `id`; one current per user and purpose | None: follows its account, no policy            |
-| `password_reset_links`    | `id`, unique `token_hash`; one current | None: follows its account (cascade), no policy  |
-| `email_changes`           | `user_id` (cascade)                    | None: follows its account, no policy            |
-| `code_requests`           | `email`                                | None: per address, account or not, no policy    |
-| `password_reset_requests` | `email`                                | None: per address, account or not, no policy    |
-| `sign_in_attempts`        | `email`                                | None: per address, account or not, no policy    |
+| Table                        | Key                                                   | Organization scoping                            |
+| ---------------------------- | ----------------------------------------------------- | ----------------------------------------------- |
+| `users`                      | `id`, unique `email`                                  | None: an account belongs to a person, no policy |
+| `password_credentials`       | `user_id` (cascade)                                   | None: follows its account, no policy            |
+| `one_time_codes`             | `id`; one current per user and purpose                | None: follows its account, no policy            |
+| `password_reset_links`       | `id`, unique `token_hash`; one current                | None: follows its account (cascade), no policy  |
+| `email_changes`              | `user_id` (cascade)                                   | None: follows its account, no policy            |
+| `code_requests`              | `email`                                               | None: per address, account or not, no policy    |
+| `password_reset_requests`    | `email`                                               | None: per address, account or not, no policy    |
+| `sign_in_attempts`           | `email`                                               | None: per address, account or not, no policy    |
+| `two_step_verifications`     | `user_id` (cascade), unique `webauthn_user_handle`    | None: follows its account, no policy            |
+| `backup_codes`               | `id`, unique (`user_id`, `code_hash`) (cascade)       | None: follows its account, no policy            |
+| `security_keys`              | `id`, unique `credential_id` (cascade)                | None: follows its account, no policy            |
+| `authenticator_app_setups`   | `user_id` (cascade)                                   | None: follows its account, no policy            |
+| `security_key_registrations` | `user_id` (cascade)                                   | None: follows its account, no policy            |
+| `sign_in_challenges`         | `id`, unique `user_id`, unique `token_hash` (cascade) | None: follows its account, no policy            |
 
 Created by `migrations/0001_accounts_and_sessions.sql`; `users.sign_up_count` by
 `migrations/0002_sign_up_count.sql`, which backfills it from the version; `users.display_name`,
@@ -64,7 +81,19 @@ Created by `migrations/0001_accounts_and_sessions.sql`; `users.sign_up_count` by
 them; `users.password_changed_at` (backfilled from the credential), `users.delete_at`,
 `users.deletion_checked_at` (with a partial index on `delete_at`), `password_reset_links`,
 `password_reset_requests` and `email_changes` by `migrations/0004_account_security.sql`.
-`email_changes.session_id` names a session of the sessions module without a foreign key. Row-level
+The six tables of two-step verification come from `migrations/0005_two_step_verification.sql`, which
+only creates them (expand only): `two_step_verifications` holds the sealed secret of the app
+(`authenticator_secret`), when it was configured, the last accepted time step, the WebAuthn handle of
+the account, the count of wrong answers (0 to 5, checked) and the end of a lockout, when the backup
+codes were generated and when two-step verification was turned on; `backup_codes` the HMAC of each
+code and when it was used; `security_keys` the credential id, the public key (COSE, base64url), the
+signature counter, the transports, the backup flags and the last use of each key, read by account
+through the index on `user_id`; `authenticator_app_setups` and `security_key_registrations` the one
+pending setup and registration of an account, with their session and expiry; `sign_in_challenges`
+the one open challenge of an account (the SHA-256 of its token, its `rememberMe`, its expiry and the
+WebAuthn challenge of its latest options). `email_changes.session_id`,
+`authenticator_app_setups.session_id` and `security_key_registrations.session_id` name a session of
+the sessions module without a foreign key. Row-level
 security applies to the tables with an `organization_id` (`cw-database-conventions`); none of these
 has one, since the contracts give an account, its codes, its links and its lockout no organization
 (`organizationId` is always `null` in `asyncapi/identity-service.yaml`). So they carry no policy and
@@ -81,53 +110,81 @@ The jobs of `account.deletion-sweep` and `account.delete` live in the `pgboss` s
 From `openapi/internal/identity-service.yaml` of the installed `@cadenway/contracts`; issuer
 `api-gateway` only, no organization.
 
-| Route                                                        | Actor       | Success         | Refusals                                                                                                                      |
-| ------------------------------------------------------------ | ----------- | --------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `POST /internal/v1/auth/sign-in-methods`                     | `anonymous` | 200             | 400                                                                                                                           |
-| `POST /internal/v1/auth/sign-up`                             | `anonymous` | 202             | 400, 409 `auth.email-taken`, 422 terms or password, 429 `auth.code-throttled`                                                 |
-| `POST /internal/v1/auth/sign-up/code`                        | `anonymous` | 202             | 400, 429 `auth.code-throttled`                                                                                                |
-| `POST /internal/v1/auth/sign-up/verification`                | `anonymous` | 200             | 400, 422 `auth.code-invalid`, `auth.code-expired`, `auth.sign-up-replaced`                                                    |
-| `POST /internal/v1/auth/sign-in`                             | `anonymous` | 200             | 400, 403 `auth.email-not-verified`, 422 `auth.invalid-credentials`, 429 `auth.account-locked`                                 |
-| `POST /internal/v1/auth/sign-in/code`                        | `anonymous` | 202             | 400, 429 `auth.code-throttled`                                                                                                |
-| `POST /internal/v1/auth/sign-in/code/verification`           | `anonymous` | 200             | 400, 422 `auth.code-invalid`, `auth.code-expired`                                                                             |
-| `POST /internal/v1/auth/password-reset`                      | `anonymous` | 202             | 400, 429 `auth.reset-throttled`                                                                                               |
-| `POST /internal/v1/auth/password-reset/inspection`           | `anonymous` | 200             | 400, 422 `auth.reset-link-expired`                                                                                            |
-| `POST /internal/v1/auth/password-reset/confirmation`         | `anonymous` | 200             | 400, 422 `auth.reset-link-expired`, `auth.password-too-short`, `auth.password-compromised`                                    |
-| `POST /internal/v1/sessions/{sessionId}/reauthentication`    | `user`      | 200             | 400, 404 `session.not-found`, 422 `auth.password-incorrect`, 429 `auth.account-locked`                                        |
-| `GET /internal/v1/users/{userId}`                            | `user`      | 200, `ETag`     | 400, 404 `user.not-found`                                                                                                     |
-| `PATCH /internal/v1/users/{userId}`                          | `user`      | 200, `ETag`     | 400, 404 `user.not-found`, 412 `request.version-mismatch`                                                                     |
-| `PUT /internal/v1/users/{userId}/password`                   | `user`      | 200, `ETag`     | 400, 404 `user.not-found`, `session.not-found`, 422 password rules or `auth.password-incorrect`, 429 `auth.account-locked`    |
-| `POST /internal/v1/users/{userId}/email-change`              | `user`      | 202             | 400, 403 `auth.reauthentication-required`, 404, 409 `auth.email-taken`, 422 `auth.email-unchanged`, 429 `auth.code-throttled` |
-| `POST /internal/v1/users/{userId}/email-change/confirmation` | `user`      | 200, `ETag`     | 400, 404, 409 `auth.email-taken`, 422 `auth.code-invalid`, `auth.code-expired`                                                |
-| `POST /internal/v1/users/{userId}/deletion`                  | `user`      | 202, `deleteAt` | 400, 403 `auth.reauthentication-required`, 404, 409 `account.organization-owner`                                              |
+| Route                                                           | Actor       | Success                      | Refusals                                                                                                                                                                                                            |
+| --------------------------------------------------------------- | ----------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST /internal/v1/auth/sign-in-methods`                        | `anonymous` | 200                          | 400                                                                                                                                                                                                                 |
+| `POST /internal/v1/auth/sign-up`                                | `anonymous` | 202                          | 400, 409 `auth.email-taken`, 422 terms or password, 429 `auth.code-throttled`                                                                                                                                       |
+| `POST /internal/v1/auth/sign-up/code`                           | `anonymous` | 202                          | 400, 429 `auth.code-throttled`                                                                                                                                                                                      |
+| `POST /internal/v1/auth/sign-up/verification`                   | `anonymous` | 200                          | 400, 422 `auth.code-invalid`, `auth.code-expired`, `auth.sign-up-replaced`                                                                                                                                          |
+| `POST /internal/v1/auth/sign-in`                                | `anonymous` | 200, or 202 with a challenge | 400, 403 `auth.email-not-verified`, 422 `auth.invalid-credentials`, 429 `auth.account-locked`                                                                                                                       |
+| `POST /internal/v1/auth/sign-in/code`                           | `anonymous` | 202                          | 400, 429 `auth.code-throttled`                                                                                                                                                                                      |
+| `POST /internal/v1/auth/sign-in/code/verification`              | `anonymous` | 200, or 202 with a challenge | 400, 422 `auth.code-invalid`, `auth.code-expired`                                                                                                                                                                   |
+| `POST /internal/v1/auth/sign-in/challenge/inspection`           | `anonymous` | 200                          | 400, 422 `auth.challenge-expired`                                                                                                                                                                                   |
+| `POST /internal/v1/auth/sign-in/challenge/authenticator-app`    | `anonymous` | 200                          | 400, 422 `auth.challenge-expired`, `auth.two-step-code-invalid`, 429 `auth.two-step-locked`                                                                                                                         |
+| `POST /internal/v1/auth/sign-in/challenge/backup-code`          | `anonymous` | 200                          | 400, 422 `auth.challenge-expired`, `auth.two-step-code-invalid`, 429 `auth.two-step-locked`                                                                                                                         |
+| `POST /internal/v1/auth/sign-in/challenge/security-key/options` | `anonymous` | 200                          | 400, 422 `auth.challenge-expired`, `auth.security-key-refused`, 429 `auth.two-step-locked`                                                                                                                          |
+| `POST /internal/v1/auth/sign-in/challenge/security-key`         | `anonymous` | 200                          | 400, 422 `auth.challenge-expired`, `auth.security-key-refused`, 429 `auth.two-step-locked`                                                                                                                          |
+| `POST /internal/v1/auth/password-reset`                         | `anonymous` | 202                          | 400, 429 `auth.reset-throttled`                                                                                                                                                                                     |
+| `POST /internal/v1/auth/password-reset/inspection`              | `anonymous` | 200                          | 400, 422 `auth.reset-link-expired`                                                                                                                                                                                  |
+| `POST /internal/v1/auth/password-reset/confirmation`            | `anonymous` | 200                          | 400, 422 `auth.reset-link-expired`, `auth.password-too-short`, `auth.password-compromised`                                                                                                                          |
+| `POST /internal/v1/sessions/{sessionId}/reauthentication`       | `user`      | 200                          | 400, 403 `auth.reauthentication-required`, 404 `session.not-found`, 409 `auth.two-step-not-enabled`, 422 `auth.password-incorrect`, `auth.two-step-code-invalid`, 429 `auth.account-locked`, `auth.two-step-locked` |
+| `GET /internal/v1/users/{userId}`                               | `user`      | 200, `ETag`                  | 400, 404 `user.not-found`                                                                                                                                                                                           |
+| `PATCH /internal/v1/users/{userId}`                             | `user`      | 200, `ETag`                  | 400, 404 `user.not-found`, 412 `request.version-mismatch`                                                                                                                                                           |
+| `PUT /internal/v1/users/{userId}/password`                      | `user`      | 200, `ETag`                  | 400, 403 `auth.reauthentication-required`, 404 `user.not-found`, `session.not-found`, 422 password rules or `auth.password-incorrect`, 429 `auth.account-locked`                                                    |
+| `POST /internal/v1/users/{userId}/email-change`                 | `user`      | 202                          | 400, 403 `auth.reauthentication-required`, 404, 409 `auth.email-taken`, 422 `auth.email-unchanged`, 429 `auth.code-throttled`                                                                                       |
+| `POST /internal/v1/users/{userId}/email-change/confirmation`    | `user`      | 200, `ETag`                  | 400, 404, 409 `auth.email-taken`, 422 `auth.code-invalid`, `auth.code-expired`                                                                                                                                      |
+| `POST /internal/v1/users/{userId}/deletion`                     | `user`      | 202, `deleteAt`              | 400, 403 `auth.reauthentication-required`, 404, 409 `account.organization-owner`                                                                                                                                    |
+| `GET /internal/v1/users/{userId}/two-step-verification`         | `user`      | 200                          | 400, 404 `user.not-found`                                                                                                                                                                                           |
+| `POST .../two-step-verification/disable`                        | `user`      | 204                          | 400, 403 `auth.reauthentication-required`, 404, 409 `auth.mfa-required-by-organization`                                                                                                                             |
+| `POST .../two-step-verification/authenticator-app/setup`        | `user`      | 200                          | 400, 403 `auth.reauthentication-required`, 404                                                                                                                                                                      |
+| `POST .../authenticator-app/setup/confirmation`                 | `user`      | 200                          | 400, 404, 422 `auth.two-step-setup-expired`, `auth.two-step-code-invalid`                                                                                                                                           |
+| `POST .../two-step-verification/backup-codes/regenerate`        | `user`      | 200                          | 400, 403 `auth.reauthentication-required`, 404, 409 `auth.two-step-not-enabled`                                                                                                                                     |
+| `POST .../two-step-verification/security-keys/registration`     | `user`      | 200                          | 400, 403 `auth.reauthentication-required`, 404, 409 `auth.two-step-not-enabled`, `auth.security-key-limit-reached`                                                                                                  |
+| `POST .../two-step-verification/security-keys`                  | `user`      | 201, `Location`              | 400, 404, 409 `auth.two-step-not-enabled`, `auth.security-key-limit-reached`, 422 `auth.two-step-setup-expired`, `auth.security-key-refused`                                                                        |
+| `POST .../security-keys/{securityKeyId}/remove`                 | `user`      | 204                          | 400, 403 `auth.reauthentication-required`, 404 `user.not-found`, `session.not-found`, `security-key.not-found`                                                                                                      |
 
 Every route also answers the 401 and 403 of the internal token guard. A 429 carries `Retry-After`.
-The sign-ins answer `deletionCancelled` in their `200`. `403 auth.reauthentication-required` carries
-`details.methods: [password]`; `409 account.organization-owner` carries `details.organizationIds`.
+The sign-ins answer `deletionCancelled` in their `200`, and the answers of a challenge
+`trustedDevice` when asked. `403 auth.reauthentication-required` carries `details.methods`:
+`[password]` for an account without two-step verification, `[authenticator-app]` with it;
+`409 account.organization-owner` and `409 auth.mfa-required-by-organization` carry
+`details.organizationIds`, `422 auth.two-step-code-invalid` and `auth.security-key-refused`
+`details.remainingAttempts` (`null` where nothing is counted), `429 auth.two-step-locked`
+`details.lockedUntil` and `Retry-After`, `409 auth.security-key-limit-reached`
+`details.maxSecurityKeys`. `...` stands for `/internal/v1/users/{userId}/two-step-verification`.
 
 ## Events emitted
 
 All appended to the outbox in the transaction of the use case, in a system transaction, with
 `organizationId: null`.
 
-| Event                           | When                                                                      | Actor                                    |
-| ------------------------------- | ------------------------------------------------------------------------- | ---------------------------------------- |
-| `user.signed-up.v1`             | Each accepted sign-up, again with the next version                        | The user                                 |
-| `user.email-verified.v1`        | The code of a sign-up is accepted                                         | The user                                 |
-| `user.profile-updated.v1`       | A profile patch changed something                                         | The user                                 |
-| `user.password-changed.v1`      | A change (`method: change`) or a reset (`method: reset`) of the password  | The user                                 |
-| `user.email-changed.v1`         | The code of a change of address is accepted                               | The user                                 |
-| `user.deletion-scheduled.v1`    | The deletion of the account is scheduled                                  | The user                                 |
-| `user.deletion-cancelled.v1`    | A sign-in of an account whose deletion is scheduled                       | The user                                 |
-| `user.deleted.v1`               | The durable job deletes the account at `deleteAt`                         | `system`, identity-service               |
-| `one-time-code.issued.v1`       | A code is issued (sign-up, sign-up code, sign-in code, change of address) | `system`; the user for an `email-change` |
-| `password-reset-link.issued.v1` | A reset link is issued to a verified account                              | `system`, identity-service               |
+| Event                                   | When                                                                                                           | Actor                                    |
+| --------------------------------------- | -------------------------------------------------------------------------------------------------------------- | ---------------------------------------- |
+| `user.signed-up.v1`                     | Each accepted sign-up, again with the next version                                                             | The user                                 |
+| `user.email-verified.v1`                | The code of a sign-up is accepted                                                                              | The user                                 |
+| `user.profile-updated.v1`               | A profile patch changed something                                                                              | The user                                 |
+| `user.password-changed.v1`              | A change (`method: change`) or a reset (`method: reset`) of the password                                       | The user                                 |
+| `user.email-changed.v1`                 | The code of a change of address is accepted                                                                    | The user                                 |
+| `user.deletion-scheduled.v1`            | The deletion of the account is scheduled                                                                       | The user                                 |
+| `user.deletion-cancelled.v1`            | A sign-in of an account whose deletion is scheduled                                                            | The user                                 |
+| `user.deleted.v1`                       | The durable job deletes the account at `deleteAt`                                                              | `system`, identity-service               |
+| `one-time-code.issued.v1`               | A code is issued (sign-up, sign-up code, sign-in code, change of address)                                      | `system`; the user for an `email-change` |
+| `password-reset-link.issued.v1`         | A reset link is issued to a verified account                                                                   | `system`, identity-service               |
+| `user.two-step-verification-changed.v1` | Two-step verification turned on or off, its app replaced, its backup codes regenerated, a key added or removed | The user                                 |
 
 The security events carry what their e-mail shows: the address and name of the account, its language
 and time zone, and, where the contract says so, the device (read from the `User-Agent` by `bowser`)
 and the address of the browser; never a password, a code, a token or a link, but the two restricted
 ones. `session.revoked.v1` and `session.opened-on-new-device.v1`, which these flows cause, are
 appended by the sessions module in the same transaction.
+
+`user.two-step-verification-changed.v1` is appended once per change, with the next version of the
+account and its `change` (`enabled`, `disabled`, `authenticator-app-replaced`,
+`backup-codes-regenerated`, `security-key-added`, `security-key-removed`), the state after it
+(`enabled`, the configured methods, the backup codes left), the key added or removed (id and name),
+and the device and address of the browser for the security e-mail; never a secret, a code, a key or
+a token. Using a backup code to sign in emits nothing: the sign-in is not a change of the
+configuration.
 
 `one-time-code.issued.v1` and `password-reset-link.issued.v1` are restricted: listed in
 `restrictedEvents` from `RESTRICTED_EVENT_NAMES`, they are published on `restricted.<name>` into
@@ -182,8 +239,10 @@ None.
 - `passwordChangedAt` is set by the sign-up (and a later sign-up of a pending account), a change and
   a reset; a change and a reset take the next version.
 - A change of password checks, in this order, the account and the session, the new password
-  (without counting an attempt), then the current one. It keeps every session open, records a recent
-  authentication of the session of the request, ends the recent authentication of the others, and
+  (without counting an attempt), for an account with two-step verification a recent proof of the
+  session by a second factor (P2c-2), then the current one. It keeps every session open, records a
+  recent authentication of the session of the request (a password one, none for an account with
+  two-step verification, whose proof stays), ends the recent authentication of the others, and
   drops a pending change of address (decision 3 of P2c).
 - A reset link works once, for 30 minutes, from any browser; a newer link of the account and a
   change of address void it. A request answers the same way whether or not a verified account uses
@@ -211,8 +270,10 @@ None.
   kept, still scheduled, and checked again an hour later until it owns none or signs in; otherwise
   the account is erased (decision 9).
 - Erased with the account: the row of `users` (name, address, profile, preferences), its password,
-  codes, reset links and pending change of address (by their foreign keys), its sessions with their
-  address and `User-Agent` and its last organization choice (the sessions module), its personal API
+  codes, reset links, pending change of address and two-step verification (app, backup codes, keys,
+  pending setup and registration, challenge) by their foreign keys, its sessions with their address
+  and `User-Agent`, its last organization choice, its trusted devices and its enrollment (the
+  sessions module), its personal API
   tokens (the api-tokens module), and the throttles and lockout rows of its address. Kept: the copy
   of its memberships (ids and role), until the `member.removed.v1` organization-service emits on
   `user.deleted.v1` reaches it; the outbox rows of its past events, until their purge after 7 days
@@ -220,8 +281,45 @@ None.
 - "Nouvelle connexion": the password and the code sign-ins ask the sessions module to tell of a
   device the account did not use in the last 90 days; the sign-up verification, the first session of
   the account, asks for nothing.
-- Never logged, never stored in clear by this module: a password, a code, a token, a reset link or
-  the pepper.
+- Two-step verification is on while the account has an authenticator app: turning it on confirms
+  an app with one of its codes and draws 10 backup codes, returned once; it turns off by the
+  disabling only, which deletes the app, the keys, the backup codes, the pending setup and
+  registration and the open challenge, and forgets the trusted devices. Security keys need it on.
+- A code of the app is 6 digits for a 30-second step (SHA-1, RFC 6238), accepted one step early or
+  late, and once: its time step is recorded and a code of that step or an earlier one is refused,
+  in the sign-in challenge as in the re-authentication.
+- A backup code is `XXXX-XXXX` of digits and capital letters, typed with or without its dash, in
+  any case, and works once.
+- A right first factor of an account with two-step verification opens no session: it answers a
+  challenge of 10 minutes, the one open challenge of the account (a newer sign-in replaces it),
+  which keeps `rememberMe`; only its right answer opens the session, cancels a scheduled deletion
+  and counts the device. A device the account trusts skips it.
+- The wrong answers of the challenges and of the re-authentications by code of an account count
+  together: `remainingAttempts` from 4 to 1, then the fifth locks them for 15 minutes, during which
+  even a right answer is refused (`auth.two-step-locked`); a right answer resets the count. A
+  wrong code of a setup is not counted. The lockout of the password stays per address.
+- The WebAuthn options of a challenge last 5 minutes, the latest replacing the previous; an
+  assertion verifies against them, the exact origin of `WEBAUTHN_ORIGINS` (no cross-origin answer,
+  no `topOrigin`), the relying party `WEBAUTHN_RP_ID`, the signature, the counter, the key named by
+  the answer among the keys of the account, and `userHandle`, when present, equal to the handle of
+  the account. A credential id belongs to one account at most.
+- For an account with two-step verification, the guarded routes require a recent proof by a second
+  factor (`methods: [authenticator-app]`); a password never counts there, neither in the
+  re-authentication (refused before it is checked or counted) nor in the change of password (whose
+  current password is still required). The setup of an app, the start of a key registration, the
+  regeneration of the backup codes, the removal of a key and the disabling require a recent
+  authentication; the confirmation of a setup and the registration of a key ride on the one of their
+  start.
+- Turning two-step verification on ends the windows the other sessions opened with a password; a
+  change of the password voids the open challenge and the pending setups and registrations of the
+  other sessions, a reset those of every session, and both forget every trusted device, as the
+  scheduling of the deletion does.
+- The disabling is refused while an organization of the copy of the memberships requires two-step
+  verification for the role of the person (`auth.mfa-required-by-organization`); already off, it
+  answers `204` without a change.
+- Never logged, never stored in clear by this module: a password, a code, a token, a reset link, the
+  pepper, the secret of an app, a backup code, a WebAuthn answer or the token of a challenge or of a
+  trusted device.
 
 ## Transactions
 
@@ -259,11 +357,32 @@ the sessions, api-tokens and memberships modules join the transaction of the use
   outside any transaction); the last transaction settles the check the same way (a password that
   moved answers `auth.password-incorrect`), records the recent authentication through the sessions
   module and, for a change, writes the hash, the account, the dropped change of address, the end of
-  the recent authentication of the other sessions and the event together.
+  the recent authentication of the other sessions and the event together. For an account with
+  two-step verification the last transaction checks again, under the lock of the account, that the
+  session still has a recent proof by a second factor, and records none by password: two-step
+  verification turned on, or the window ended, during the check of the hash answers
+  `auth.reauthentication-required`.
+- Two-step challenge: the sign-in transaction that checks the first factor replaces the challenge
+  of the account (or, for a trusted device, opens the session). Each answer runs in one transaction:
+  the challenge is found by the hash of its token, the account locked, the challenge read again
+  `for update`, then the two-step verification locked; a wrong answer is committed with its count
+  and then refused; a right one uses the challenge up (and the backup code, or records the time step
+  of the code, or the counter and last use of the key), trusts the device when asked, opens the
+  session, cancels a scheduled deletion and appends its events together. The options of a key lock
+  the same rows and write the WebAuthn challenge of the challenge.
+- Two-step verification: each route locks the account, checks the session through the sessions
+  module, then locks the two-step verification; the confirmation of an app writes the app, the
+  backup codes, the enrollment (sessions module), the end of the password windows of the other
+  sessions, the recent authentication of the session, the account and the event together; the
+  disabling deletes the factors, forgets the trusted devices and writes the enrollment, the account
+  and the event together. The re-authentication by code runs in one transaction, its wrong code
+  committed with its count.
 - Lock order: the rows of an address (`sign_in_attempts`, `code_requests`,
   `password_reset_requests`) before the account of that address (a change of address locks the
   account, then the code row of the new address, which no verified account holds), the account before
-  its sessions, and the open
+  its two-step rows and its sessions and trusted devices: the lock of the account serializes every
+  two-step write of the account, so the order of the rows locked after it is not relied on (an answer
+  locks the challenge, then the two-step verification); and the open
   sessions of an account all at once in the order of their ids (sessions module). The reset
   confirmation and the completion of the deletion read the account first to learn its address, lock
   the rows of the address, then lock the account and check it again.
@@ -307,7 +426,7 @@ the sessions, api-tokens and memberships modules join the transaction of the use
   events or routes without an organization", and also says "never use it to serve the request of a
   user". These routes and events have no organization, the tenant runner refuses to run without
   one, and the outbox policy accepts `organizationId: null` in a system transaction only. The
-  exception is bounded: the system access touches the eight tables above, which carry no policy,
+  exception is bounded: the system access touches the fourteen tables above, which carry no policy,
   the outbox inserts with `organizationId: null`, and the rows of the other modules each port names
   by session id or account: the sessions and the last choice of the account, its personal API tokens
   in every organization (revoked at the scheduling, erased at the deletion), and the copy of its
@@ -373,6 +492,54 @@ the sessions, api-tokens and memberships modules join the transaction of the use
   sweep to enqueue the account again once the failed job row is purged (about a day,
   `deleteAfterSeconds` plus the daily maintenance of pg-boss) or runs the job again from the pg-boss
   tooling. The jobs pool holds 2 connections of its own, besides the 5 of the application pool.
+- Two-step verification (P2c-2) lives in this module: its factors are credentials of the account,
+  the challenge replaces the end of a sign-in this module owns, and a deletion erases them by the
+  foreign keys of `users`. What the sessions module needs (whether the account has it, the trusted
+  devices, the policies) lives there and is written through its public operations in the
+  transaction of the use case.
+- Keys derived from `PASSWORD_PEPPER` with HKDF-SHA-256, each under its own label: the argon2
+  secret, the code hashes, the sealing key of the secrets of the apps
+  (`cadenway identity-service authenticator apps v1`) and the backup code hashes
+  (`cadenway identity-service backup codes v1`). A secret of an app is sealed with AES-256-GCM, a
+  nonce of 96 random bits per seal and the account id as associated data, so a sealed secret copied
+  to another account does not open; it is stored as `k1.<nonce>.<ciphertext>.<tag>`, where `k1`
+  names the key version.
+- Rotating the sealing key would need: a new label (`... authenticator apps v2`) or a new secret
+  for `k2`; an adapter that opens both `k1` and `k2` and seals with `k2`; a backfill that opens
+  each `k1` secret and seals it again under `k2` in its own transaction; then, once no `k1` row is
+  left, a release that drops `k1`. Rotating `PASSWORD_PEPPER` itself would also need the argon2
+  hashes, the code hashes and the backup codes rehashed or regenerated, which this module cannot do
+  without the person (a new pepper invalidates every password); it is not planned.
+- A backup code is 8 symbols of 36 (digits and capital letters), about 41.4 bits (8 × log2 36), not
+  the 80 bits an earlier note of the security skill gave. With 5 wrong answers per account before a
+  15-minute lockout, shared with the codes of the app, an attacker who already has the password tries
+  at most 480 codes a day against 10 valid ones out of 36^8 (about 2.8 × 10^12): less than one chance
+  in 500 million a day. A code is stored as HMAC-SHA-256 under its own derived key, bound to the
+  account, so a leaked table cannot be checked offline without the pepper.
+- The lockout of the two-step answers is stored on `two_step_verifications` (`failed_answers`,
+  `locked_until`), per account, not per challenge: a new challenge (a new sign-in with the
+  password) does not reset it. The aggregate version of two-step verification is the version of the
+  account (`users.version`), which every change takes; the two-step tables carry no version of
+  their own.
+- The WebAuthn handle of an account is 256 random bits, drawn when two-step verification turns on
+  and kept when the app is replaced, unique across accounts; a key registered before a disabling is
+  deleted with it, so a handle never outlives its keys.
+- User verification is `preferred` and not required (`requireUserVerification: false`): the key is
+  a second factor after the password. The origin is checked exactly against `WEBAUTHN_ORIGINS`
+  before `@simplewebauthn/server` runs, which refuses a cross-origin answer or one with a
+  `topOrigin` that the library alone would accept. `WEBAUTHN_RP_ID` is the host of the web
+  application (`app.${DOMAIN}`, `app.cadenway.localhost` locally), which the configuration checks
+  is the host of every origin or a parent of it.
+- The disabling of an account already without two-step verification answers `204` before the
+  policy and the recent authentication: there is nothing to protect, and the contract calls it a
+  no-op. A setup started by a session can only be confirmed by that session.
+- `tests/two-step-verification.int-spec.ts` proves, on real PostgreSQL and NATS, the setup and its
+  confirmation, a sign-in answering 202 then 200 with a code of the app, a backup code working
+  once, a trusted device skipping the challenge and forgotten after a change of the password, a
+  security key registered and asserted with a software authenticator for the relying party
+  `app.cadenway.localhost` and the origin `http://app.cadenway.localhost`, 5 wrong answers then
+  429, the disabling refused under a policy, the organization withheld from a policy-bound member,
+  one event per change, the rollback and redelivery, and no secret in the logs.
 - `tests/auth-flows.int-spec.ts` proves each authentication route, the events and their routes, the
   binding of the verification to the password of the latest sign-up, concurrent attempts, the
   rollback of a unit of work, the redaction of a sent code in the outbox, and the absence of secrets
