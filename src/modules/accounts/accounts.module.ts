@@ -33,6 +33,7 @@ import { confirmEmailChangeProvider } from './composition/providers/use-cases/ac
 import { confirmPasswordResetProvider } from './composition/providers/use-cases/accounts/confirm-password-reset.provider.js';
 import { discoverSignInMethodsProvider } from './composition/providers/use-cases/accounts/discover-sign-in-methods.provider.js';
 import { enqueueDueAccountDeletionsProvider } from './composition/providers/use-cases/accounts/enqueue-due-account-deletions.provider.js';
+import { getNotificationRecipientProvider } from './composition/providers/use-cases/accounts/get-notification-recipient.provider.js';
 import { getUserProvider } from './composition/providers/use-cases/accounts/get-user.provider.js';
 import { inspectPasswordResetLinkProvider } from './composition/providers/use-cases/accounts/inspect-password-reset-link.provider.js';
 import { reauthenticateProvider } from './composition/providers/use-cases/accounts/reauthenticate.provider.js';
@@ -60,6 +61,7 @@ import { removeSecurityKeyProvider } from './composition/providers/use-cases/two
 import { startAuthenticatorAppSetupProvider } from './composition/providers/use-cases/two-step/start-authenticator-app-setup.provider.js';
 import { startSecurityKeyRegistrationProvider } from './composition/providers/use-cases/two-step/start-security-key-registration.provider.js';
 import { AccountSecurityController } from './presentation/http/controllers/accounts/account-security.controller.js';
+import { NotificationRecipientController } from './presentation/http/controllers/accounts/notification-recipient.controller.js';
 import { UsersController } from './presentation/http/controllers/accounts/users.controller.js';
 import { AuthController } from './presentation/http/controllers/authentication/auth.controller.js';
 import { ReauthenticationController } from './presentation/http/controllers/authentication/reauthentication.controller.js';
@@ -93,6 +95,7 @@ import { TwoStepVerificationController } from './presentation/http/controllers/t
     PasswordResetController,
     ReauthenticationController,
     UsersController,
+    NotificationRecipientController,
     AvatarsController,
     AccountSecurityController,
     TwoStepVerificationController,
@@ -126,6 +129,7 @@ import { TwoStepVerificationController } from './presentation/http/controllers/t
     requestSignInCodeProvider,
     signInWithCodeProvider,
     getUserProvider,
+    getNotificationRecipientProvider,
     updateUserProfileProvider,
     reauthenticateProvider,
     changePasswordProvider,

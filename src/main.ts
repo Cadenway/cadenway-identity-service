@@ -1,10 +1,10 @@
 import { createApplication, loadConfig, runApplication } from '@cadenway/nest-common';
 import type { NestExpressApplication } from '@nestjs/platform-express';
-import type { NextFunction, Request, Response } from 'express';
 
 import { AppModule } from './app.module.js';
 import { appConfigSchema } from './config/app-config.js';
 import type { AppConfig } from './config/app-config.js';
+import { configurePrivateHttpPolicies } from './infrastructure/private-http-policies.js';
 
 // Started after the instrumentation hooks and `telemetry.js`, with the heap capped for the 256M
 // container: `node --max-old-space-size=160 --import @cadenway/nest-common/register
@@ -30,16 +30,6 @@ await runApplication({ service: 'identity-service' }, async (): Promise<void> =>
       },
     },
   });
-  // The body parser can refuse a request before the private routes' middleware executes.
-  app.use(
-    [
-      '/internal/v1/realtime/tickets',
-      /^\/internal\/v1\/users\/[^/]+\/avatar(?:-reference|\/uploads(?:\/[^/]+)?)?\/?$/iu,
-    ],
-    (error: unknown, _request: Request, response: Response, next: NextFunction): void => {
-      response.setHeader('Cache-Control', 'no-store');
-      next(error);
-    },
-  );
+  configurePrivateHttpPolicies(app);
   await app.listen(config.PORT);
 });

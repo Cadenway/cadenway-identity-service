@@ -109,8 +109,8 @@ has no payload.
 
 ## API
 
-From `openapi/internal/identity-service.yaml` of the installed `@cadenway/contracts`; issuer
-`api-gateway` only, no organization.
+From `openapi/internal/identity-service.yaml` of the installed `@cadenway/contracts`. The account
+routes below accept `api-gateway`.
 
 | Route                                                           | Actor       | Success                      | Refusals                                                                                                                                                                                                            |
 | --------------------------------------------------------------- | ----------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -154,6 +154,13 @@ The sign-ins answer `deletionCancelled` in their `200`, and the answers of a cha
 `details.remainingAttempts` (`null` where nothing is counted), `429 auth.two-step-locked`
 `details.lockedUntil` and `Retry-After`, `409 auth.security-key-limit-reached`
 `details.maxSecurityKeys`. `...` stands for `/internal/v1/users/{userId}/two-step-verification`.
+
+Notification delivery jobs call `GET /internal/v1/users/{userId}/notification-recipient` with a
+`notification-service` system token that has no organization, role or scopes. The read returns only
+the verified current email address, language, IANA time zone and account version from the same
+account row. A missing, unverified or scheduled-for-deletion account returns `404 user.not-found`.
+An account state the service cannot read returns `503 upstream.unavailable`. All responses carry
+`Cache-Control: no-store`. The read appends no event.
 
 The avatar routes are under `/internal/v1/users/{userId}`. The API gateway reserves an upload
 with `POST /avatar/uploads`, reads its state with `GET /avatar/uploads/{uploadId}`, and sets or
