@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.4.0](https://github.com/Cadenway/cadenway-identity-service/compare/v0.3.0...v0.4.0) (2026-11-20)
+
+
+### Features
+
+* **accounts:** add the security of the account ([#31](https://github.com/Cadenway/cadenway-identity-service/issues/31)) ([79be172](https://github.com/Cadenway/cadenway-identity-service/commit/79be1726f470459d6b8aff796531c319094abdbc))
+* **accounts:** add two-step verification and the organization authentication policy ([#32](https://github.com/Cadenway/cadenway-identity-service/issues/32)) ([88d63f4](https://github.com/Cadenway/cadenway-identity-service/commit/88d63f4d40c50398c27d8bb8d3fb0c7a09011f26))
+* add the organization context, personal api tokens and the profile update ([#27](https://github.com/Cadenway/cadenway-identity-service/issues/27)) ([d980968](https://github.com/Cadenway/cadenway-identity-service/commit/d980968e7db9a01cf4d3835847070ef9b9259bed))
+* **identity:** issue and redeem single-use realtime tickets ([#34](https://github.com/Cadenway/cadenway-identity-service/issues/34)) ([e169b60](https://github.com/Cadenway/cadenway-identity-service/commit/e169b60586bf0d223c2e52a98e95aa577422cc05))
+* **identity:** reserve and manage account avatars ([#35](https://github.com/Cadenway/cadenway-identity-service/issues/35)) ([312877a](https://github.com/Cadenway/cadenway-identity-service/commit/312877a9339e33c709ae313eb5f1b066ecb47f21))
+* **identity:** resolve current verified activity email recipients ([#36](https://github.com/Cadenway/cadenway-identity-service/issues/36)) ([8fb38fe](https://github.com/Cadenway/cadenway-identity-service/commit/8fb38fe34018fddbe5140c3b1162c03b36a2c12d))
+
+
+### Bug Fixes
+
+* **memberships:** keep retrying member events for a day and adopt the kit contract codes ([#29](https://github.com/Cadenway/cadenway-identity-service/issues/29)) ([c0b685d](https://github.com/Cadenway/cadenway-identity-service/commit/c0b685d4e5f335d9984357bdf7d0cf125128dbc2))
+
 ## [0.3.0](https://github.com/Cadenway/cadenway-identity-service/compare/v0.2.0...v0.3.0) (2026-11-16)
 
 
