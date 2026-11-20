@@ -29,6 +29,7 @@ describe('appConfigSchema', () => {
       LOG_LEVEL: 'info',
       LOG_PRETTY: false,
       DATABASE_URL: 'postgres://identity_app:identity_app@localhost:5432/identity',
+      DATABASE_TRANSACTION_MAX_ATTEMPTS: 3,
       NATS_URL: 'nats://localhost:4222',
       NATS_USER: 'identity',
       NATS_PASSWORD: 'identity',
@@ -47,6 +48,15 @@ describe('appConfigSchema', () => {
       WEBAUTHN_RP_ID: 'app.cadenway.localhost',
       WEBAUTHN_ORIGINS: ['http://app.cadenway.localhost'],
     });
+  });
+
+  it('accepts one transaction attempt to disable retries', () => {
+    const config = loadConfig(appConfigSchema, {
+      ...complete,
+      DATABASE_TRANSACTION_MAX_ATTEMPTS: '1',
+    });
+
+    expect(config.DATABASE_TRANSACTION_MAX_ATTEMPTS).toBe(1);
   });
 
   it('accepts the committed .env.example as it is', () => {

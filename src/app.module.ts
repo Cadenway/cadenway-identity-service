@@ -81,6 +81,7 @@ import { SessionsModule } from './modules/sessions/sessions.module.js';
         connectionString: config.DATABASE_URL,
         applicationName: 'identity-service',
         idempotency: true,
+        transactionMaxAttempts: config.DATABASE_TRANSACTION_MAX_ATTEMPTS,
       }),
     }),
     MessagingModule.forRootAsync({
