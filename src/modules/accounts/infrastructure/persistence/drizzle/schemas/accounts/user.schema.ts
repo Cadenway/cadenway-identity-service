@@ -37,6 +37,8 @@ export default pgTable(
     displayName: text('display_name'),
     jobTitle: text('job_title'),
     timeZone: text('time_zone').notNull().default('Europe/Paris'),
+    avatarId: uuid('avatar_id'),
+    avatarGeneration: integer('avatar_generation').notNull().default(0),
     emailVerifiedAt: timestamp('email_verified_at', { withTimezone: true }),
     version: integer('version').notNull().default(1),
     signUpCount: integer('sign_up_count').notNull().default(1),
@@ -55,5 +57,6 @@ export default pgTable(
       .where(sql`${table.deleteAt} is not null`),
     check('users_version_check', sql`${table.version} >= 1`),
     check('users_sign_up_count_check', sql`${table.signUpCount} >= 1`),
+    check('users_avatar_generation_check', sql`${table.avatarGeneration} >= 0`),
   ],
 );

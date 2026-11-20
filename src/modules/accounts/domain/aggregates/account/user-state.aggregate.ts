@@ -85,6 +85,12 @@ export interface UserState {
    */
   readonly timeZone: string;
 
+  /** Current opaque avatar reference, absent on accounts restored from the older shape. */
+  readonly avatarId?: string | null;
+
+  /** Avatar generation and invalidation fence, zero before any avatar operation. */
+  readonly avatarGeneration?: number;
+
   /**
    * Property emailVerifiedAt
    *

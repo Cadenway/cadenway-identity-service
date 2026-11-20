@@ -60,6 +60,7 @@ use case that calls it.
 | Table                        | Key                                                   | Organization scoping                            |
 | ---------------------------- | ----------------------------------------------------- | ----------------------------------------------- |
 | `users`                      | `id`, unique `email`                                  | None: an account belongs to a person, no policy |
+| `avatar_uploads`             | `id`, unique owner and idempotency digest             | None: follows its account, no policy            |
 | `password_credentials`       | `user_id` (cascade)                                   | None: follows its account, no policy            |
 | `one_time_codes`             | `id`; one current per user and purpose                | None: follows its account, no policy            |
 | `password_reset_links`       | `id`, unique `token_hash`; one current                | None: follows its account (cascade), no policy  |
@@ -102,8 +103,9 @@ code by account and purpose, or its link by the hash of its token, and that a us
 account of its verified internal token. The application role `identity_app` reads and writes their
 rows and runs no DDL on them.
 
-The jobs of `account.deletion-sweep` and `account.delete` live in the `pgboss` schema of
-`@cadenway/nest-jobs`, provisioned by `src/migrate.ts`; their payloads hold ids only.
+The `account.deletion-sweep`, `account.delete` and `account.avatar-upload-expiry` queues live in
+the `pgboss` schema of `@cadenway/nest-jobs`, provisioned by `src/migrate.ts`. The avatar sweep
+has no payload.
 
 ## API
 
@@ -160,6 +162,14 @@ account row. A missing, unverified or scheduled-for-deletion account returns `40
 An account state the service cannot read returns `503 upstream.unavailable`. All responses carry
 `Cache-Control: no-store`. The read appends no event.
 
+The avatar routes are under `/internal/v1/users/{userId}`. The API gateway reserves an upload
+with `POST /avatar/uploads`, reads its state with `GET /avatar/uploads/{uploadId}`, and sets or
+clears the reference with `PUT /avatar` and `DELETE /avatar`. The first operation returns a 201
+with a reservation location. The writes return 204 and the account ETag. The reservation state and
+`GET /avatar-reference` return 200. A self request ignores the organization. To read another
+account's opaque reference, the gateway first establishes current member visibility and supplies
+the verified organization. Avatar responses are private.
+
 ## Events emitted
 
 All appended to the outbox in the transaction of the use case, in a system transaction, with
@@ -170,6 +180,8 @@ All appended to the outbox in the transaction of the use case, in a system trans
 | `user.signed-up.v1`                     | Each accepted sign-up, again with the next version                                                             | The user                                 |
 | `user.email-verified.v1`                | The code of a sign-up is accepted                                                                              | The user                                 |
 | `user.profile-updated.v1`               | A profile patch changed something                                                                              | The user                                 |
+| `user.avatar-changed.v1`                | The account adopts, replaces or clears its opaque avatar reference                                             | The user                                 |
+| `user.avatar-upload-abandoned.v1`       | The bounded expiry worker commits a terminal unused upload decision                                            | `system`, identity-service               |
 | `user.password-changed.v1`              | A change (`method: change`) or a reset (`method: reset`) of the password                                       | The user                                 |
 | `user.email-changed.v1`                 | The code of a change of address is accepted                                                                    | The user                                 |
 | `user.deletion-scheduled.v1`            | The deletion of the account is scheduled                                                                       | The user                                 |
@@ -184,6 +196,12 @@ and time zone, and, where the contract says so, the device (read from the `User-
 and the address of the browser; never a password, a code, a token or a link, but the two restricted
 ones. `session.revoked.v1` and `session.opened-on-new-device.v1`, which these flows cause, are
 appended by the sessions module in the same transaction.
+
+The avatar facts contain opaque account, asset and upload IDs only. The avatar generation
+orders reference changes independently of the account version. Each expiry occurrence selects
+up to 100 candidates and rechecks each reservation under its account lock before appending a
+terminal fact in the same transaction. The account deletion fact lets Storage retire all of
+the deleted account's reservations and images.
 
 `user.two-step-verification-changed.v1` is appended once per change, with the next version of the
 account and its `change` (`enabled`, `disabled`, `authenticator-app-replaced`,

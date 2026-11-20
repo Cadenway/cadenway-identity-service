@@ -8,6 +8,7 @@ import { InvalidUserStateError } from '../../errors/accounts/invalid-user-state.
 import { SignUpReplacedError } from '../../errors/accounts/sign-up-replaced.error.js';
 import { DeletionAlreadyScheduledError } from '../../errors/deletion/deletion-already-scheduled.error.js';
 import { EmailAddress } from '../../value-objects/email/email-address.value-object.js';
+import { AvatarUpload } from '../avatar-upload/avatar-upload.aggregate.js';
 import type { UserRegistration } from './user-registration.aggregate.js';
 import type { UserState } from './user-state.aggregate.js';
 import { User } from './user.aggregate.js';
@@ -218,6 +219,109 @@ describe('User', () => {
     );
     expect(() => account.updateProfile({ jobTitle: 'x'.repeat(121) })).toThrow(InvalidProfileError);
     expect(() => account.updateProfile({ timeZone: '' })).toThrow(InvalidProfileError);
+  });
+});
+
+describe('User avatar', () => {
+  const firstId = '019a7003-4d5e-7f6a-8b9c-0d1e2f3a4b01';
+  const secondId = '019a7003-4d5e-7f6a-8b9c-0d1e2f3a4b02';
+  const now = new Date('2026-11-20T09:00:00.000Z');
+
+  function reserve(user: User, id: string = firstId): AvatarUpload {
+    return AvatarUpload.reserve({
+      id,
+      userId: user.id,
+      generation: user.avatarGeneration,
+      now,
+      contentType: 'image/png',
+      sizeBytes: 48_292,
+    });
+  }
+
+  it('reads an account stored before avatars without an image reference', () => {
+    expect(unverified().avatarId).toBeNull();
+    expect(unverified().avatarGeneration).toBe(0);
+  });
+
+  it('publishes an opaque avatar and increments the avatar generation and account version', () => {
+    const user = unverified();
+    const result = user.publishAvatar(reserve(user), now, user.version);
+
+    expect(result.user.avatarId).toBe(firstId);
+    expect(result.user.avatarGeneration).toBe(1);
+    expect(result.user.version).toBe(user.version + 1);
+    expect(result.upload.snapshot.status).toBe('committed');
+    expect(result.change).toEqual({
+      userId: user.id,
+      generation: 1,
+      assetId: firstId,
+      oldAssetId: null,
+    });
+  });
+
+  it('refuses stale preconditions without changing the account or consuming a pending upload', () => {
+    const user = unverified().updateProfile({ displayName: 'Camille' }).user;
+    const pending = reserve(user);
+
+    expect(() => user.publishAvatar(pending, now, user.version - 1)).toThrow(
+      expect.objectContaining({ reason: 'version-mismatch' }),
+    );
+    expect(() => user.clearAvatar(user.version - 1)).toThrow(
+      expect.objectContaining({ reason: 'version-mismatch' }),
+    );
+    expect(user.avatarId).toBeNull();
+    expect(pending.snapshot.status).toBe('pending');
+  });
+
+  it('keeps the previous image active until a replacement is adopted and fences competing uploads', () => {
+    const user = unverified();
+    const initial = user.publishAvatar(reserve(user), now);
+    const competing = reserve(initial.user, '019a7003-4d5e-7f6a-8b9c-0d1e2f3a4b03');
+    const replacement = reserve(initial.user, secondId);
+
+    expect(initial.user.avatarId).toBe(firstId);
+    const replaced = initial.user.publishAvatar(replacement, now);
+    expect(replaced.change).toEqual({
+      userId: user.id,
+      generation: 2,
+      assetId: secondId,
+      oldAssetId: firstId,
+    });
+    expect(() => replaced.user.publishAvatar(competing, now)).toThrow(
+      expect.objectContaining({ reason: 'superseded' }),
+    );
+  });
+
+  it('replays a committed upload against the current account after removal without reinstating it', () => {
+    const user = unverified();
+    const first = user.publishAvatar(reserve(user), now);
+    const cleared = first.user.clearAvatar();
+
+    expect(cleared.user.avatarId).toBeNull();
+    expect(cleared.user.version).toBe(first.user.version + 1);
+    expect(cleared.change).toEqual({
+      userId: user.id,
+      generation: 2,
+      assetId: null,
+      oldAssetId: firstId,
+    });
+    const staleReplay = cleared.user.publishAvatar(first.upload, new Date('2026-11-21'), 1);
+    expect(staleReplay).toEqual({ user: cleared.user, upload: first.upload, change: null });
+  });
+
+  it('fences pending reservations on removal even when there was no active avatar', () => {
+    const user = unverified();
+    const pending = reserve(user);
+    const cleared = user.clearAvatar(user.version);
+
+    expect(cleared.user.version).toBe(user.version);
+    expect(cleared.user.avatarGeneration).toBe(user.avatarGeneration + 1);
+    expect(cleared.change).toBeNull();
+    expect(() => cleared.user.publishAvatar(pending, now)).toThrow(
+      expect.objectContaining({ reason: 'superseded' }),
+    );
+    const next = reserve(cleared.user, secondId);
+    expect(cleared.user.publishAvatar(next, now).user.avatarId).toBe(secondId);
   });
 });
 

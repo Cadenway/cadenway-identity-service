@@ -12,9 +12,18 @@ function isRecipientRequest(request: Request): boolean {
 }
 
 /** Install after the kit's JSON parser and before Nest registers the parameterized route. */
-export function configureNotificationRecipientHttpPolicy(
-  app: Pick<NestExpressApplication, 'use'>,
-): void {
+export function configurePrivateHttpPolicies(app: Pick<NestExpressApplication, 'use'>): void {
+  app.use(
+    [
+      '/internal/v1/realtime/tickets',
+      /^\/internal\/v1\/users\/[^/]+\/avatar(?:-reference|\/uploads(?:\/[^/]+)?)?\/?$/iu,
+    ],
+    (error: unknown, _request: Request, response: Response, next: NextFunction): void => {
+      response.setHeader('Cache-Control', 'no-store');
+      next(error);
+    },
+  );
+
   app.use((request: Request, response: Response, next: NextFunction): void => {
     if (isRecipientRequest(request)) {
       response.setHeader('Cache-Control', 'no-store');
