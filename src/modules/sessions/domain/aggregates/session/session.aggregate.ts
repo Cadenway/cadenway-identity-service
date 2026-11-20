@@ -158,6 +158,16 @@ export class Session {
   public get snapshot(): SessionState {
     return this.state;
   }
+
+  /** The earliest absolute or inactivity deadline, used for the P4 realtime session lease. */
+  public get activeUntil(): Date {
+    return new Date(
+      Math.min(
+        this.state.expiresAt.getTime(),
+        this.inactivityDeadline(this.state.inactivityTimeoutMinutes),
+      ),
+    );
+  }
   // #endregion
 
   // #region Constructor
@@ -267,7 +277,12 @@ export class Session {
    * @returns {boolean} `true` when that inactivity closes the session.
    */
   public isIdleLongerThan(minutes: number, now: Date): boolean {
-    return now.getTime() >= this.state.lastActiveAt.getTime() + minutes * 60_000;
+    return now.getTime() >= this.inactivityDeadline(minutes);
+  }
+
+  /** Millisecond timestamp at which the supplied inactivity rule stops the session. */
+  private inactivityDeadline(minutes: number): number {
+    return this.state.lastActiveAt.getTime() + minutes * 60_000;
   }
 
   /**

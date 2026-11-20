@@ -22,6 +22,9 @@ export interface SessionEvents {
    */
   sessionRevoked(session: Session, actorUserId: string): Promise<void>;
 
+  /** Appends the session's new organization selection version. */
+  sessionOrganizationChanged(session: Session): Promise<void>;
+
   /**
    * Method sessionOpenedOnNewDevice
    *

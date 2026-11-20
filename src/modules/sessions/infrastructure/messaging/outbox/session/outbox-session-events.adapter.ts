@@ -1,4 +1,7 @@
-import { eventSchemas } from '@cadenway/contracts/events/identity-service';
+import {
+  eventSchemas,
+  SESSION_ORGANIZATION_CHANGED_V1,
+} from '@cadenway/contracts/events/identity-service';
 import type { TransactionScope } from '@cadenway/nest-common/database';
 import type { OutboxWriter } from '@cadenway/nest-messaging/outbox';
 
@@ -84,6 +87,18 @@ export class OutboxSessionEvents implements SessionEvents {
     await this.outbox.append(this.transaction, eventSchemas, 'session.revoked.v1', {
       organizationId: null,
       actor: { type: 'user', id: actorUserId },
+      version: session.snapshot.version,
+      sessionId: session.id,
+      userId: session.userId,
+    });
+    this.onAppend();
+  }
+
+  /** Appends the new session version without exposing either organization or its membership. */
+  public async sessionOrganizationChanged(session: Session): Promise<void> {
+    await this.outbox.append(this.transaction, eventSchemas, SESSION_ORGANIZATION_CHANGED_V1, {
+      organizationId: null,
+      actor: { type: 'user', id: session.userId },
       version: session.snapshot.version,
       sessionId: session.id,
       userId: session.userId,

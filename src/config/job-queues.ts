@@ -35,6 +35,12 @@ export const ACCOUNT_DELETION_SWEEP_CRON: string = '*/10 * * * *';
  */
 export const ACCOUNT_DELETION_QUEUE: string = 'account.delete';
 
+/** System-only queue for removing expired realtime tickets. */
+export const REALTIME_TICKET_EXPIRY_QUEUE: string = 'session.realtime-ticket-expiry';
+
+/** Runs expiration every minute in UTC. */
+export const REALTIME_TICKET_EXPIRY_CRON: string = '* * * * *';
+
 /**
  * Constant jobQueues
  *
@@ -52,6 +58,8 @@ export const ACCOUNT_DELETION_QUEUE: string = 'account.delete';
  *   `account.delete.dead-letter`, kept 14 days (see the MODULE.md of the accounts module for what an
  *   operator does with it). A job waits 1 day at most to start, and a finished one is kept 1 day:
  *   the occurrence key holds that long.
+ * - `session.realtime-ticket-expiry` has two retries with backoff. The next sweep catches up
+ *   because the expiry time on the ticket determines eligibility.
  *
  * @type {readonly JobQueueDeclaration[]}
  */
@@ -76,5 +84,16 @@ export const jobQueues: readonly JobQueueDeclaration[] = [
     retentionSeconds: 86_400,
     deleteAfterSeconds: 86_400,
     deadLetterRetentionSeconds: 1_209_600,
+  },
+  {
+    name: REALTIME_TICKET_EXPIRY_QUEUE,
+    retryLimit: 2,
+    retryDelaySeconds: 10,
+    retryBackoff: true,
+    retryDelayMaxSeconds: 60,
+    expireInSeconds: 120,
+    retentionSeconds: 3_600,
+    deleteAfterSeconds: 3_600,
+    deadLetterRetentionSeconds: 86_400,
   },
 ];

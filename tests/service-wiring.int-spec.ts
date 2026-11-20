@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { generateKeyPairSync, randomUUID } from 'node:crypto';
+import { createHash, generateKeyPairSync, randomUUID } from 'node:crypto';
 import { createServer } from 'node:net';
 import { fileURLToPath } from 'node:url';
 
@@ -24,6 +24,12 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { AppModule } from '../src/app.module.js';
 import { appConfigSchema } from '../src/config/app-config.js';
+import { RealtimeTicketNotFound } from '../src/modules/sessions/application/models/realtime-ticket/realtime-ticket-not-found.model.js';
+import { RealtimeOrganizationNotSelected } from '../src/modules/sessions/application/models/realtime-ticket/realtime-organization-not-selected.model.js';
+import { SessionNotFound } from '../src/modules/sessions/application/models/session/session-not-found.model.js';
+import { IssueRealtimeTicket } from '../src/modules/sessions/application/use-cases/commands/realtime-ticket/issue-realtime-ticket/issue-realtime-ticket.use-case.js';
+import { RedeemRealtimeTicket } from '../src/modules/sessions/application/use-cases/commands/realtime-ticket/redeem-realtime-ticket/redeem-realtime-ticket.use-case.js';
+import { SystemExpiredRealtimeTicketsUnitOfWork } from '../src/modules/sessions/infrastructure/persistence/drizzle/transactions/session/system-expired-realtime-tickets.unit-of-work.js';
 
 // The service as main.ts assembles it, on a disposable PostgreSQL and NATS. `@cadenway/nest-testing`
 // does not export its container fixtures yet and a service never depends on `testcontainers` itself,
@@ -63,8 +69,8 @@ const platformTables = [
 
 /**
  * The tables of the business modules: accounts (users, credentials, codes, throttles, lockout,
- * reset links, pending changes of address, two-step verification), sessions (sessions, the last
- * organization each account chose, trusted devices, the accounts with two-step verification and the
+ * reset links, pending changes of address, two-step verification), sessions (sessions, realtime
+ * tickets, the last organization each account chose, trusted devices, two-step enrollments and the
  * authentication policies), memberships (the copy of the memberships) and api-tokens. Those with an
  * `organization_id` carry the forced policy of the kit.
  */
@@ -81,6 +87,7 @@ const businessTables = [
   'password_credentials',
   'password_reset_links',
   'password_reset_requests',
+  'realtime_tickets',
   'security_key_registrations',
   'security_keys',
   'sessions',
@@ -96,7 +103,7 @@ const businessTables = [
 const allTables = [...platformTables, ...businessTables].sort();
 
 /** Migrations of `migrations/meta/_journal.json`. */
-const migrationCount = 6;
+const migrationCount = 7;
 
 /**
  * Runs `docker compose` on the throwaway project.
@@ -398,6 +405,7 @@ describe('identity-service wiring', () => {
       'memberships',
       'organization_choices',
       'outbox_events',
+      'realtime_tickets',
       'sessions',
     ]);
     expect(tables.rows).toEqual(
@@ -421,6 +429,7 @@ describe('identity-service wiring', () => {
         policyname: 'organization_choices_organization_isolation',
       },
       { tablename: 'outbox_events', policyname: 'outbox_events_organization_isolation' },
+      { tablename: 'realtime_tickets', policyname: 'realtime_tickets_organization_isolation' },
       { tablename: 'sessions', policyname: 'sessions_organization_isolation' },
     ]);
   });
@@ -562,6 +571,280 @@ describe('identity-service wiring', () => {
     expect(deleted).toEqual([1, 1, 1, 1]);
   });
 
+  it('removes only expired realtime tickets in expiry order within the batch limit', async () => {
+    const system = service().get<SystemTransactionRunner>(SystemTransactionRunner);
+    const tenant = service().get(TenantTransactionRunner);
+    const sessionId: string = randomUUID();
+    const memberId: string = randomUUID();
+    // Keep the fixtures ahead of the real scheduled worker and use a fixed cutoff in the test.
+    const cutoff: Date = new Date(Date.now() + 3_600_000);
+    const expired: Date = new Date(cutoff.getTime() - 1_000);
+    const live: Date = new Date(cutoff.getTime() + 1_000);
+
+    await system.run(async ({ client }) => {
+      await client.query(
+        `insert into sessions
+           (id, user_id, organization_id, member_id, token_hash, persistent, ip_address,
+            last_active_at, expires_at)
+         values ($1, $2, $3, $4, repeat('a', 64), false, '192.0.2.1', now(),
+                 $5::timestamptz + interval '1 day')`,
+        [sessionId, camilleMartinId, atelierNordId, memberId, cutoff],
+      );
+      await client.query(
+        `insert into realtime_tickets
+           (token_hash, session_id, user_id, organization_id, member_id, session_version,
+            issued_at, expires_at)
+         select repeat(digest, 64), $1, $2, $3, $4, 1, expires - interval '30 seconds', expires
+           from (values ('b', $5::timestamptz), ('c', $6::timestamptz), ('d', $7::timestamptz))
+             as fixture(digest, expires)`,
+        [sessionId, camilleMartinId, atelierNordId, memberId, expired, cutoff, live],
+      );
+    });
+
+    const foreignRows = await runWithOrganizationContext(memberOf(otherOrganizationId), () =>
+      tenant.run(async ({ client }): Promise<number> => {
+        const { rows } = await client.query(
+          'select 1 from realtime_tickets where session_id = $1',
+          [sessionId],
+        );
+        return rows.length;
+      }),
+    );
+    expect(foreignRows).toBe(0);
+
+    const remaining = (): Promise<readonly Date[]> =>
+      system.run(async ({ client }): Promise<readonly Date[]> => {
+        const { rows } = await client.query(
+          'select expires_at from realtime_tickets where session_id = $1 order by expires_at',
+          [sessionId],
+        );
+        return (rows as { readonly expires_at: Date }[]).map(({ expires_at }) => expires_at);
+      });
+    const cleanup: SystemExpiredRealtimeTicketsUnitOfWork =
+      new SystemExpiredRealtimeTicketsUnitOfWork(system);
+
+    await expect(remaining()).resolves.toEqual([expired, cutoff, live]);
+    await expect(cleanup.deleteBatch(cutoff, 1)).resolves.toBe(1);
+    await expect(remaining()).resolves.toEqual([cutoff, live]);
+    await expect(cleanup.deleteBatch(cutoff, 1)).resolves.toBe(1);
+    await expect(cleanup.deleteBatch(cutoff, 1)).resolves.toBe(0);
+    await expect(remaining()).resolves.toEqual([live]);
+  });
+
+  describe('single-use realtime tickets', () => {
+    /** Creates an active organization membership and a session with two-step verification. */
+    async function ticketFixture(): Promise<{
+      readonly organizationId: string;
+      readonly userId: string;
+      readonly memberId: string;
+      readonly sessionId: string;
+    }> {
+      const organizationId = randomUUID();
+      const userId = randomUUID();
+      const memberId = randomUUID();
+      const sessionId = randomUUID();
+      const sessionHash = createHash('sha256').update(randomUUID()).digest('hex');
+      const system = service().get(SystemTransactionRunner);
+      await system.run(async ({ client }) => {
+        await client.query(
+          `insert into memberships (id, organization_id, user_id, role, version)
+           values ($1, $2, $3, 'member', 1)`,
+          [memberId, organizationId, userId],
+        );
+        await client.query(
+          `insert into authentication_policies (organization_id, two_step_verification_required_for)
+           values ($1, 'everyone')`,
+          [organizationId],
+        );
+        await client.query(
+          'insert into two_step_enrollments (user_id, enabled_at) values ($1, now())',
+          [userId],
+        );
+        await client.query(
+          `insert into sessions
+             (id, user_id, organization_id, member_id, token_hash, persistent, ip_address,
+              last_active_at, expires_at, authenticated_at, two_step_authenticated_at)
+           values ($1, $2, $3, $4, $5, false, '192.0.2.1', now(), now() + interval '1 hour',
+                   now(), now())`,
+          [sessionId, userId, organizationId, memberId, sessionHash],
+        );
+      });
+      return { organizationId, userId, memberId, sessionId };
+    }
+
+    it('stores only a digest and allows exactly one concurrent redemption', async () => {
+      const fixture = await ticketFixture();
+      const issue = service().get(IssueRealtimeTicket);
+      const redeem = service().get(RedeemRealtimeTicket);
+      const ticket = await issue.execute({
+        actorUserId: fixture.userId,
+        organizationId: fixture.organizationId,
+        sessionId: fixture.sessionId,
+      });
+      const digest = createHash('sha256').update(ticket.token).digest('hex');
+      const stored = await service()
+        .get(SystemTransactionRunner)
+        .run(({ client }) =>
+          client.query(
+            'select token_hash, redeemed_at from realtime_tickets where session_id = $1',
+            [fixture.sessionId],
+          ),
+        );
+      expect(stored.rows).toEqual([{ token_hash: digest, redeemed_at: null }]);
+
+      const outcomes = await Promise.allSettled([
+        redeem.execute({ token: ticket.token }),
+        redeem.execute({ token: ticket.token }),
+      ]);
+      const success = outcomes.filter((result) => result.status === 'fulfilled');
+      const failure = outcomes.filter((result) => result.status === 'rejected');
+      expect(success).toHaveLength(1);
+      expect(failure).toHaveLength(1);
+      expect(success[0]).toMatchObject({
+        value: {
+          userId: fixture.userId,
+          organizationId: fixture.organizationId,
+          memberId: fixture.memberId,
+          sessionId: fixture.sessionId,
+          role: 'member',
+        },
+      });
+      const rejected = failure[0];
+      expect(
+        rejected?.status === 'rejected' && rejected.reason instanceof RealtimeTicketNotFound,
+      ).toBe(true);
+    });
+
+    it('refuses issuance for another organization or another session actor', async () => {
+      const fixture = await ticketFixture();
+      const issue = service().get(IssueRealtimeTicket);
+      await expect(
+        issue.execute({
+          actorUserId: fixture.userId,
+          organizationId: randomUUID(),
+          sessionId: fixture.sessionId,
+        }),
+      ).rejects.toBeInstanceOf(RealtimeOrganizationNotSelected);
+      await expect(
+        issue.execute({
+          actorUserId: randomUUID(),
+          organizationId: fixture.organizationId,
+          sessionId: fixture.sessionId,
+        }),
+      ).rejects.toBeInstanceOf(SessionNotFound);
+    });
+
+    it('uses only the selected organization inactivity policy when another organization differs', async () => {
+      const fixture = await ticketFixture();
+      const system = service().get(SystemTransactionRunner);
+      await system.run(async ({ client }) => {
+        await client.query(
+          `insert into authentication_policies
+             (organization_id, session_inactivity_timeout_minutes)
+           values ($1, 60)`,
+          [randomUUID()],
+        );
+        await client.query(
+          "update sessions set last_active_at = now() - interval '2 hours' where id = $1",
+          [fixture.sessionId],
+        );
+      });
+      const issue = service().get(IssueRealtimeTicket);
+      const input = {
+        actorUserId: fixture.userId,
+        organizationId: fixture.organizationId,
+        sessionId: fixture.sessionId,
+      };
+      await expect(issue.execute(input)).resolves.toHaveProperty('expiresAt');
+      await system.run(({ client }) =>
+        client.query(
+          'update authentication_policies set session_inactivity_timeout_minutes = 60 where organization_id = $1',
+          [fixture.organizationId],
+        ),
+      );
+      await expect(issue.execute(input)).rejects.toBeInstanceOf(SessionNotFound);
+    });
+
+    it('uses the default inactivity limit when the selected organization has no policy', async () => {
+      const fixture = await ticketFixture();
+      const system = service().get(SystemTransactionRunner);
+      await system.run(async ({ client }) => {
+        await client.query('delete from authentication_policies where organization_id = $1', [
+          fixture.organizationId,
+        ]);
+        await client.query(
+          "update sessions set last_active_at = now() - interval '2 hours' where id = $1",
+          [fixture.sessionId],
+        );
+      });
+      const issue = service().get(IssueRealtimeTicket);
+      const input = {
+        actorUserId: fixture.userId,
+        organizationId: fixture.organizationId,
+        sessionId: fixture.sessionId,
+      };
+      await expect(issue.execute(input)).resolves.toHaveProperty('expiresAt');
+      await system.run(({ client }) =>
+        client.query(
+          "update sessions set last_active_at = now() - interval '13 hours' where id = $1",
+          [fixture.sessionId],
+        ),
+      );
+      await expect(issue.execute(input)).rejects.toBeInstanceOf(SessionNotFound);
+    });
+
+    it.each(['session', 'organization', 'membership', 'two-step', 'expiry'] as const)(
+      'refuses redemption after %s changes',
+      async (change) => {
+        const fixture = await ticketFixture();
+        const ticket = await service().get(IssueRealtimeTicket).execute({
+          actorUserId: fixture.userId,
+          organizationId: fixture.organizationId,
+          sessionId: fixture.sessionId,
+        });
+        await service()
+          .get(SystemTransactionRunner)
+          .run(async ({ client }) => {
+            switch (change) {
+              case 'session':
+                await client.query('update sessions set revoked_at = now() where id = $1', [
+                  fixture.sessionId,
+                ]);
+                break;
+              case 'organization':
+                await client.query(
+                  'update sessions set organization_id = null, member_id = null, version = version + 1 where id = $1',
+                  [fixture.sessionId],
+                );
+                break;
+              case 'membership':
+                await client.query('update memberships set removed_at = now() where id = $1', [
+                  fixture.memberId,
+                ]);
+                break;
+              case 'two-step':
+                await client.query('delete from two_step_enrollments where user_id = $1', [
+                  fixture.userId,
+                ]);
+                break;
+              case 'expiry':
+                await client.query(
+                  `update realtime_tickets
+                    set issued_at = date_trunc('milliseconds', now()) - interval '60 seconds',
+                        expires_at = date_trunc('milliseconds', now()) - interval '1 millisecond'
+                  where session_id = $1`,
+                  [fixture.sessionId],
+                );
+                break;
+            }
+          });
+        await expect(
+          service().get(RedeemRealtimeTicket).execute({ token: ticket.token }),
+        ).rejects.toBeInstanceOf(RealtimeTicketNotFound);
+      },
+    );
+  });
+
   it('refuses any change of structure to the application role', async () => {
     const system = service().get(SystemTransactionRunner);
     const statements = [
@@ -598,6 +881,8 @@ describe('identity-service wiring', () => {
       'account.delete.dead-letter',
       'account.deletion-sweep',
       'account.deletion-sweep.dead-letter',
+      'session.realtime-ticket-expiry',
+      'session.realtime-ticket-expiry.dead-letter',
     ]);
     await expect(
       system.run((tx) => tx.client.query('create table pgboss.wiring_probe (id integer)')),

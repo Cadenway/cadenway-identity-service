@@ -82,6 +82,9 @@ export class InMemorySessions implements SessionsUnitOfWork {
    */
   public revoked: { readonly session: Session; readonly actorUserId: string }[] = [];
 
+  /** Committed organization selection events. */
+  public organizationChanges: Session[] = [];
+
   /**
    * Property activityWrites
    *
@@ -174,6 +177,7 @@ export class InMemorySessions implements SessionsUnitOfWork {
     const revoked: { readonly session: Session; readonly actorUserId: string }[] = [
       ...this.revoked,
     ];
+    const organizationChanges: Session[] = [...this.organizationChanges];
     const writes: { count: number } = { count: this.activityWrites };
     const newDevices: {
       readonly session: Session;
@@ -353,6 +357,10 @@ export class InMemorySessions implements SessionsUnitOfWork {
         revoked.push({ session, actorUserId });
         return Promise.resolve();
       },
+      sessionOrganizationChanged: (session: Session): Promise<void> => {
+        organizationChanges.push(session);
+        return Promise.resolve();
+      },
       sessionOpenedOnNewDevice: (
         session: Session,
         client: { readonly device: DeviceDescription; readonly ipAddress: string },
@@ -449,6 +457,7 @@ export class InMemorySessions implements SessionsUnitOfWork {
     this.trustedDevices = devices;
     this.enrollments = enrolled;
     this.revoked = revoked;
+    this.organizationChanges = organizationChanges;
     this.activityWrites = writes.count;
     this.newDevices = newDevices;
     return result;

@@ -29,15 +29,16 @@ the sessions.
 | --------------------------------------------- | ------------------------------ |
 | `memberships.module`                          | sessions, api-tokens, accounts |
 | `public/membership/find-active-membership`    | sessions, api-tokens           |
+| `public/membership/lock-active-membership`    | sessions                       |
 | `public/membership/find-owned-organizations`  | accounts                       |
 | `public/membership/find-user-memberships`     | sessions                       |
 | `public/membership/find-organization-member`  | sessions                       |
 | `public/membership/list-organization-members` | sessions                       |
 
-`MembershipsModule` exports the `FindActiveMembership`, `FindOwnedOrganizations`,
+`MembershipsModule` exports the `FindActiveMembership`, `LockActiveMembership`, `FindOwnedOrganizations`,
 `FindUserMemberships`, `FindOrganizationMember` and `ListOrganizationMembers` providers, each with
 its input and output types. `FindActiveMembership`, `FindOwnedOrganizations` and
-`FindUserMemberships` run in the system transaction of their caller and join it; they must not be
+`FindUserMemberships` and `LockActiveMembership` run in the system transaction of their caller and join it; they must not be
 called from a tenant transaction (the kit refuses to open a system transaction inside a tenant one).
 `FindOrganizationMember` and `ListOrganizationMembers` run in the tenant transaction of their
 caller, the routes of the authentication policy, and join it.
@@ -159,6 +160,8 @@ then, within 7 days of its outbox retention, organization-service publishes the 
 - `FindActiveMembership` runs in the system transaction of its caller (`SystemMembershipsUnitOfWork`
   joins it): the choice of an organization, the opening and the introspection of a session, the
   introspection of an API token.
+- `LockActiveMembership` joins the system transaction of the ticket operation and holds the current
+  membership row until that transaction ends.
 - `FindOwnedOrganizations` runs in the system transaction of its caller and joins it: the scheduling
   of the deletion of an account and its completion by its durable job.
 - `FindUserMemberships` runs in the system transaction of its caller and joins it: the requirements

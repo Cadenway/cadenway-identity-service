@@ -15,8 +15,8 @@ paths:
 - Errors use the common format of `@cadenway/nest-common` with a stable machine `code`.
 - Every route requires the internal token (guard of nest-common) and declares with
   `@InternalAccess` the issuers, actors and organization requirement its contract states.
-  `openapi/internal/identity-service.yaml` accepts the issuer `api-gateway` only. The routes of the
-  personal API tokens (create, list, revoke) require an organization, the current one of the
-  session, and run in its tenant transaction; every other route requires none and ignores the one
-  the token may carry.
+  `api-gateway` is the usual issuer. Only the system `realtime-gateway` without an organization can
+  redeem a realtime ticket. Issuing that ticket requires the gateway's verified session user and
+  current organization. Personal API token operations require that organization and run in its
+  tenant transaction.
 - Never return a field the contract does not declare.
