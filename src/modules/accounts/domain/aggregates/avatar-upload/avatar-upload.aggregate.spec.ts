@@ -38,6 +38,17 @@ describe('AvatarUpload', () => {
     },
   );
 
+  it('reserves the exact second the signed transfer can represent without extending its lifetime', () => {
+    const upload = AvatarUpload.reserve({
+      id: uploadId,
+      ...declaration,
+      ...context,
+      now: new Date('2026-11-20T09:00:00.789Z'),
+    });
+
+    expect(upload.snapshot.expiresAt).toEqual(expiresAt);
+  });
+
   it('refuses a declaration above 5 MiB or without an accepted image content type', () => {
     expect(() =>
       AvatarUpload.reserve({

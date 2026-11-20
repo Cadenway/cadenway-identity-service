@@ -42,7 +42,8 @@ export class AvatarUpload {
       generation,
       contentType,
       sizeBytes,
-      expiresAt: new Date(now.getTime() + reservationMs),
+      // The signed S3 POST policy represents its deadline in whole seconds.
+      expiresAt: new Date(Math.floor((now.getTime() + reservationMs) / 1_000) * 1_000),
       status: 'pending',
     });
   }
