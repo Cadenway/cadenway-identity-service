@@ -12,7 +12,8 @@
 # release that reads them ships after that pull request.
 #
 # INTERNAL_TOKEN_TRUSTED_ISSUERS lists who may call this service: the API gateway and the realtime
-# gateway (ticket redemption). The folded scalar gives the service one line of JSON.
+# gateway (ticket redemption). The folded scalar gives the service one line of JSON. Stage the
+# optional Notification public keys in Identity before enabling the signed Notification caller.
 #
 # MIGRATION_DATABASE_URL is deliberately absent: the GitOps agent of cadenway-ops hands the
 # migrator's URL to the one-off migration container only (docs/database.md there), so the running
@@ -31,6 +32,7 @@ services:
       INTERNAL_TOKEN_TRUSTED_ISSUERS: >-
         {"api-gateway": [${API_GATEWAY_INTERNAL_TOKEN_PUBLIC_JWKS}],
         "realtime-gateway": [${REALTIME_GATEWAY_INTERNAL_TOKEN_PUBLIC_JWKS}]}
+      NOTIFICATION_SERVICE_INTERNAL_TOKEN_PUBLIC_JWKS: ${NOTIFICATION_SERVICE_INTERNAL_TOKEN_PUBLIC_JWKS:-}
       PASSWORD_PEPPER: ${IDENTITY_PASSWORD_PEPPER}
       WEBAUTHN_RP_ID: app.${DOMAIN}
       WEBAUTHN_ORIGINS: ${PUBLIC_SCHEME:-https}://app.${DOMAIN}

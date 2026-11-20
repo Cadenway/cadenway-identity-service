@@ -118,6 +118,49 @@ describe('appConfigSchema', () => {
     ).toThrow(/INTERNAL_TOKEN_TRUSTED_ISSUERS/u);
   });
 
+  it.each(['', 'null'])('leaves Notification trust disabled for %j', (keys) => {
+    expect(
+      loadConfig(appConfigSchema, {
+        ...complete,
+        NOTIFICATION_SERVICE_INTERNAL_TOKEN_PUBLIC_JWKS: keys,
+      }).INTERNAL_TOKEN_TRUSTED_ISSUERS,
+    ).not.toHaveProperty('notification-service');
+  });
+
+  it('trusts both public Notification keys during rotation', () => {
+    const firstKey = { kty: 'OKP', crv: 'Ed25519', x: 'A'.repeat(43), kid: 'first' };
+    const secondKey = { ...firstKey, x: 'B'.repeat(43), kid: 'second' };
+    const keys = [JSON.stringify(firstKey), JSON.stringify(secondKey)].join(',');
+
+    const config = loadConfig(appConfigSchema, {
+      ...complete,
+      NOTIFICATION_SERVICE_INTERNAL_TOKEN_PUBLIC_JWKS: keys,
+    });
+    expect(config.INTERNAL_TOKEN_TRUSTED_ISSUERS['notification-service']).toEqual([
+      firstKey,
+      secondKey,
+    ]);
+    expect(config.INTERNAL_TOKEN_TRUSTED_ISSUERS['api-gateway']).toHaveLength(1);
+  });
+
+  it('refuses a private key in the hosted public-key list without printing it', () => {
+    const keys = JSON.stringify({
+      kty: 'OKP',
+      crv: 'Ed25519',
+      x: 'A'.repeat(43),
+      kid: 'notification',
+      d: 'B'.repeat(43),
+    });
+    const read = () =>
+      loadConfig(appConfigSchema, {
+        ...complete,
+        NOTIFICATION_SERVICE_INTERNAL_TOKEN_PUBLIC_JWKS: keys,
+      });
+
+    expect(read).toThrow(/NOTIFICATION_SERVICE_INTERNAL_TOKEN_PUBLIC_JWKS/u);
+    expect(read).not.toThrow(/B{43}/u);
+  });
+
   it('refuses a pepper shorter than 32 characters, without printing it', () => {
     const secret: string = 'short-pepper-s3cret';
 

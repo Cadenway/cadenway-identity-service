@@ -23,7 +23,8 @@ import { z } from 'zod';
  *   accepts an anonymous local broker, but every broker of Cadenway refuses a connection without
  *   them.
  * - `INTERNAL_TOKEN_AUDIENCE` and `INTERNAL_TOKEN_TRUSTED_ISSUERS`: the `aud` this service accepts
- *   and the public keys of the backends allowed to call it.
+ *   and the public keys of the backends allowed to call it. Hosting can add verified Notification
+ *   public keys through `NOTIFICATION_SERVICE_INTERNAL_TOKEN_PUBLIC_JWKS`.
  * - `PASSWORD_PEPPER`: `passwordPepperConfigShape`, the secret every key of the service derives
  *   from: the secret key of the password hashes, the key of the one-time code hashes, the key that
  *   seals the authenticator-app secrets and the key of the backup code hashes.
@@ -177,6 +178,32 @@ function originsMatchRelyingParty(config: Readonly<WebAuthnConfig>): boolean {
   });
 }
 
+/** Validates the hosted public-key list with the same schema as the explicit issuer map. */
+const notificationPublicKeys = z
+  .string()
+  .trim()
+  .nullish()
+  .transform(
+    (value, context): InternalTokenVerifierConfig['INTERNAL_TOKEN_TRUSTED_ISSUERS'] | undefined => {
+      if (value == null || value === '' || value === 'null') {
+        return undefined;
+      }
+      try {
+        const keys: unknown = JSON.parse(`[${value}]`);
+        const issuers = internalTokenVerifierConfigShape.INTERNAL_TOKEN_TRUSTED_ISSUERS.safeParse(
+          JSON.stringify({ 'notification-service': keys }),
+        );
+        if (issuers.success) {
+          return issuers.data;
+        }
+      } catch {
+        // Never echo the raw JSON or unknown JWK properties in a configuration issue.
+      }
+      context.addIssue({ code: 'custom', message: 'Expected comma-separated public JWK objects.' });
+      return z.NEVER;
+    },
+  );
+
 /**
  * Constant appConfigSchema
  *
@@ -194,13 +221,21 @@ export const appConfigSchema: z.ZodType<AppConfig> = z
     ...databaseConfigShape,
     ...messagingConfigShape,
     ...internalTokenVerifierConfigShape,
+    NOTIFICATION_SERVICE_INTERNAL_TOKEN_PUBLIC_JWKS: notificationPublicKeys,
     ...passwordPepperConfigShape,
     ...webAuthnConfigShape,
   })
   .refine(originsMatchRelyingParty, {
     path: ['WEBAUTHN_ORIGINS'],
     error: 'Expected origins on the relying party WEBAUTHN_RP_ID or one of its subdomains.',
-  });
+  })
+  .transform(({ NOTIFICATION_SERVICE_INTERNAL_TOKEN_PUBLIC_JWKS, ...config }): AppConfig => ({
+    ...config,
+    INTERNAL_TOKEN_TRUSTED_ISSUERS: {
+      ...NOTIFICATION_SERVICE_INTERNAL_TOKEN_PUBLIC_JWKS,
+      ...config.INTERNAL_TOKEN_TRUSTED_ISSUERS,
+    },
+  }));
 
 /**
  * Interface MigrationConfig

@@ -99,6 +99,12 @@ each value comes from on a server.
 | `NATS_USER`, `NATS_PASSWORD`          | The service           | User `identity` and its password; inbox prefix `_INBOX.identity`                                                                                              |
 | `PASSWORD_PEPPER`                     | The service           | Secret of 32 characters at least, mixed into password and code hashes                                                                                         |
 
+For hosted deployment, release Identity with the recipient route first. Ops then supplies
+`NOTIFICATION_SERVICE_INTERNAL_TOKEN_PUBLIC_JWKS` to Identity as comma-separated public JWKs and
+verifies the trust before enabling the signed caller in Notification. An absent, empty or `null`
+value leaves Notification untrusted. The explicit issuer map takes precedence when it already
+contains `notification-service`.
+
 ### Calling the service locally
 
 Every route but `/health/*` requires an internal token. The key in `.env.example` is a placeholder

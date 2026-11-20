@@ -3,9 +3,11 @@ import { createHash, generateKeyPairSync, randomUUID } from 'node:crypto';
 import { createServer } from 'node:net';
 import { fileURLToPath } from 'node:url';
 
+import { GetNotificationRecipientInternalResponse } from '@cadenway/contracts/validators/internal/identity-service';
 import {
   createApplication,
   InternalTokenSigner,
+  JSON_BODY_LIMIT_BYTES,
   loadConfig,
   runWithOrganizationContext,
 } from '@cadenway/nest-common';
@@ -24,6 +26,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { AppModule } from '../src/app.module.js';
 import { appConfigSchema } from '../src/config/app-config.js';
+import { configureNotificationRecipientHttpPolicy } from '../src/infrastructure/notification-recipient-http-policy.js';
 import { RealtimeTicketNotFound } from '../src/modules/sessions/application/models/realtime-ticket/realtime-ticket-not-found.model.js';
 import { RealtimeOrganizationNotSelected } from '../src/modules/sessions/application/models/realtime-ticket/realtime-organization-not-selected.model.js';
 import { SessionNotFound } from '../src/modules/sessions/application/models/session/session-not-found.model.js';
@@ -176,9 +179,10 @@ function hostPort(service: string, port: string): string {
 /**
  * Creates an Ed25519 key pair in the JWK forms the internal token uses.
  *
+ * @param kid - Key id of the test issuer.
  * @returns The public key for the verifier and the private key for a signer.
  */
-function keyPair(): {
+function keyPair(kid = 'test-api-gateway'): {
   readonly publicJwk: Ed25519PublicJwk;
   readonly privateJwk: Ed25519PrivateJwk;
 } {
@@ -186,7 +190,7 @@ function keyPair(): {
   if (x === undefined || d === undefined) {
     throw new Error('Node returned an Ed25519 JWK without its key material.');
   }
-  const publicJwk: Ed25519PublicJwk = { kty: 'OKP', crv: 'Ed25519', x, kid: 'test-api-gateway' };
+  const publicJwk: Ed25519PublicJwk = { kty: 'OKP', crv: 'Ed25519', x, kid };
   return { publicJwk, privateJwk: { ...publicJwk, d } };
 }
 
@@ -249,8 +253,10 @@ class WiringProbeController {
 
 describe('identity-service wiring', () => {
   const gateway = keyPair();
+  const notification = keyPair('test-notification-service');
   let app: NestExpressApplication | undefined;
   let signer: InternalTokenSigner;
+  let notificationSigner: InternalTokenSigner;
   let migrator: pg.Pool;
 
   /**
@@ -308,6 +314,10 @@ describe('identity-service wiring', () => {
       'INTERNAL_TOKEN_TRUSTED_ISSUERS',
       JSON.stringify({ 'api-gateway': [gateway.publicJwk] }),
     );
+    vi.stubEnv(
+      'NOTIFICATION_SERVICE_INTERNAL_TOKEN_PUBLIC_JWKS',
+      JSON.stringify(notification.publicJwk),
+    );
     vi.stubEnv('PASSWORD_PEPPER', 'integration-test-password-pepper-000000000000');
     vi.stubEnv('WEBAUTHN_RP_ID', 'app.cadenway.localhost');
     vi.stubEnv('WEBAUTHN_ORIGINS', 'http://app.cadenway.localhost');
@@ -333,10 +343,15 @@ describe('identity-service wiring', () => {
       },
       logDestination: { write: (): void => undefined },
     });
+    configureNotificationRecipientHttpPolicy(app);
     await app.init();
     signer = await InternalTokenSigner.create({
       issuer: 'api-gateway',
       privateJwk: gateway.privateJwk,
+    });
+    notificationSigner = await InternalTokenSigner.create({
+      issuer: 'notification-service',
+      privateJwk: notification.privateJwk,
     });
   });
 
@@ -487,6 +502,155 @@ describe('identity-service wiring', () => {
     expect(response.body).toMatchObject({
       code: 'auth.token-invalid',
       details: { reason: 'audience' },
+    });
+  });
+
+  describe('notification recipient read', () => {
+    const systemActor = { type: 'system', id: 'notification-service' } as const;
+
+    it('returns only the current verified profile from the same account row', async () => {
+      const userId = randomUUID();
+      const unverifiedId = randomUUID();
+      const scheduledId = randomUUID();
+      const pendingEmail = `${userId}+pending@example.test`;
+      const email = `${userId}@example.test`;
+      const system = service().get(SystemTransactionRunner);
+      await system.run(async ({ client }) => {
+        await client.query(
+          `insert into users (id, email, name, email_verified_at, delete_at, language, time_zone, version)
+           values ($1, $4, 'Verified fixture', now(), null, 'fr', 'Europe/Paris', 3),
+                  ($2, $5, 'Unverified fixture', null, null, 'fr', 'Europe/Paris', 1),
+                  ($3, $6, 'Scheduled fixture', now(), now() + interval '1 day', 'fr', 'Europe/Paris', 1)`,
+          [
+            userId,
+            unverifiedId,
+            scheduledId,
+            email,
+            `${unverifiedId}@example.test`,
+            `${scheduledId}@example.test`,
+          ],
+        );
+        await client.query(
+          'insert into email_changes (user_id, session_id, email) values ($1, $2, $3)',
+          [userId, randomUUID(), pendingEmail],
+        );
+      });
+      const auth = await notificationSigner.sign('identity-service', {
+        actor: systemActor,
+        organizationId: null,
+      });
+      const read = (id: string) =>
+        request(service().getHttpServer())
+          .get(`/internal/v1/users/${id}/notification-recipient`)
+          .set('Authorization', `Bearer ${auth}`)
+          .set('If-None-Match', '*');
+
+      const original = await read(userId);
+      const expected = { email, language: 'fr', timeZone: 'Europe/Paris', version: 3 };
+      expect(original.status).toBe(200);
+      expect(original.headers['cache-control']).toBe('no-store');
+      expect(original.body).toEqual(expected);
+      expect(GetNotificationRecipientInternalResponse.parse(original.body)).toEqual(expected);
+
+      await system.run(({ client }) =>
+        client.query(
+          `update users set email = $2, language = 'en', time_zone = 'America/New_York',
+           version = version + 1 where id = $1`,
+          [userId, pendingEmail],
+        ),
+      );
+      const current = await read(userId);
+      expect(current.status).toBe(200);
+      expect(current.body).toEqual({
+        email: pendingEmail,
+        language: 'en',
+        timeZone: 'America/New_York',
+        version: 4,
+      });
+
+      await system.run(({ client }) => client.query('delete from users where id = $1', [userId]));
+      for (const id of [userId, unverifiedId, scheduledId, randomUUID()]) {
+        const missing = await read(id);
+        expect(missing.status).toBe(404);
+        expect(missing.headers['cache-control']).toBe('no-store');
+        expect(missing.body).toMatchObject({ code: 'user.not-found' });
+      }
+    });
+
+    it('requires the unscoped Notification system and accepts only the account path', async () => {
+      const server = request(service().getHttpServer());
+      const path = `/internal/v1/users/${camilleMartinId}/notification-recipient`;
+      const auth = await notificationSigner.sign('identity-service', {
+        actor: systemActor,
+        organizationId: null,
+      });
+      const gatewayAuth = await signer.sign('identity-service', {
+        actor: { type: 'system', id: 'api-gateway' },
+        organizationId: null,
+      });
+
+      const anonymous = await server.get(path);
+      expect(anonymous.status).toBe(401);
+      expect(anonymous.headers['cache-control']).toBe('no-store');
+      expect(anonymous.body).toMatchObject({ code: 'auth.token-missing' });
+
+      const wrongIssuer = await server.get(path).set('Authorization', `Bearer ${gatewayAuth}`);
+      expect(wrongIssuer.status).toBe(403);
+      expect(wrongIssuer.headers['cache-control']).toBe('no-store');
+      expect(wrongIssuer.body).toMatchObject({ code: 'auth.issuer-not-allowed' });
+
+      for (const claims of [
+        { actor: { type: 'user', id: camilleMartinId }, organizationId: null },
+        { actor: systemActor, organizationId: atelierNordId },
+        { actor: systemActor, organizationId: null, role: 'member' },
+        { actor: systemActor, organizationId: null, scopes: ['notifications:read'] },
+      ] as const) {
+        const scopedAuth = await notificationSigner.sign('identity-service', claims);
+        const forbidden = await server.get(path).set('Authorization', `Bearer ${scopedAuth}`);
+        expect(forbidden.status).toBe(403);
+        expect(forbidden.headers['cache-control']).toBe('no-store');
+        expect(forbidden.body).toMatchObject({ code: 'auth.actor-not-allowed' });
+      }
+
+      const unexpected = [
+        server.get(`${path}?unexpected=1`),
+        server.get('/internal/v1/users/invalid/notification-recipient'),
+        server.get(path).send({ unexpected: true }),
+      ];
+      for (const input of unexpected) {
+        const malformed = await input.set('Authorization', `Bearer ${auth}`);
+        expect(malformed.status).toBe(400);
+        expect(malformed.headers['cache-control']).toBe('no-store');
+        expect(malformed.body).toMatchObject({ code: 'request.invalid' });
+      }
+    });
+
+    it('keeps path decoding and parser refusals private at the HTTP boundary', async () => {
+      const server = request(service().getHttpServer());
+      const path = `/INTERNAL/v1/users/${camilleMartinId}/Notification-Recipient/`;
+      const auth = await notificationSigner.sign('identity-service', {
+        actor: systemActor,
+        organizationId: null,
+      });
+      const marker = 'private-input-probe';
+      const inputs = [
+        server.get(`/INTERNAL/v1/users/${marker}%ZZ/Notification-Recipient/`),
+        server.get(path).send({ probe: marker + 'x'.repeat(JSON_BODY_LIMIT_BYTES) }),
+        server.get(path).set('Content-Type', 'application/json; charset=iso-8859-1').send('{}'),
+        server.get(path).set('Content-Type', 'application/json').send(`{"${marker}":`),
+      ];
+
+      for (const input of inputs) {
+        const refused = await input.set('Authorization', `Bearer ${auth}`);
+        expect(refused.status).toBe(400);
+        expect(refused.headers['cache-control']).toBe('no-store');
+        expect(refused.body).toMatchObject({ code: 'request.invalid' });
+        expect(refused.text).not.toContain(marker);
+      }
+
+      const head = await server.head(path);
+      expect(head.status).toBe(401);
+      expect(head.headers['cache-control']).toBe('no-store');
     });
   });
 
@@ -1023,6 +1187,17 @@ describe('identity-service wiring', () => {
       status: 'error',
       error: { postgres: { status: 'down' } },
     });
+
+    const token = await notificationSigner.sign('identity-service', {
+      actor: { type: 'system', id: 'notification-service' },
+      organizationId: null,
+    });
+    const recipient = await request(service().getHttpServer())
+      .get(`/internal/v1/users/${camilleMartinId}/notification-recipient`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(recipient.status).toBe(503);
+    expect(recipient.headers['cache-control']).toBe('no-store');
+    expect(recipient.body).toMatchObject({ code: 'upstream.unavailable' });
   });
 
   it('answers 503 on readiness and 200 on liveness as soon as it shuts down', async () => {
