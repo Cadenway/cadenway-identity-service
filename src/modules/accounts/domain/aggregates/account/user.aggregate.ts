@@ -4,11 +4,15 @@ import { InvalidProfileError } from '../../errors/accounts/invalid-profile.error
 import { InvalidUserNameError } from '../../errors/accounts/invalid-user-name.error.js';
 import { InvalidUserStateError } from '../../errors/accounts/invalid-user-state.error.js';
 import { SignUpReplacedError } from '../../errors/accounts/sign-up-replaced.error.js';
+import { AvatarRefusal } from '../../errors/avatar/avatar-refusal.error.js';
 import { DeletionAlreadyScheduledError } from '../../errors/deletion/deletion-already-scheduled.error.js';
+import type { AvatarChanged } from '../../events/avatar/avatar-changed.event.js';
+import { isAvatarUploadId } from '../../policies/avatar/avatar-upload-id.policy.js';
 import type { EmailAddress } from '../../value-objects/email/email-address.value-object.js';
 import type { SignUpPasswordCheck } from '../../value-objects/password/sign-up-password-check.value-object.js';
 import type { ProfilePatch } from '../../value-objects/profile/profile-patch.value-object.js';
 import type { ProfileUpdate } from '../../value-objects/profile/profile-update.value-object.js';
+import type { AvatarUpload } from '../avatar-upload/avatar-upload.aggregate.js';
 import type { UserRegistration } from './user-registration.aggregate.js';
 import type { UserState } from './user-state.aggregate.js';
 
@@ -159,6 +163,16 @@ export class User {
    */
   public get id(): string {
     return this.state.id;
+  }
+
+  /** The current opaque avatar reference, independent of the account's organization. */
+  public get avatarId(): string | null {
+    return this.state.avatarId?.toLowerCase() ?? null;
+  }
+
+  /** The current avatar generation, including fences created by removal of an absent image. */
+  public get avatarGeneration(): number {
+    return this.state.avatarGeneration ?? 0;
   }
 
   /**
@@ -388,6 +402,16 @@ export class User {
     if (state.deleteAt !== null && state.emailVerifiedAt === null) {
       throw new InvalidUserStateError('only a verified account has a scheduled deletion');
     }
+    const avatarGeneration = state.avatarGeneration ?? 0;
+    if (!Number.isSafeInteger(avatarGeneration) || avatarGeneration < 0) {
+      throw new InvalidUserStateError('the avatar generation is a nonnegative integer');
+    }
+    if (
+      typeof state.avatarId === 'string' &&
+      (!isAvatarUploadId(state.avatarId) || avatarGeneration === 0)
+    ) {
+      throw new InvalidUserStateError('an avatar is an opaque reference in a positive generation');
+    }
     return new User(state);
   }
 
@@ -504,6 +528,60 @@ export class User {
       return { user: this, changed };
     }
     return { user: new User({ ...next, version: this.state.version + 1 }), changed };
+  }
+
+  /**
+   * Adopts Storage's prepared reservation under the account lock, as specified by
+   * `setAvatarInternal`. A committed replay returns the current account without re-adopting it.
+   */
+  public publishAvatar(
+    upload: AvatarUpload,
+    now: Date,
+    expectedVersion?: number,
+  ): { readonly user: User; readonly upload: AvatarUpload; readonly change: AvatarChanged | null } {
+    const adopted = upload.commit({ userId: this.id, generation: this.avatarGeneration, now });
+    if (adopted === upload) return { user: this, upload, change: null };
+    this.requireAvatarVersion(expectedVersion);
+    return { ...this.changeAvatar(adopted.snapshot.id), upload: adopted };
+  }
+
+  /**
+   * Clears the reference and fences older reservations, as specified by `deleteAvatarInternal`.
+   * With no active reference only the fence advances. The version and facts stay unchanged.
+   */
+  public clearAvatar(expectedVersion?: number): {
+    readonly user: User;
+    readonly change: AvatarChanged | null;
+  } {
+    this.requireAvatarVersion(expectedVersion);
+    return this.changeAvatar(null);
+  }
+
+  private requireAvatarVersion(expectedVersion: number | undefined): void {
+    if (expectedVersion !== undefined && expectedVersion !== this.version) {
+      throw new AvatarRefusal('version-mismatch', this.version);
+    }
+  }
+
+  private changeAvatar(assetId: string | null): {
+    readonly user: User;
+    readonly change: AvatarChanged | null;
+  } {
+    const oldAssetId = this.avatarId;
+    const generation = this.avatarGeneration + 1;
+    const changed = oldAssetId !== assetId;
+    const version = changed ? this.version + 1 : this.version;
+    if (!Number.isSafeInteger(generation) || !Number.isSafeInteger(version)) {
+      throw new AvatarRefusal('invalid-state');
+    }
+    const user = new User({
+      ...this.state,
+      avatarId: assetId,
+      avatarGeneration: generation,
+      version,
+    });
+    const change = changed ? { userId: this.id, generation, assetId, oldAssetId } : null;
+    return { user, change };
   }
 
   /**

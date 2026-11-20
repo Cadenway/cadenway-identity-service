@@ -27,7 +27,7 @@
     "quality": "pnpm format:check && pnpm test:lint && pnpm lint && pnpm typecheck && pnpm test:architecture && pnpm test:coverage && pnpm build"
   },
   "dependencies": {
-    "@cadenway/contracts": "0.17.0",
+    "@cadenway/contracts": "0.19.0",
     "@cadenway/nest-common": "0.8.1",
     "@cadenway/nest-jobs": "0.3.0",
     "@cadenway/nest-messaging": "0.3.2",

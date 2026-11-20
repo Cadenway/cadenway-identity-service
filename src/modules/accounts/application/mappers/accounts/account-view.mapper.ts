@@ -18,6 +18,7 @@ export function toAccountView(user: User): AccountView {
     language: user.language,
     displayName: user.displayName,
     jobTitle: user.jobTitle,
+    ...(user.avatarId === null ? {} : { avatarId: user.avatarId }),
     timeZone: user.timeZone,
     version: user.version,
     passwordChangedAt: user.passwordChangedAt,

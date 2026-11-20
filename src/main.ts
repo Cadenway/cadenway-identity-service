@@ -30,9 +30,12 @@ await runApplication({ service: 'identity-service' }, async (): Promise<void> =>
       },
     },
   });
-  // The body parser can refuse a request before the ticket routes' middleware executes.
+  // The body parser can refuse a request before the private routes' middleware executes.
   app.use(
-    '/internal/v1/realtime/tickets',
+    [
+      '/internal/v1/realtime/tickets',
+      /^\/internal\/v1\/users\/[^/]+\/avatar(?:-reference|\/uploads(?:\/[^/]+)?)?\/?$/iu,
+    ],
     (error: unknown, _request: Request, response: Response, next: NextFunction): void => {
       response.setHeader('Cache-Control', 'no-store');
       next(error);
