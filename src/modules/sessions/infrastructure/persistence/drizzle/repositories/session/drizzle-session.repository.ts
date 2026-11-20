@@ -65,10 +65,12 @@ function openAt(now: Date): SQL | undefined {
  *
  * @type {SQL<number>}
  */
-const INACTIVITY_TIMEOUT_MINUTES: SQL<number> =
-  sql<number>`coalesce((select ${policies.sessionInactivityTimeoutMinutes} from ${policies} where ${policies.organizationId} = ${sessions.organizationId}), ${sql.raw(String(Session.DEFAULT_INACTIVITY_TIMEOUT_MINUTES))})`.mapWith(
-    Number,
-  );
+const INACTIVITY_TIMEOUT_MINUTES: SQL<number> = sql<number>`coalesce((
+    select ${policies.sessionInactivityTimeoutMinutes}
+    from ${policies}
+    where ${policies}.${sql.identifier(policies.organizationId.name)}
+      = ${sessions}.${sql.identifier(sessions.organizationId.name)}
+  ), ${sql.raw(String(Session.DEFAULT_INACTIVITY_TIMEOUT_MINUTES))})`.mapWith(Number);
 
 /**
  * Constant SESSION_COLUMNS

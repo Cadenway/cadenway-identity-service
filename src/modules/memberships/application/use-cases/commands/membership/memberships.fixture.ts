@@ -77,6 +77,15 @@ export class InMemoryMemberships implements MembershipsUnitOfWork {
         );
         return Promise.resolve(state === undefined ? null : Membership.restore(state));
       },
+      lockActive: (organizationId: string, userId: string): Promise<Membership | null> => {
+        const state: MembershipState | undefined = [...rows.values()].findLast(
+          (row: MembershipState) =>
+            row.organizationId === organizationId &&
+            row.userId === userId &&
+            row.removedAt === null,
+        );
+        return Promise.resolve(state === undefined ? null : Membership.restore(state));
+      },
       findOwnedOrganizationIds: (userId: string): Promise<string[]> =>
         Promise.resolve(
           [

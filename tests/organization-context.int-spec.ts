@@ -3,6 +3,10 @@ import { createHash, generateKeyPairSync, randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 import {
+  SESSION_ORGANIZATION_CHANGED_V1,
+  sessionOrganizationChangedV1Schema,
+} from '@cadenway/contracts/events/identity-service';
+import {
   createApplication,
   encodeCursor,
   InternalTokenSigner,
@@ -615,6 +619,30 @@ describe('identity-service organization context', () => {
         organizationId: atelierNord,
         role: 'owner',
       });
+      const events = await systemQuery<{ readonly id: string; readonly payload: unknown }>(
+        `select id, payload from outbox_events
+         where event_name = $1 and payload->>'sessionId' = $2`,
+        [SESSION_ORGANIZATION_CHANGED_V1, camille.first.id],
+      );
+      expect(events).toHaveLength(1);
+      const event = events[0];
+      expect(sessionOrganizationChangedV1Schema.parse(event?.payload)).toEqual({
+        id: event?.id,
+        occurredAt: expect.any(String) as unknown,
+        organizationId: null,
+        actor: { type: 'user', id: people.camille },
+        version: 2,
+        sessionId: camille.first.id,
+        userId: people.camille,
+      });
+      await vi.waitFor(
+        async () => {
+          expect(
+            await systemQuery('select status from outbox_events where id = $1', [event?.id]),
+          ).toEqual([{ status: 'sent' }]);
+        },
+        { timeout: 20_000, interval: 250 },
+      );
     });
 
     it('refuses an organization the user is not a member of, or was removed from', async () => {
@@ -672,6 +700,13 @@ describe('identity-service organization context', () => {
         organizationId: studioSud,
         role: 'member',
       });
+      expect(
+        await systemQuery(
+          `select (payload->>'version')::int as version from outbox_events
+           where event_name = $1 and payload->>'sessionId' = $2 order by version`,
+          [SESSION_ORGANIZATION_CHANGED_V1, camille.first.id],
+        ),
+      ).toEqual([{ version: 2 }, { version: 3 }]);
     });
 
     it('starts a new session in the organization the user chose last', async () => {
@@ -725,7 +760,7 @@ describe('identity-service organization context', () => {
       });
     });
 
-    it('rolls back the choice and the session it moved when the work fails', async () => {
+    it('rolls back the choice, session and outbox event when the work fails', async () => {
       const session = await openSession(people.ines);
       const unitOfWork = new SystemSessionsUnitOfWork(
         app.get(SystemTransactionRunner),
@@ -742,12 +777,12 @@ describe('identity-service organization context', () => {
           if (loaded === null) {
             throw new Error('The session of Inès Robert is missing.');
           }
-          await store.sessions.chooseOrganization(
-            loaded.chooseOrganization(
-              { organizationId: atelierNord, memberId: members.inesAtelierNord },
-              new Date(),
-            ),
+          const chosen = loaded.chooseOrganization(
+            { organizationId: atelierNord, memberId: members.inesAtelierNord },
+            new Date(),
           );
+          await store.sessions.chooseOrganization(chosen);
+          await store.events.sessionOrganizationChanged(chosen);
           await store.organizationChoices.remember(people.ines, atelierNord);
           throw new Error('the work fails after its writes');
         }),

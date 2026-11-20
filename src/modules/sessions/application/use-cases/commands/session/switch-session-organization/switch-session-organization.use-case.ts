@@ -18,7 +18,8 @@ import type { SwitchSessionOrganizationOutput } from './switch-session-organizat
  * Makes an organization the current organization of a session of the actor, and the one its next
  * sessions start in (`PUT /internal/v1/sessions/{sessionId}/organization`, P2b plan, decision 2).
  * In one system transaction it locks the session, checks the active membership of the actor in the
- * copy of the memberships, then writes the session and the last choice of the account.
+ * copy of the memberships, then writes the session, the change event and the last choice of the
+ * account.
  *
  * - A session of another user, an unknown id, or a session that ended since its introspection is
  *   refused alike (`session.not-found`, which the gateway answers `401 auth.session-expired`).
@@ -131,6 +132,7 @@ export class SwitchSessionOrganization {
         const chosen: Session = session.chooseOrganization(membership, now, inactivity);
         if (chosen !== session) {
           await store.sessions.chooseOrganization(chosen);
+          await store.events.sessionOrganizationChanged(chosen);
         }
         await store.organizationChoices.remember(input.actorUserId, membership.organizationId);
         return { organizationId: membership.organizationId, role: membership.role };

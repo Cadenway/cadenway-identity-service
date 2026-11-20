@@ -21,6 +21,7 @@ const LEA_ID = '019a5f3c-8d2e-7c4a-9b1f-3e5d7a9c1b31';
 const ATELIER_NORD = '019a5f3c-8d2e-7c4a-9b1f-3e5d7a9c1b2f';
 const OTHER_ORGANIZATION = '019a5f3c-8d2e-7c4a-9b1f-3e5d7a9c1b2e';
 const MEMBER_ID = '019a6b10-0000-7000-8000-000000000001';
+const NEXT_MEMBER_ID = '019a6b10-0000-7000-8000-000000000002';
 
 describe('SwitchSessionOrganization', () => {
   let store: InMemorySessions;
@@ -69,6 +70,7 @@ describe('SwitchSessionOrganization', () => {
       version: 2,
     });
     expect(store.choices.get(CAMILLE_ID)).toBe(ATELIER_NORD);
+    expect(store.organizationChanges.map((session) => session.snapshot.version)).toEqual([2]);
   });
 
   it('leaves the session unchanged for its current organization, which stays the last choice', async () => {
@@ -82,6 +84,24 @@ describe('SwitchSessionOrganization', () => {
     });
     expect(store.sessions.get(opened.id)?.state.version).toBe(2);
     expect(store.choices.get(CAMILLE_ID)).toBe(ATELIER_NORD);
+    expect(store.organizationChanges).toHaveLength(1);
+  });
+
+  it('appends the next session version if the membership changes within the same organization', async () => {
+    const input = { actorUserId: CAMILLE_ID, sessionId: opened.id, organizationId: ATELIER_NORD };
+    await switchOrganization.execute(input);
+    memberships.join(CAMILLE_ID, {
+      memberId: NEXT_MEMBER_ID,
+      organizationId: ATELIER_NORD,
+      role: 'guest',
+    });
+
+    await expect(switchOrganization.execute(input)).resolves.toEqual({
+      organizationId: ATELIER_NORD,
+      role: 'guest',
+    });
+    expect(store.organizationChanges.map((session) => session.snapshot.version)).toEqual([2, 3]);
+    expect(store.organizationChanges[1]?.snapshot.memberId).toBe(NEXT_MEMBER_ID);
   });
 
   it('refuses an organization the actor is not a member of, and changes nothing', async () => {
@@ -98,6 +118,7 @@ describe('SwitchSessionOrganization', () => {
       version: 1,
     });
     expect(store.choices.size).toBe(0);
+    expect(store.organizationChanges).toEqual([]);
   });
 
   it('refuses a session of another user, an unknown one and one that ended', async () => {
@@ -173,6 +194,7 @@ describe('SwitchSessionOrganization', () => {
     ).rejects.toThrow(SessionNotFound);
     expect(store.sessions.get(opened.id)?.state.revokedAt).not.toBeNull();
     expect(store.revoked).toEqual([]);
+    expect(store.organizationChanges).toEqual([]);
     expect(store.choices.has(CAMILLE_ID)).toBe(false);
   });
 });

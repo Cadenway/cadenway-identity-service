@@ -59,6 +59,9 @@ export interface MembershipRepository {
    */
   findActive(organizationId: string, userId: string): Promise<Membership | null>;
 
+  /** Locks the latest active membership for this organization and account until transaction end. */
+  lockActive(organizationId: string, userId: string): Promise<Membership | null>;
+
   /**
    * Method findOwnedOrganizationIds
    *

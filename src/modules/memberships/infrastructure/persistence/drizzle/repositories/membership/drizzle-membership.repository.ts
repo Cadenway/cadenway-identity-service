@@ -80,6 +80,7 @@ export class DrizzleMembershipRepository implements MembershipRepository {
    */
   public async insertIfAbsent(membership: Membership): Promise<boolean> {
     const { id, organizationId, userId, role, version, removedAt } = membership.snapshot;
+    await this.lockIdentity(organizationId, userId);
     const inserted: { id: string }[] = await this.db
       .insert(memberships)
       .values({ id, organizationId, userId, role, version, removedAt })
@@ -135,6 +136,33 @@ export class DrizzleMembershipRepository implements MembershipRepository {
       .limit(1);
     const row: MembershipRow | undefined = rows[0];
     return row === undefined ? null : toMembership(row);
+  }
+
+  /** Locks the current membership and serializes new memberships for this account and organization. */
+  public async lockActive(organizationId: string, userId: string): Promise<Membership | null> {
+    await this.lockIdentity(organizationId, userId);
+    const rows: MembershipRow[] = await this.db
+      .select()
+      .from(memberships)
+      .where(
+        and(
+          eq(memberships.organizationId, organizationId),
+          eq(memberships.userId, userId),
+          isNull(memberships.removedAt),
+        ),
+      )
+      .orderBy(desc(memberships.createdAt), desc(memberships.id))
+      .limit(1)
+      .for('update');
+    const row: MembershipRow | undefined = rows[0];
+    return row === undefined ? null : toMembership(row);
+  }
+
+  /** Serializes selection with creation even when the membership row does not exist yet. */
+  private async lockIdentity(organizationId: string, userId: string): Promise<void> {
+    await this.db.execute(
+      sql`select pg_advisory_xact_lock(hashtextextended(${organizationId}::uuid::text || ':' || ${userId}::uuid::text, 0))`,
+    );
   }
 
   /**

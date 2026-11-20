@@ -60,6 +60,17 @@ export class DrizzleTwoStepEnrollmentRepository implements TwoStepEnrollmentRepo
     return rows.length === 1;
   }
 
+  /** Locks an existing enrollment until the caller's transaction completes. */
+  public async isEnrolledForUpdate(userId: string): Promise<boolean> {
+    const rows: { userId: string }[] = await this.db
+      .select({ userId: enrollments.userId })
+      .from(enrollments)
+      .where(eq(enrollments.userId, userId))
+      .limit(1)
+      .for('update');
+    return rows.length === 1;
+  }
+
   /**
    * Method enroll
    *

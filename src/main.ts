@@ -1,5 +1,6 @@
 import { createApplication, loadConfig, runApplication } from '@cadenway/nest-common';
 import type { NestExpressApplication } from '@nestjs/platform-express';
+import type { NextFunction, Request, Response } from 'express';
 
 import { AppModule } from './app.module.js';
 import { appConfigSchema } from './config/app-config.js';
@@ -15,7 +16,7 @@ import type { AppConfig } from './config/app-config.js';
 // route but the health probes requires an internal token whose `aud` is INTERNAL_TOKEN_AUDIENCE and
 // whose signature verifies with a key of INTERNAL_TOKEN_TRUSTED_ISSUERS; each route says which
 // issuer and actor it accepts, and the actor and organization of a request come from that token
-// only. No route of this service requires an organization yet.
+// only.
 await runApplication({ service: 'identity-service' }, async (): Promise<void> => {
   const config: Readonly<AppConfig> = loadConfig(appConfigSchema);
   const app: NestExpressApplication = await createApplication(AppModule, {
@@ -29,5 +30,13 @@ await runApplication({ service: 'identity-service' }, async (): Promise<void> =>
       },
     },
   });
+  // The body parser can refuse a request before the ticket routes' middleware executes.
+  app.use(
+    '/internal/v1/realtime/tickets',
+    (error: unknown, _request: Request, response: Response, next: NextFunction): void => {
+      response.setHeader('Cache-Control', 'no-store');
+      next(error);
+    },
+  );
   await app.listen(config.PORT);
 });

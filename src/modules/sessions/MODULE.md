@@ -7,6 +7,8 @@ The sign-in sessions of the browsers:
 - the opening of a session once the accounts module has verified a sign-in: an opaque token of 256
   random bits, returned once, of which only the SHA-256 is stored;
 - the introspection the API gateway calls on every request that carries the session cookie;
+- the issuance and single-use redemption of short-lived realtime tickets for a selected
+  organization;
 - the revocation of a session (the sign-out), of every other session ("Déconnecter les autres"),
   and of the sessions a password reset or the scheduling of a deletion closes;
 - the list of the open sessions of a person ("Sessions actives");
@@ -36,7 +38,8 @@ It does not own accounts, passwords, codes or the factors of two-step verificati
 module), nor the cookies, which the API gateway sets from the tokens, nor the memberships, which it
 reads through the `FindActiveMembership` and `FindUserMemberships` providers of the memberships
 module behind its own `ActiveMemberships` port, and through `FindOrganizationMember` and
-`ListOrganizationMembers` behind its `OrganizationMembers` port.
+`ListOrganizationMembers` behind its `OrganizationMembers` port. The realtime ticket access
+port uses `LockActiveMembership` to hold the active membership in the ticket transaction.
 
 ## Public entry points
 
@@ -86,6 +89,7 @@ has two-step verification.
 | `trusted_devices`         | `id`, unique `token_hash` | none: a device of an account                                |
 | `two_step_enrollments`    | `user_id`                 | none: a fact of an account                                  |
 | `authentication_policies` | `organization_id`         | `organization_id`, tenant table; policy forced              |
+| `realtime_tickets`        | `token_hash`              | `organization_id`, bound to the session; policy forced      |
 
 `sessions` was created by `migrations/0001_accounts_and_sessions.sql`; its `organization_id` and
 `member_id` (the membership it acts through, both `null` together) and `organization_choices` by
@@ -105,11 +109,15 @@ of `authenticated_at` when a second factor opened that window, `null` otherwise 
 written before it, and creates `trusted_devices` (the SHA-256 of the token
 of the cookie `__Host-cw_trusted_device`, its expiry, read by token hash and pruned by account
 through the index on `user_id`), `two_step_enrollments` (one row per account with two-step
-verification) and `authentication_policies` (one row per organization whose policy was patched,
-the default row inserted by the first patch, even one that moves nothing; none reads as `nobody`
+verification) and `authentication_policies` (one row per organization whose policy was locked,
+the default row inserted by the first lock; none reads as `nobody`
 and 720 minutes), whose forced policy the migration writes by hand, as for
 every `organization_id`. `user_id` names an account and `organization_id` an organization of
 another service, without a foreign key.
+
+`migrations/0006_realtime_tickets.sql` creates `realtime_tickets`. It stores the ticket digest,
+the session version, the account, the selected organization and membership, and the issuance,
+expiry and redemption times. Deleting a session also deletes its tickets.
 
 ## API
 
@@ -143,20 +151,29 @@ session acting on such an organization answers `withheldOrganization` with no or
 
 Every route also answers the 401 and 403 of the internal token guard.
 
+The realtime ticket operations are registered as private Sessions providers. Their HTTP entry
+points depend on the published P4 Identity contract.
+
 ## Events emitted
 
 | Event                             | When                                                                        | Actor                   |
 | --------------------------------- | --------------------------------------------------------------------------- | ----------------------- |
 | `session.revoked.v1`              | An active session is revoked: sign-out, revocation, others, reset, deletion | The user of the session |
+| `session.organization-changed.v1` | A selection changes the organization or membership, including the first one | The user of the session |
 | `session.opened-on-new-device.v1` | A sign-in opens a session on a device unused by the account for 90 days     | The user                |
 
 `session.revoked.v1` is appended to the outbox in the transaction of the revocation, with the version of the
 session after the revocation (one more than its last choice of an organization) and
 `organizationId: null`, which `asyncapi/identity-service.yaml` still fixes ("always `null` in this
 version") although a session now names its current organization. A session that only expires, or
-one revoked again, emits nothing. The choice of an organization emits nothing: the contract
-declares no event for it. No rebuild use case exists yet: no consumer keeps a projection of
-sessions.
+one revoked again, emits nothing.
+
+`session.organization-changed.v1` carries the persisted session version, the session and
+account IDs, and `organizationId: null`. The payload omits both organizations, the membership and
+the ticket. The realtime gateway uses the version to invalidate sockets with an older session
+version. Selecting the same membership or recording activity emits nothing. The outbox relay
+retries publication with the same event ID, and repeated or older deliveries cannot invalidate a
+newer socket.
 
 `session.opened-on-new-device.v1` is appended by `OpenSession`, in the transaction of the sign-in,
 when the sign-in asks for it (`newDeviceNotice`: the password and the code sign-ins, never the
@@ -201,6 +218,9 @@ accounts module.
   active membership there, else in none.
 - A revoked session never becomes active again; revoking an ended session answers 204 and emits
   nothing; a session of another user answers like an unknown id.
+- A realtime ticket can be redeemed once within 60 seconds and before the session ends. The
+  session version and the active membership must still match at redemption. The stored digest
+  resolves the ticket without carrying the credential into persistence.
 - The token is never logged, never stored, never in an event; the address and the `User-Agent` are
   never logged with it.
 - A session records its recent authentication at the sign-in that opens it, and again when its
@@ -244,7 +264,8 @@ session exists only if the sign-in commits (`tests/auth-flows.int-spec.ts` prove
 reads the last choice of the account and the copy of the memberships in that transaction. The
 revocation locks the session row, writes it and appends its event together. The choice of an
 organization locks the session, reads the copy of the memberships, and writes the session and the
-last choice together (`tests/organization-context.int-spec.ts` proves the rollback). The
+last choice together with the outbox row when the session changes
+(`tests/organization-context.int-spec.ts` proves the rollback). The
 introspection writes the last activity only when it moved by a minute, without a lock: a concurrent
 later write wins; it reads the copy of the memberships in the same transaction.
 
@@ -276,6 +297,17 @@ without two-step verification read the active memberships of the organization an
 enrollments in two queries. The introspection reads the inactivity of the policy of the current
 organization with the session, in the same query, then, for a session acting through an active
 membership, the policy and the enrollment of the account by their keys, for the withholding.
+
+`SystemRealtimeTicketsUnitOfWork` opens one system transaction for issuance or redemption. The
+authorization lookup locks policy, membership and any required enrollment first. The use case
+then locks the session and, for redemption, the ticket before rechecking their binding.
+
+The `session.realtime-ticket-expiry` job runs every minute in UTC without a payload or tenant
+context. It fixes the cutoff at the start of the attempt and deletes up to 100 expired tickets
+per system transaction through the expiry index. It skips locked rows and checks cancellation
+before each batch. Redemption enforces expiry separately. The next sweep picks up any still
+expired rows after a skipped or failed attempt. After two retries, inspect recurring dead letters
+in `session.realtime-ticket-expiry.dead-letter` and verify that subsequent sweeps resume.
 
 ## Decisions
 

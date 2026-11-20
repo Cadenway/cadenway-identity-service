@@ -1,16 +1,25 @@
-import { Module } from '@nestjs/common';
+import { Module, type MiddlewareConsumer, type NestModule } from '@nestjs/common';
+import type { NextFunction, Request, Response } from 'express';
 
 import { MembershipsModule } from '../memberships/memberships.module.js';
 import { organizationMembersProvider } from './composition/providers/adapters/authentication-policy/organization-members.provider.js';
+import { realtimeTicketAccessProvider } from './composition/providers/adapters/realtime-ticket/realtime-ticket-access.provider.js';
+import { realtimeTicketExpiryHandlerProvider } from './composition/providers/adapters/realtime-ticket/realtime-ticket-expiry-handler.provider.js';
+import { realtimeTicketUnitOfWorkProvider } from './composition/providers/adapters/realtime-ticket/realtime-ticket-unit-of-work.provider.js';
 import { updateAuthenticationPolicyProvider } from './composition/providers/use-cases/authentication-policy/update-authentication-policy.provider.js';
 import { checkOrganizationAccessProvider } from './composition/providers/use-cases/authentication-policy/check-organization-access.provider.js';
 import { findTwoStepRequirementsProvider } from './composition/providers/use-cases/authentication-policy/find-two-step-requirements.provider.js';
 import { getAuthenticationPolicyProvider } from './composition/providers/use-cases/authentication-policy/get-authentication-policy.provider.js';
+import { issueRealtimeTicketProvider } from './composition/providers/use-cases/realtime-ticket/issue-realtime-ticket.provider.js';
+import { purgeExpiredRealtimeTicketsProvider } from './composition/providers/use-cases/realtime-ticket/purge-expired-realtime-tickets.provider.js';
+import { redeemRealtimeTicketProvider } from './composition/providers/use-cases/realtime-ticket/redeem-realtime-ticket.provider.js';
 import { recordTwoStepVerificationProvider } from './composition/providers/use-cases/session/record-two-step-verification.provider.js';
 import { checkTrustedDeviceProvider } from './composition/providers/use-cases/trusted-device/check-trusted-device.provider.js';
 import { forgetTrustedDevicesProvider } from './composition/providers/use-cases/trusted-device/forget-trusted-devices.provider.js';
 import { trustDeviceProvider } from './composition/providers/use-cases/trusted-device/trust-device.provider.js';
 import { AuthenticationPolicyController } from './presentation/http/controllers/authentication-policy/authentication-policy.controller.js';
+import { IssueRealtimeTicketController } from './presentation/http/controllers/realtime-ticket/issue-realtime-ticket.controller.js';
+import { RedeemRealtimeTicketController } from './presentation/http/controllers/realtime-ticket/redeem-realtime-ticket.controller.js';
 import { CheckOrganizationAccess } from './public/authentication-policy/check-organization-access.js';
 import { FindTwoStepRequirements } from './public/authentication-policy/find-two-step-requirements.js';
 import { RecordTwoStepVerification } from './public/session/record-two-step-verification.js';
@@ -68,6 +77,8 @@ import { RevokeUserSessions } from './public/session/revoke-user-sessions.js';
     SessionsController,
     UserSessionsController,
     AuthenticationPolicyController,
+    IssueRealtimeTicketController,
+    RedeemRealtimeTicketController,
   ],
   providers: [
     sessionsUnitOfWorkProvider,
@@ -98,6 +109,12 @@ import { RevokeUserSessions } from './public/session/revoke-user-sessions.js';
     checkOrganizationAccessProvider,
     getAuthenticationPolicyProvider,
     updateAuthenticationPolicyProvider,
+    realtimeTicketUnitOfWorkProvider,
+    realtimeTicketAccessProvider,
+    issueRealtimeTicketProvider,
+    redeemRealtimeTicketProvider,
+    purgeExpiredRealtimeTicketsProvider,
+    realtimeTicketExpiryHandlerProvider,
   ],
   exports: [
     OpenSession,
@@ -116,4 +133,16 @@ import { RevokeUserSessions } from './public/session/revoke-user-sessions.js';
     CheckOrganizationAccess,
   ],
 })
-export class SessionsModule {}
+export class SessionsModule implements NestModule {
+  // #region Methods
+  /** Keeps ticket responses and guard refusals private. */
+  public configure(consumer: MiddlewareConsumer): void {
+    consumer
+      .apply((_request: Request, response: Response, next: NextFunction): void => {
+        response.setHeader('Cache-Control', 'no-store');
+        next();
+      })
+      .forRoutes(IssueRealtimeTicketController, RedeemRealtimeTicketController);
+  }
+  // #endregion
+}

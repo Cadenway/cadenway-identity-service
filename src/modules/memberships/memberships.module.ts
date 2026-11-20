@@ -10,11 +10,13 @@ import { findOrganizationMemberProvider } from './composition/providers/use-case
 import { findOwnedOrganizationsProvider } from './composition/providers/use-cases/membership/find-owned-organizations.provider.js';
 import { findUserMembershipsProvider } from './composition/providers/use-cases/membership/find-user-memberships.provider.js';
 import { listOrganizationMembersProvider } from './composition/providers/use-cases/membership/list-organization-members.provider.js';
+import { lockActiveMembershipProvider } from './composition/providers/use-cases/membership/lock-active-membership.provider.js';
 import { FindActiveMembership } from './public/membership/find-active-membership.js';
 import { FindOrganizationMember } from './public/membership/find-organization-member.js';
 import { FindOwnedOrganizations } from './public/membership/find-owned-organizations.js';
 import { FindUserMemberships } from './public/membership/find-user-memberships.js';
 import { ListOrganizationMembers } from './public/membership/list-organization-members.js';
+import { LockActiveMembership } from './public/membership/lock-active-membership.js';
 
 /**
  * Class MembershipsModule
@@ -30,6 +32,7 @@ import { ListOrganizationMembers } from './public/membership/list-organization-m
     systemUnitOfWorkProvider,
     applyMembershipChangeProvider,
     findActiveMembershipProvider,
+    lockActiveMembershipProvider,
     findOwnedOrganizationsProvider,
     findUserMembershipsProvider,
     findOrganizationMemberProvider,
@@ -39,6 +42,7 @@ import { ListOrganizationMembers } from './public/membership/list-organization-m
   ],
   exports: [
     FindActiveMembership,
+    LockActiveMembership,
     FindOwnedOrganizations,
     FindUserMemberships,
     FindOrganizationMember,
