@@ -20,6 +20,7 @@ export function toUser(view: AccountView): User {
     language: view.language,
     displayName: view.displayName,
     jobTitle: view.jobTitle,
+    ...(view.avatarId === undefined ? {} : { avatarId: view.avatarId }),
     timeZone: view.timeZone,
     passwordChangedAt: view.passwordChangedAt.toISOString(),
     version: view.version,

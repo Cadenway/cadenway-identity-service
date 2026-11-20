@@ -30,6 +30,8 @@ export function toUser(row: UserRow): User {
     displayName: row.displayName,
     jobTitle: row.jobTitle,
     timeZone: row.timeZone,
+    avatarId: row.avatarId,
+    avatarGeneration: row.avatarGeneration,
     emailVerifiedAt: row.emailVerifiedAt,
     version: row.version,
     signUpCount: row.signUpCount,

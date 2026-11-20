@@ -3,6 +3,7 @@ import { createHash, generateKeyPairSync, randomUUID } from 'node:crypto';
 import { createServer } from 'node:net';
 import { fileURLToPath } from 'node:url';
 
+import { ReserveAvatarUploadInternalResponse } from '@cadenway/contracts/validators/internal/identity-service';
 import {
   createApplication,
   InternalTokenSigner,
@@ -78,6 +79,7 @@ const businessTables = [
   'api_tokens',
   'authentication_policies',
   'authenticator_app_setups',
+  'avatar_uploads',
   'backup_codes',
   'code_requests',
   'email_changes',
@@ -103,7 +105,7 @@ const businessTables = [
 const allTables = [...platformTables, ...businessTables].sort();
 
 /** Migrations of `migrations/meta/_journal.json`. */
-const migrationCount = 7;
+const migrationCount = 8;
 
 /**
  * Runs `docker compose` on the throwaway project.
@@ -488,6 +490,123 @@ describe('identity-service wiring', () => {
       code: 'auth.token-invalid',
       details: { reason: 'audience' },
     });
+  });
+
+  it('exposes opaque avatar references and emits changes only for committed transitions', async () => {
+    const userId = randomUUID();
+    const system = service().get(SystemTransactionRunner);
+    await system.run(({ client }) =>
+      client.query(
+        'insert into users (id, name, email, email_verified_at) values ($1, $2, $3, now())',
+        [userId, 'Avatar Fixture', `${userId}@example.test`],
+      ),
+    );
+    const token = await signer.sign('identity-service', {
+      actor: { type: 'user', id: userId },
+      organizationId: atelierNordId,
+    });
+    const otherToken = await signer.sign('identity-service', {
+      actor: { type: 'user', id: camilleMartinId },
+      organizationId: null,
+    });
+    const authorization = `Bearer ${token}`;
+    const path = `/internal/v1/users/${userId}`;
+    const http = request(service().getHttpServer());
+    const unauthenticated = await http.get(`${path}/avatar-reference`);
+    expect(unauthenticated.status).toBe(401);
+    expect(unauthenticated.headers['cache-control']).toBe('no-store');
+    const oversized = await http
+      .post(`${path}/avatar/uploads`)
+      .set('Authorization', authorization)
+      .send({ contentType: 'image/png', sizeBytes: 5_242_881 });
+    expect(oversized.status).toBe(422);
+    expect(oversized.body).toMatchObject({ code: 'media.file-too-large' });
+    const unsupported = await http
+      .post(`${path}/avatar/uploads`)
+      .set('Authorization', authorization)
+      .send({ contentType: 'image/svg+xml', sizeBytes: 250 });
+    expect(unsupported.status).toBe(422);
+    expect(unsupported.body).toMatchObject({ code: 'media.unsupported-type' });
+    const reserve = await http
+      .post(`${path}/avatar/uploads`)
+      .set('Authorization', authorization)
+      .set('Idempotency-Key', 'avatar-fixture')
+      .send({ contentType: 'image/png', sizeBytes: 250 });
+    expect(reserve.status).toBe(201);
+    expect(reserve.headers['cache-control']).toBe('no-store');
+    const { uploadId, expiresAt } = ReserveAvatarUploadInternalResponse.parse(reserve.body);
+    expect(reserve.headers.location).toBe(`${path}/avatar/uploads/${uploadId}`);
+
+    const readUpload = await http
+      .get(`${path}/avatar/uploads/${uploadId}`)
+      .set('Authorization', authorization)
+      .set('If-None-Match', '*');
+    expect(readUpload.status).toBe(200);
+    expect(readUpload.headers['cache-control']).toBe('no-store');
+    expect(readUpload.body).toEqual({ uploadId, expiresAt, state: 'pending' });
+
+    const refused = await http
+      .get(`${path}/avatar-reference`)
+      .set('Authorization', `Bearer ${otherToken}`);
+    expect(refused.status).toBe(404);
+    expect(refused.headers['cache-control']).toBe('no-store');
+    expect(refused.body).toMatchObject({ code: 'user.not-found' });
+
+    const publish = () =>
+      http
+        .put(`${path}/avatar`)
+        .set('Authorization', authorization)
+        .set('If-Match', '"1"')
+        .send({ uploadId });
+    expect((await publish()).headers.etag).toBe('"2"');
+    const committedReplay = await publish();
+    expect(committedReplay.status).toBe(204);
+    expect(committedReplay.headers.etag).toBe('"2"');
+
+    const reference = await http
+      .get(`${path}/avatar-reference`)
+      .set('Authorization', authorization)
+      .set('If-None-Match', '*');
+    expect(reference.status).toBe(200);
+    expect(reference.headers['cache-control']).toBe('no-store');
+    expect(reference.body).toEqual({ assetId: uploadId });
+    expect((await http.get(path).set('Authorization', authorization)).body).toMatchObject({
+      avatarId: uploadId,
+      version: 2,
+    });
+
+    const stale = await http
+      .delete(`${path}/avatar`)
+      .set('Authorization', authorization)
+      .set('If-Match', '"1"');
+    expect(stale.status).toBe(412);
+    expect(stale.body).toMatchObject({ code: 'request.version-mismatch', details: { version: 2 } });
+
+    const remove = () => http.delete(`${path}/avatar`).set('Authorization', authorization);
+    expect((await remove()).headers.etag).toBe('"3"');
+    expect((await remove()).headers.etag).toBe('"3"');
+    const absent = await http.get(`${path}/avatar-reference`).set('Authorization', authorization);
+    expect(absent.body).toEqual({ assetId: null });
+
+    const facts = await system.run(({ client }) =>
+      client.query(
+        `select payload from outbox_events
+         where event_name = 'user.avatar-changed.v1' and payload->>'userId' = $1
+         order by (payload->>'version')::integer`,
+        [userId],
+      ),
+    );
+    const rows = facts.rows as readonly { readonly payload: unknown }[];
+    expect(rows.map(({ payload }) => payload)).toEqual([
+      expect.objectContaining({
+        actor: { type: 'user', id: userId },
+        organizationId: null,
+        version: 1,
+        assetId: uploadId,
+        oldAssetId: null,
+      }),
+      expect.objectContaining({ version: 2, assetId: null, oldAssetId: uploadId }),
+    ]);
   });
 
   it('lets the application role read and write the platform tables of its organization only', async () => {
@@ -877,6 +996,8 @@ describe('identity-service wiring', () => {
     );
 
     expect(queues.map(({ name }) => name)).toEqual([
+      'account.avatar-upload-expiry',
+      'account.avatar-upload-expiry.dead-letter',
       'account.delete',
       'account.delete.dead-letter',
       'account.deletion-sweep',

@@ -1,4 +1,6 @@
 import { Module } from '@nestjs/common';
+import type { MiddlewareConsumer, NestModule } from '@nestjs/common';
+import type { NextFunction, Request, Response } from 'express';
 
 import { ApiTokensModule } from '../api-tokens/api-tokens.module.js';
 import { MembershipsModule } from '../memberships/memberships.module.js';
@@ -16,6 +18,7 @@ import { ownedOrganizationsProvider } from './composition/providers/adapters/acc
 import { passwordHasherProvider } from './composition/providers/adapters/accounts/password-hasher.provider.js';
 import { resetLinkSecretsProvider } from './composition/providers/adapters/accounts/reset-link-secrets.provider.js';
 import { sessionOpenerProvider } from './composition/providers/adapters/accounts/session-opener.provider.js';
+import { avatarProviders } from './composition/providers/adapters/avatar/avatar.provider.js';
 import { authenticatorAppSecretsProvider } from './composition/providers/adapters/two-step/authenticator-app-secrets.provider.js';
 import { backupCodeSecretsProvider } from './composition/providers/adapters/two-step/backup-code-secrets.provider.js';
 import { challengeTokensProvider } from './composition/providers/adapters/two-step/challenge-tokens.provider.js';
@@ -61,6 +64,7 @@ import { UsersController } from './presentation/http/controllers/accounts/users.
 import { AuthController } from './presentation/http/controllers/authentication/auth.controller.js';
 import { ReauthenticationController } from './presentation/http/controllers/authentication/reauthentication.controller.js';
 import { SignInChallengeController } from './presentation/http/controllers/authentication/sign-in-challenge.controller.js';
+import { AvatarsController } from './presentation/http/controllers/avatar/avatars.controller.js';
 import { PasswordResetController } from './presentation/http/controllers/password-reset/password-reset.controller.js';
 import { TwoStepVerificationController } from './presentation/http/controllers/two-step/two-step-verification.controller.js';
 
@@ -89,11 +93,13 @@ import { TwoStepVerificationController } from './presentation/http/controllers/t
     PasswordResetController,
     ReauthenticationController,
     UsersController,
+    AvatarsController,
     AccountSecurityController,
     TwoStepVerificationController,
   ],
   providers: [
     accountsUnitOfWorkProvider,
+    ...avatarProviders,
     passwordHasherProvider,
     oneTimeCodeSecretsProvider,
     compromisedPasswordsProvider,
@@ -148,4 +154,16 @@ import { TwoStepVerificationController } from './presentation/http/controllers/t
     startSecurityKeyRegistrationProvider,
   ],
 })
-export class AccountsModule {}
+export class AccountsModule implements NestModule {
+  // #region Methods
+  /** Keeps avatar responses private, including guard and validation refusals. */
+  public configure(consumer: MiddlewareConsumer): void {
+    consumer
+      .apply((_request: Request, response: Response, next: NextFunction): void => {
+        response.setHeader('Cache-Control', 'no-store');
+        next();
+      })
+      .forRoutes(AvatarsController);
+  }
+  // #endregion
+}

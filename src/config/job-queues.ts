@@ -41,6 +41,12 @@ export const REALTIME_TICKET_EXPIRY_QUEUE: string = 'session.realtime-ticket-exp
 /** Runs expiration every minute in UTC. */
 export const REALTIME_TICKET_EXPIRY_CRON: string = '* * * * *';
 
+/** System-only queue for retiring unused avatar reservations. */
+export const AVATAR_UPLOAD_EXPIRY_QUEUE: string = 'account.avatar-upload-expiry';
+
+/** Runs one bounded expiration sweep every minute in UTC. */
+export const AVATAR_UPLOAD_EXPIRY_CRON: string = '* * * * *';
+
 /**
  * Constant jobQueues
  *
@@ -60,6 +66,8 @@ export const REALTIME_TICKET_EXPIRY_CRON: string = '* * * * *';
  *   the occurrence key holds that long.
  * - `session.realtime-ticket-expiry` has two retries with backoff. The next sweep catches up
  *   because the expiry time on the ticket determines eligibility.
+ * - `account.avatar-upload-expiry` takes up to 100 candidates per occurrence. Two retries cover
+ *   transient failures, and a later sweep retries candidates without a committed decision.
  *
  * @type {readonly JobQueueDeclaration[]}
  */
@@ -87,6 +95,17 @@ export const jobQueues: readonly JobQueueDeclaration[] = [
   },
   {
     name: REALTIME_TICKET_EXPIRY_QUEUE,
+    retryLimit: 2,
+    retryDelaySeconds: 10,
+    retryBackoff: true,
+    retryDelayMaxSeconds: 60,
+    expireInSeconds: 120,
+    retentionSeconds: 3_600,
+    deleteAfterSeconds: 3_600,
+    deadLetterRetentionSeconds: 86_400,
+  },
+  {
+    name: AVATAR_UPLOAD_EXPIRY_QUEUE,
     retryLimit: 2,
     retryDelaySeconds: 10,
     retryBackoff: true,

@@ -72,6 +72,9 @@ export interface AccountView {
    */
   readonly jobTitle: string | null;
 
+  /** Opaque id of the current avatar, when present. */
+  readonly avatarId?: string;
+
   /**
    * Property timeZone
    *
