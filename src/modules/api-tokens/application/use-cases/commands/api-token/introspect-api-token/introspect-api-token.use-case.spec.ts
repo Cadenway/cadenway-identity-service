@@ -1,5 +1,6 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { ActiveMembership } from '../../../../models/api-token/active-membership.model.js';
 import {
   FakeActiveMemberships,
   FakeApiTokenSecrets,
@@ -25,12 +26,13 @@ describe('IntrospectApiToken', () => {
   let clock: FixedClock;
   let introspect: IntrospectApiToken;
   let created: CreateApiTokenOutput;
+  let secrets: FakeApiTokenSecrets;
 
   beforeEach(async () => {
     store = new InMemoryApiTokens();
     memberships = new FakeActiveMemberships();
     clock = new FixedClock('2026-11-08T14:02:00Z');
-    const secrets: FakeApiTokenSecrets = new FakeApiTokenSecrets();
+    secrets = new FakeApiTokenSecrets();
     access = new FakeOrganizationAccess();
     introspect = new IntrospectApiToken(store, secrets, memberships, clock, access);
     created = await new CreateApiToken(
@@ -119,5 +121,76 @@ describe('IntrospectApiToken', () => {
       apiTokenId: created.apiToken.id,
     });
     await expect(introspect.execute({ token: created.secret })).resolves.toEqual({ active: false });
+  });
+
+  describe('with current membership proofs', () => {
+    const proof = {
+      organizationId: ATELIER_NORD,
+      memberId: '019a6b10-0000-7000-8000-000000000001',
+      role: 'guest',
+    } as const;
+    const find =
+      vi.fn<(organizationId: string, userId: string) => Promise<ActiveMembership | null>>();
+
+    beforeEach(() => {
+      find.mockReset();
+      find.mockResolvedValue(proof);
+      introspect = new IntrospectApiToken(store, secrets, memberships, clock, access, { find });
+    });
+
+    it('uses the current role independently of the projection', async () => {
+      await expect(introspect.execute({ token: created.secret })).resolves.toMatchObject({
+        active: true,
+        organizationId: ATELIER_NORD,
+        role: 'guest',
+      });
+      expect(find).toHaveBeenCalledExactlyOnceWith(ATELIER_NORD, CAMILLE_ID);
+    });
+
+    it('removes scope on confirmed removal and can resume for a new membership', async () => {
+      find.mockResolvedValueOnce(null).mockResolvedValueOnce({
+        ...proof,
+        memberId: '019a6b10-0000-7000-8000-000000000002',
+      });
+      await expect(introspect.execute({ token: created.secret })).resolves.toEqual({
+        active: false,
+      });
+      expect(store.useWrites).toBe(0);
+      await expect(introspect.execute({ token: created.secret })).resolves.toMatchObject({
+        active: true,
+        organizationId: ATELIER_NORD,
+        role: 'guest',
+      });
+    });
+
+    it('does not fall back to projected access during an outage', async () => {
+      const unavailable = new Error('organization.unavailable');
+      find.mockRejectedValueOnce(unavailable);
+      await expect(introspect.execute({ token: created.secret })).rejects.toBe(unavailable);
+      expect(store.useWrites).toBe(0);
+      await expect(introspect.execute({ token: created.secret })).resolves.toMatchObject({
+        active: true,
+        role: 'guest',
+      });
+    });
+
+    it('rejects a local revocation during the authority request', async () => {
+      find.mockImplementationOnce(async () => {
+        await new RevokeApiToken(store, clock).execute({
+          actorUserId: CAMILLE_ID,
+          organizationId: ATELIER_NORD,
+          apiTokenId: created.apiToken.id,
+        });
+        return proof;
+      });
+      await expect(introspect.execute({ token: created.secret })).resolves.toEqual({
+        active: false,
+      });
+    });
+
+    it('performs no authority call for an unrecognized secret', async () => {
+      await expect(introspect.execute({ token: 'malformed' })).resolves.toEqual({ active: false });
+      expect(find).not.toHaveBeenCalled();
+    });
   });
 });

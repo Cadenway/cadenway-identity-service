@@ -1,3 +1,4 @@
+import { CONFIG } from '@cadenway/nest-common';
 import { SystemTransactionRunner, TenantTransactionRunner } from '@cadenway/nest-common/database';
 import { EventConsumers } from '@cadenway/nest-messaging';
 import type { EventRedelivery } from '@cadenway/nest-messaging';
@@ -39,17 +40,18 @@ const subscribe = vi.fn<(registration: unknown) => Promise<void>>();
 
 /**
  * Stands for the global providers of the kit that `MembershipsModule` injects: the durable
- * consumers, which record the registrations instead of reaching a broker, and the two runners,
- * which no registration uses.
+ * consumers, which record the registrations instead of reaching a broker, the two runners,
+ * and a configuration with the current membership authority disabled.
  */
 @Global()
 @Module({
   providers: [
+    { provide: CONFIG, useValue: {} },
     { provide: EventConsumers, useValue: { subscribe } },
     { provide: TenantTransactionRunner, useValue: {} },
     { provide: SystemTransactionRunner, useValue: {} },
   ],
-  exports: [EventConsumers, TenantTransactionRunner, SystemTransactionRunner],
+  exports: [CONFIG, EventConsumers, TenantTransactionRunner, SystemTransactionRunner],
 })
 class KitDoubles {}
 

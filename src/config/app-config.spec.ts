@@ -59,6 +59,69 @@ describe('appConfigSchema', () => {
     expect(config.DATABASE_TRANSACTION_MAX_ATTEMPTS).toBe(1);
   });
 
+  describe('current membership authority', () => {
+    const origin = 'http://organization-service:3011';
+    const signingKey = {
+      kty: 'OKP',
+      crv: 'Ed25519',
+      kid: 'identity-fixture',
+      x: 'A'.repeat(43),
+      d: 'B'.repeat(43),
+    };
+
+    it('reads the origin with a separately validated Identity signing key', () => {
+      const config = loadConfig(appConfigSchema, {
+        ...complete,
+        ORGANIZATION_SERVICE_URL: origin,
+        IDENTITY_SERVICE_INTERNAL_TOKEN_PRIVATE_JWK: JSON.stringify(signingKey),
+      });
+
+      expect(config.ORGANIZATION_SERVICE_URL).toBe(origin);
+      expect(config.IDENTITY_SERVICE_INTERNAL_TOKEN_PRIVATE_JWK).toStrictEqual(signingKey);
+    });
+
+    it('requires the origin and signing key together', () => {
+      expect(() =>
+        loadConfig(appConfigSchema, { ...complete, ORGANIZATION_SERVICE_URL: origin }),
+      ).toThrow(/IDENTITY_SERVICE_INTERNAL_TOKEN_PRIVATE_JWK/u);
+      expect(() =>
+        loadConfig(appConfigSchema, {
+          ...complete,
+          IDENTITY_SERVICE_INTERNAL_TOKEN_PRIVATE_JWK: JSON.stringify(signingKey),
+        }),
+      ).toThrow(/ORGANIZATION_SERVICE_URL/u);
+    });
+
+    it.each([
+      'https://example.test/organization',
+      'https://example.test?query=embedded',
+      'https://example.test#fragment',
+      'https://example-user:example-password@example.test',
+      'ftp://example.test',
+    ])('rejects a non-origin URL without including its value', (url) => {
+      const load = () =>
+        loadConfig(appConfigSchema, {
+          ...complete,
+          ORGANIZATION_SERVICE_URL: url,
+          IDENTITY_SERVICE_INTERNAL_TOKEN_PRIVATE_JWK: JSON.stringify(signingKey),
+        });
+
+      expect(load).toThrow(/ORGANIZATION_SERVICE_URL/u);
+      expect(load).not.toThrow(url);
+    });
+
+    it('rejects a malformed private key without disclosing its content', () => {
+      const load = () =>
+        loadConfig(appConfigSchema, {
+          ...complete,
+          ORGANIZATION_SERVICE_URL: origin,
+          IDENTITY_SERVICE_INTERNAL_TOKEN_PRIVATE_JWK: 'malformed-fixture',
+        });
+      expect(load).toThrow(/IDENTITY_SERVICE_INTERNAL_TOKEN_PRIVATE_JWK/u);
+      expect(load).not.toThrow(/malformed-fixture/u);
+    });
+  });
+
   it('accepts the committed .env.example as it is', () => {
     const example: NodeJS.Dict<string> = parseEnv(
       readFileSync(new URL('../../.env.example', import.meta.url), 'utf8'),

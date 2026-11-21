@@ -50,7 +50,7 @@ From `openapi/internal/identity-service.yaml` of the installed `@cadenway/contra
 | `POST /internal/v1/api-tokens`                | `user`   | Required     | 201, `Location`, secret     | 400, 403 `auth.reauthentication-required`, 404 `session.not-found` |
 | `GET /internal/v1/api-tokens`                 | `user`   | Required     | 200, one page               | 400                                                                |
 | `DELETE /internal/v1/api-tokens/{apiTokenId}` | `user`   | Required     | 204                         | 400, 404 `api-token.not-found`                                     |
-| `POST /internal/v1/api-tokens/introspect`     | `system` | None         | 200, `active` true or false | 400                                                                |
+| `POST /internal/v1/api-tokens/introspect`     | `system` | None         | 200, `active` true or false | 400, 503 if the configured membership authority is unavailable     |
 
 Every route also answers the 401 and 403 of the internal token guard, `403
 auth.organization-required` included for the routes of a session. The gateway answers `403
@@ -87,8 +87,11 @@ answers `active: false` for a token whose user is no longer a member of its orga
   `members:read`, `webhooks:manage`, a scope given twice counting once; expiry 30 days (default),
   90 days, 1 year (the same date of the next year, UTC) or never.
 - A token is active when it is known by its hash, neither revoked nor expired, and its user has an
-  active membership in its organization in the copy of the memberships. A malformed value, one
-  whose check characters do not match, and a session token are inactive without a lookup.
+  active membership in its organization. When configured, Organization proves the current role or
+  membership removal independently of the copy. A live but unavailable proof returns
+  `503 organization.unavailable`. After rejoining the organization, a still-valid token can act
+  with the role of the new membership. A malformed value, one whose check characters do not match,
+  and a session token are inactive without a lookup.
 - An active token of a member whom the authentication policy of its organization requires to have
   two-step verification, and who has none, introspects with `withheldOrganization`
   (`organization.mfa-required`) and no scope, its organization and role kept (decision 8 of P2c); it
@@ -111,9 +114,11 @@ answers `active: false` for a token whose user is no longer a member of its orga
 - `RevokeUserApiTokens` and `EraseUserApiTokens` run in `SystemApiTokensUnitOfWork` and join the
   system transaction of the accounts use case that calls them (the scheduling and the completion of
   a deletion); the tokens are locked before their revocation.
-- The introspection runs in one system transaction (`SystemApiTokensUnitOfWork`): it finds the
-  token by its hash, reads the copy of the memberships, the authentication policy of the
-  organization and the enrollment of the account in the same transaction, and writes the last use.
+- The configured introspection finds the token by its hash, checks Organization outside the system
+  transaction and rechecks the token before applying the local authentication policy and writing
+  the last use. During rollout without the current authority configured, reading the token and
+  its membership from the projection, applying the policy and writing the last use run in one
+  system transaction.
 
 ## Decisions
 

@@ -1,5 +1,13 @@
-import { baseConfigShape, internalTokenVerifierConfigShape } from '@cadenway/nest-common';
-import type { BaseConfig, InternalTokenVerifierConfig } from '@cadenway/nest-common';
+import {
+  baseConfigShape,
+  internalTokenSignerConfigShape,
+  internalTokenVerifierConfigShape,
+} from '@cadenway/nest-common';
+import type {
+  BaseConfig,
+  InternalTokenSignerConfig,
+  InternalTokenVerifierConfig,
+} from '@cadenway/nest-common';
 import { databaseConfigShape } from '@cadenway/nest-common/database';
 import type { DatabaseConfig } from '@cadenway/nest-common/database';
 import { messagingConfigShape } from '@cadenway/nest-messaging';
@@ -28,6 +36,8 @@ import { socialSignInConfigShape, type SocialSignInConfig } from './social-sign-
  * - `INTERNAL_TOKEN_AUDIENCE` and `INTERNAL_TOKEN_TRUSTED_ISSUERS`: the `aud` this service accepts
  *   and the public keys of the backends allowed to call it. Hosting can add verified Notification
  *   public keys through `NOTIFICATION_SERVICE_INTERNAL_TOKEN_PUBLIC_JWKS`.
+ * - `ORGANIZATION_SERVICE_URL` and `IDENTITY_SERVICE_INTERNAL_TOKEN_PRIVATE_JWK`: optional
+ *   Organization service origin and signing key, supplied together to enable membership proofs.
  * - `PASSWORD_PEPPER`: `passwordPepperConfigShape`, the secret every key of the service derives
  *   from: the secret key of the password hashes, the key of the one-time code hashes, the key that
  *   seals the authenticator-app secrets and the key of the backup code hashes.
@@ -45,7 +55,10 @@ export type AppConfig = BaseConfig &
   PasswordPepperConfig &
   WebAuthnConfig &
   SocialSignInConfig &
-  SamlSignInConfig;
+  SamlSignInConfig & {
+    readonly ORGANIZATION_SERVICE_URL?: string;
+    readonly IDENTITY_SERVICE_INTERNAL_TOKEN_PRIVATE_JWK?: InternalTokenSignerConfig['INTERNAL_TOKEN_PRIVATE_JWK'];
+  };
 
 /**
  * Interface PasswordPepperConfig
@@ -209,6 +222,11 @@ const notificationPublicKeys = z
     },
   );
 
+function isOrganizationOrigin(value: string): boolean {
+  const url = URL.parse(value);
+  return url?.origin === value && (url.protocol === 'http:' || url.protocol === 'https:');
+}
+
 /**
  * Constant appConfigSchema
  *
@@ -227,6 +245,14 @@ export const appConfigSchema: z.ZodType<AppConfig> = z
     ...messagingConfigShape,
     ...internalTokenVerifierConfigShape,
     NOTIFICATION_SERVICE_INTERNAL_TOKEN_PUBLIC_JWKS: notificationPublicKeys,
+    ORGANIZATION_SERVICE_URL: z
+      .string()
+      .trim()
+      .max(512)
+      .refine(isOrganizationOrigin, { error: 'Expected an HTTP or HTTPS origin.' })
+      .optional(),
+    IDENTITY_SERVICE_INTERNAL_TOKEN_PRIVATE_JWK:
+      internalTokenSignerConfigShape.INTERNAL_TOKEN_PRIVATE_JWK.optional(),
     ...passwordPepperConfigShape,
     ...webAuthnConfigShape,
     ...socialSignInConfigShape,
@@ -236,6 +262,24 @@ export const appConfigSchema: z.ZodType<AppConfig> = z
     path: ['WEBAUTHN_ORIGINS'],
     error: 'Expected origins on the relying party WEBAUTHN_RP_ID or one of its subdomains.',
   })
+  .refine(
+    (config) =>
+      config.ORGANIZATION_SERVICE_URL === undefined ||
+      config.IDENTITY_SERVICE_INTERNAL_TOKEN_PRIVATE_JWK !== undefined,
+    {
+      path: ['IDENTITY_SERVICE_INTERNAL_TOKEN_PRIVATE_JWK'],
+      error: 'Required when ORGANIZATION_SERVICE_URL is configured.',
+    },
+  )
+  .refine(
+    (config) =>
+      config.IDENTITY_SERVICE_INTERNAL_TOKEN_PRIVATE_JWK === undefined ||
+      config.ORGANIZATION_SERVICE_URL !== undefined,
+    {
+      path: ['ORGANIZATION_SERVICE_URL'],
+      error: 'Required when the Identity signing key is configured.',
+    },
+  )
   .transform(({ NOTIFICATION_SERVICE_INTERNAL_TOKEN_PUBLIC_JWKS, ...config }): AppConfig => ({
     ...config,
     INTERNAL_TOKEN_TRUSTED_ISSUERS: {

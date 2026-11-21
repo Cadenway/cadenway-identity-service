@@ -1,5 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { generateKeyPairSync, randomUUID } from 'node:crypto';
+import { once } from 'node:events';
+import { createServer } from 'node:http';
 import { fileURLToPath } from 'node:url';
 
 import {
@@ -11,10 +13,16 @@ import {
   RequestPasswordResetInternalResponse,
   ScheduleAccountDeletionInternalResponse,
 } from '@cadenway/contracts/validators/internal/identity-service';
-import { createApplication, InternalTokenSigner, loadConfig } from '@cadenway/nest-common';
+import {
+  createApplication,
+  InternalTokenSigner,
+  InternalTokenVerifier,
+  loadConfig,
+} from '@cadenway/nest-common';
 import type {
   Ed25519PrivateJwk,
   Ed25519PublicJwk,
+  InternalPrincipal,
   InternalTokenClaims,
 } from '@cadenway/nest-common';
 import { SystemTransactionRunner } from '@cadenway/nest-common/database';
@@ -1458,6 +1466,174 @@ describe('identity-service account security', () => {
       );
       expect(tokens).toEqual([{ count: 1 }]);
     });
+  });
+
+  it('introspects both credential types against signed current Organization membership proofs', async () => {
+    const camille = await seedAccount('Camille');
+    const memberId = '019a6b10-0000-7000-8000-000000000001';
+    const newMemberId = '019a6b10-0000-7000-8000-000000000002';
+    await systemQuery(
+      'insert into memberships (id, organization_id, user_id, role, version) values ($1, $2, $3, $4, 1)',
+      [memberId, atelierNord, camille.userId, 'owner'],
+    );
+    const session = await signIn(camille);
+    const chosen = await call(
+      'put',
+      `/internal/v1/sessions/${session.sessionId}/organization`,
+      user(camille.userId),
+      { organizationId: atelierNord },
+    );
+    expect(chosen.status).toBe(200);
+    const created = await call(
+      'post',
+      '/internal/v1/api-tokens',
+      user(camille.userId, atelierNord),
+      {
+        name: 'Current membership fixture',
+        scopes: ['tasks:read'],
+        sessionId: session.sessionId,
+      },
+    );
+    expect(created.status).toBe(201);
+    const { secret } = created.body as { secret: string };
+    secrets.push(secret);
+
+    const identity = keyPair('test-identity');
+    const verifier = await InternalTokenVerifier.create({
+      audience: 'organization-service',
+      trustedIssuers: { 'identity-service': [identity.publicJwk] },
+    });
+    let answer: { status: number; body: unknown } = {
+      status: 200,
+      body: { memberId, role: 'guest', version: 2 },
+    };
+    const principals: InternalPrincipal[] = [];
+    const organization = createServer((incoming, outgoing) => {
+      if (incoming.method !== 'GET' || incoming.url !== '/internal/v1/search-membership') {
+        outgoing.writeHead(404).end();
+        return;
+      }
+      const header = incoming.headers.authorization;
+      if (!header?.startsWith('Bearer ')) {
+        outgoing.writeHead(401).end();
+        return;
+      }
+      void verifier.verify(header.slice('Bearer '.length)).then(
+        (principal) => {
+          principals.push(principal);
+          outgoing
+            .writeHead(answer.status, {
+              'Content-Type':
+                answer.status === 200 ? 'application/json' : 'application/problem+json',
+            })
+            .end(JSON.stringify(answer.body));
+        },
+        () => outgoing.writeHead(401).end(),
+      );
+    });
+    organization.listen(0, '127.0.0.1');
+    let configured: NestExpressApplication | undefined;
+    try {
+      await once(organization, 'listening');
+      const address = organization.address();
+      if (address === null || typeof address === 'string') {
+        throw new Error('The Organization test server has no TCP address.');
+      }
+      const config = loadConfig(appConfigSchema, {
+        ...process.env,
+        ORGANIZATION_SERVICE_URL: `http://127.0.0.1:${String(address.port)}`,
+        IDENTITY_SERVICE_INTERNAL_TOKEN_PRIVATE_JWK: JSON.stringify(identity.privateJwk),
+      });
+      configured = await createApplication(AppModule, {
+        service: 'identity-service',
+        config,
+        provideConfig: true,
+        internalToken: {
+          verifier: {
+            audience: config.INTERNAL_TOKEN_AUDIENCE,
+            trustedIssuers: config.INTERNAL_TOKEN_TRUSTED_ISSUERS,
+          },
+        },
+        logDestination: {
+          write: (line: string): void => {
+            logLines.push(line);
+          },
+        },
+      });
+      await configured.init();
+      const appWithProof = configured;
+      const signed = await gateway.sign('identity-service', system);
+      const introspect = async (credential: 'session' | 'api-token'): Promise<Response> =>
+        request(appWithProof.getHttpServer())
+          .post(
+            credential === 'session'
+              ? '/internal/v1/tokens/introspect'
+              : '/internal/v1/api-tokens/introspect',
+          )
+          .set('Authorization', `Bearer ${signed}`)
+          .send({ token: credential === 'session' ? session.token : secret });
+
+      for (const credential of ['session', 'api-token'] as const) {
+        const attenuated = await introspect(credential);
+        expect(attenuated.status).toBe(200);
+        expect(attenuated.body).toMatchObject({ active: true, role: 'guest' });
+      }
+      answer = {
+        status: 404,
+        body: {
+          title: 'Not found',
+          type: 'about:blank',
+          status: 404,
+          code: 'organization.not-found',
+        },
+      };
+      expect((await introspect('session')).body).toMatchObject({
+        active: true,
+        organizationId: null,
+        role: null,
+      });
+      expect((await introspect('api-token')).body).toEqual({ active: false });
+
+      answer = { status: 503, body: {} };
+      for (const credential of ['session', 'api-token'] as const) {
+        const unavailable = await introspect(credential);
+        expect(unavailable.status).toBe(503);
+        expect(unavailable.body).toMatchObject({ code: 'organization.unavailable' });
+      }
+
+      answer = {
+        status: 200,
+        body: { memberId: newMemberId, role: 'member', version: 1 },
+      };
+      expect((await introspect('session')).body).toMatchObject({
+        active: true,
+        organizationId: null,
+      });
+      expect((await introspect('api-token')).body).toMatchObject({
+        active: true,
+        organizationId: atelierNord,
+        role: 'member',
+      });
+
+      expect(
+        await systemQuery('select organization_id, member_id from sessions where id = $1', [
+          session.sessionId,
+        ]),
+      ).toEqual([{ organization_id: atelierNord, member_id: memberId }]);
+      expect(principals).toHaveLength(8);
+      for (const principal of principals) {
+        expect(principal).toMatchObject({
+          issuer: 'identity-service',
+          actor: { type: 'user', id: camille.userId },
+          organizationId: atelierNord,
+          role: null,
+          scopes: [],
+        });
+      }
+    } finally {
+      organization.close();
+      await configured?.close();
+    }
   });
 
   describe('the deletion of an account', () => {

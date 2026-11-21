@@ -16,11 +16,11 @@ import type { IntrospectApiTokenOutput } from './introspect-api-token.output.js'
  * Tells whether a personal API token is active (`POST /internal/v1/api-tokens/introspect`). The
  * gateway calls it on every request with a bearer token and never caches the answer. A token is
  * active when it is known by the hash of its secret, neither revoked nor expired, and its user is
- * still a member of its organization in the copy of the memberships; any other value, a malformed
- * one or a session token included, answers `active: false`, never an error. An active answer
- * records the use, at most once a minute, without a lock: a concurrent later write wins. It runs in
- * one system transaction, which the reading of the memberships joins; calling it twice has the
- * effect of calling it once. While the policy of its organization requires two-step verification
+ * still a member of its organization; a malformed, unknown, expired, out-of-scope or revoked token
+ * answers `active: false`. When Organization is configured, membership is verified outside the
+ * transaction and the token is checked again before use. A rollout without that authority reads
+ * the projection in one system transaction. An active answer records the use at most once a
+ * minute, without a lock. While the policy of its organization requires two-step verification
  * for the role of its user, who has none, the token stays active but acts on nothing: `scopes` is
  * empty and `withheldOrganizationId` names the organization (decision 8 of P2c).
  */
@@ -80,6 +80,9 @@ export class IntrospectApiToken {
    * @readonly
    */
   private readonly access: OrganizationAccess;
+
+  /** The current membership authority when configured. */
+  private readonly authority: Pick<ActiveMemberships, 'find'> | null;
   // #endregion
 
   // #region Constructor
@@ -94,6 +97,7 @@ export class IntrospectApiToken {
    * @param {ActiveMemberships} memberships - The copy of the memberships.
    * @param {Clock} clock - The time of the request.
    * @param {OrganizationAccess} access - The authentication policy of the organization.
+   * @param {Pick<ActiveMemberships, 'find'> | null} authority - The current membership authority.
    * @constructor
    */
   public constructor(
@@ -102,12 +106,14 @@ export class IntrospectApiToken {
     memberships: ActiveMemberships,
     clock: Clock,
     access: OrganizationAccess,
+    authority: Pick<ActiveMemberships, 'find'> | null = null,
   ) {
     this.unitOfWork = unitOfWork;
     this.secrets = secrets;
     this.memberships = memberships;
     this.clock = clock;
     this.access = access;
+    this.authority = authority;
   }
   // #endregion
 
@@ -126,43 +132,71 @@ export class IntrospectApiToken {
     if (tokenHash === null) {
       return { active: false };
     }
-    const now: Date = this.clock.now();
-    return this.unitOfWork.run(
-      async (tokens: ApiTokenRepository): Promise<IntrospectApiTokenOutput> => {
-        const token: ApiToken | null = await tokens.findByTokenHash(tokenHash);
+    const authority = this.authority;
+    if (authority === null) {
+      return this.unitOfWork.run(async (tokens): Promise<IntrospectApiTokenOutput> => {
+        const token = await tokens.findByTokenHash(tokenHash);
+        const now = this.clock.now();
         if (!token?.isActiveAt(now)) {
           return { active: false };
         }
-        const { organizationId, userId, scopes, expiresAt } = token.snapshot;
-        const membership: ActiveMembership | null = await this.memberships.find(
-          organizationId,
-          userId,
-        );
-        if (membership === null) {
-          return { active: false };
-        }
-        const withheld: boolean = await this.access.isWithheld(
-          organizationId,
-          userId,
-          membership.role,
-        );
-        const used: ApiToken = token.recordUse(now);
-        if (used !== token) {
-          await tokens.recordUse(used);
-        }
-        return {
-          active: true,
-          tokenType: 'api-token',
-          apiTokenId: token.id,
-          userId,
-          organizationId,
-          role: membership.role,
-          scopes: withheld ? [] : scopes,
-          expiresAt,
-          withheldOrganizationId: withheld ? organizationId : null,
-        };
-      },
-    );
+        const { organizationId, userId } = token.snapshot;
+        const membership = await this.memberships.find(organizationId, userId);
+        return this.answer(tokens, token, now, membership);
+      });
+    }
+
+    const selected = await this.unitOfWork.run((tokens) => tokens.findByTokenHash(tokenHash));
+    if (!selected?.isActiveAt(this.clock.now())) {
+      return { active: false };
+    }
+    const { organizationId, userId } = selected.snapshot;
+    const membership = await authority.find(organizationId, userId);
+    if (membership === null) {
+      return { active: false };
+    }
+    return this.unitOfWork.run(async (tokens): Promise<IntrospectApiTokenOutput> => {
+      const current = await tokens.findByTokenHash(tokenHash);
+      const now = this.clock.now();
+      if (
+        !current?.isActiveAt(now) ||
+        current.id !== selected.id ||
+        current.snapshot.organizationId !== organizationId ||
+        current.snapshot.userId !== userId
+      ) {
+        return { active: false };
+      }
+      return this.answer(tokens, current, now, membership);
+    });
+  }
+
+  /** Applies the account's authentication policy before using an active token. */
+  private async answer(
+    tokens: ApiTokenRepository,
+    token: ApiToken,
+    now: Date,
+    membership: ActiveMembership | null,
+  ): Promise<IntrospectApiTokenOutput> {
+    const { organizationId, userId, scopes, expiresAt } = token.snapshot;
+    if (membership?.organizationId !== organizationId) {
+      return { active: false };
+    }
+    const withheld = await this.access.isWithheld(organizationId, userId, membership.role);
+    const used = token.recordUse(now);
+    if (used !== token) {
+      await tokens.recordUse(used);
+    }
+    return {
+      active: true,
+      tokenType: 'api-token',
+      apiTokenId: token.id,
+      userId,
+      organizationId,
+      role: membership.role,
+      scopes: withheld ? [] : scopes,
+      expiresAt,
+      withheldOrganizationId: withheld ? organizationId : null,
+    };
   }
   // #endregion
 }

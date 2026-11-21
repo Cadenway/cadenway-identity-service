@@ -126,7 +126,7 @@ From `openapi/internal/identity-service.yaml` of the installed `@cadenway/contra
 
 | Route                                                   | Actor    | Success                     | Refusals                                                        |
 | ------------------------------------------------------- | -------- | --------------------------- | --------------------------------------------------------------- |
-| `POST /internal/v1/tokens/introspect`                   | `system` | 200, `active` true or false | 400                                                             |
+| `POST /internal/v1/tokens/introspect`                   | `system` | 200, `active` true or false | 400, 503 if the configured membership authority is unavailable  |
 | `DELETE /internal/v1/sessions/{sessionId}`              | `user`   | 204                         | 400, 404 `session.not-found`                                    |
 | `PUT /internal/v1/sessions/{sessionId}/organization`    | `user`   | 200, organization and role  | 400, 404 `session.not-found`, 404 `organization.not-found`      |
 | `POST /internal/v1/sessions/{sessionId}/revoke-others`  | `user`   | 200, `revokedCount`         | 400, 404 `session.not-found`                                    |
@@ -186,9 +186,10 @@ passes in; never the token nor the `User-Agent`.
 ## Events consumed
 
 None directly. A `member.removed.v1` reaches the sessions through the copy of the memberships (the
-memberships module): the introspection answers no organization for a session whose membership was
-removed. The change of a role (`member.role-changed.v1`) reaches the policy decisions the same way:
-the role of the copy is the one each decision reads.
+memberships module). The copy serves organization selection and the introspection during rollout.
+When configured, introspection confirms the role and the membership directly with Organization
+even if removal or role changes have yet to reach the copy. An unavailable proof returns
+`503 organization.unavailable`; the credential and its local selection are unchanged.
 
 The change of an authentication policy, the trust and the forgetting of a device emit nothing: the
 contract declares no event for them. `user.two-step-verification-changed.v1` belongs to the
@@ -267,7 +268,10 @@ organization locks the session, reads the copy of the memberships, and writes th
 last choice together with the outbox row when the session changes
 (`tests/organization-context.int-spec.ts` proves the rollback). The
 introspection writes the last activity only when it moved by a minute, without a lock: a concurrent
-later write wins; it reads the copy of the memberships in the same transaction.
+later write wins. With a live authority, the HTTP lookup happens between local transactions.
+The second transaction reloads the session, validates it, and applies the local MFA policy to the
+proven role. A concurrent change of selection withholds the organization for that response and
+the next introspection starts from the new selection.
 
 The operations of the accounts module (`CheckSessionAuthentication`, `AuthenticateSession`,
 `EndRecentAuthentication`, `RevokeUserSessions`, `CountOpenSessions`, `EraseUserSessions`) join the
