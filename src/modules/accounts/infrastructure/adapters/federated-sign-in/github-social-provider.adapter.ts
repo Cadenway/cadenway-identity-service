@@ -131,6 +131,7 @@ export class GitHubSocialProvider implements SocialSignInProvider {
           accept: 'application/vnd.github+json',
           authorization: `Bearer ${access.data.access_token}`,
           'user-agent': 'cadenway-identity-service',
+          'x-github-api-version': '2022-11-28',
         },
         signal,
       });

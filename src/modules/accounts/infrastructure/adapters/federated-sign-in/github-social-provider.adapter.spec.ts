@@ -109,7 +109,9 @@ describe('GitHub social provider', () => {
     ]);
     expect(fetcher.mock.calls.map(([, init]) => init?.redirect)).toEqual(['error', 'error']);
     expect(requests[0]?.headers.get('authorization')).toBeNull();
+    expect(requests[0]?.headers.get('x-github-api-version')).toBeNull();
     expect(requests[1]?.headers.get('authorization')).toBe(`Bearer ${accessToken}`);
+    expect(requests[1]?.headers.get('x-github-api-version')).toBe('2022-11-28');
   });
 
   it.each([200, 400])(
