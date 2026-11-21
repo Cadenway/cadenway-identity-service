@@ -57,23 +57,25 @@ use case that calls it.
 
 ## Owned tables
 
-| Table                        | Key                                                   | Organization scoping                            |
-| ---------------------------- | ----------------------------------------------------- | ----------------------------------------------- |
-| `users`                      | `id`, unique `email`                                  | None: an account belongs to a person, no policy |
-| `avatar_uploads`             | `id`, unique owner and idempotency digest             | None: follows its account, no policy            |
-| `password_credentials`       | `user_id` (cascade)                                   | None: follows its account, no policy            |
-| `one_time_codes`             | `id`; one current per user and purpose                | None: follows its account, no policy            |
-| `password_reset_links`       | `id`, unique `token_hash`; one current                | None: follows its account (cascade), no policy  |
-| `email_changes`              | `user_id` (cascade)                                   | None: follows its account, no policy            |
-| `code_requests`              | `email`                                               | None: per address, account or not, no policy    |
-| `password_reset_requests`    | `email`                                               | None: per address, account or not, no policy    |
-| `sign_in_attempts`           | `email`                                               | None: per address, account or not, no policy    |
-| `two_step_verifications`     | `user_id` (cascade), unique `webauthn_user_handle`    | None: follows its account, no policy            |
-| `backup_codes`               | `id`, unique (`user_id`, `code_hash`) (cascade)       | None: follows its account, no policy            |
-| `security_keys`              | `id`, unique `credential_id` (cascade)                | None: follows its account, no policy            |
-| `authenticator_app_setups`   | `user_id` (cascade)                                   | None: follows its account, no policy            |
-| `security_key_registrations` | `user_id` (cascade)                                   | None: follows its account, no policy            |
-| `sign_in_challenges`         | `id`, unique `user_id`, unique `token_hash` (cascade) | None: follows its account, no policy            |
+| Table                        | Key                                                     | Organization scoping                             |
+| ---------------------------- | ------------------------------------------------------- | ------------------------------------------------ |
+| `users`                      | `id`, unique `email`                                    | None: an account belongs to a person, no policy  |
+| `avatar_uploads`             | `id`, unique owner and idempotency digest               | None: follows its account, no policy             |
+| `password_credentials`       | `user_id` (cascade)                                     | None: follows its account, no policy             |
+| `one_time_codes`             | `id`; one current per user and purpose                  | None: follows its account, no policy             |
+| `password_reset_links`       | `id`, unique `token_hash`; one current                  | None: follows its account (cascade), no policy   |
+| `email_changes`              | `user_id` (cascade)                                     | None: follows its account, no policy             |
+| `code_requests`              | `email`                                                 | None: per address, account or not, no policy     |
+| `password_reset_requests`    | `email`                                                 | None: per address, account or not, no policy     |
+| `sign_in_attempts`           | `email`                                                 | None: per address, account or not, no policy     |
+| `two_step_verifications`     | `user_id` (cascade), unique `webauthn_user_handle`      | None: follows its account, no policy             |
+| `backup_codes`               | `id`, unique (`user_id`, `code_hash`) (cascade)         | None: follows its account, no policy             |
+| `security_keys`              | `id`, unique `credential_id` (cascade)                  | None: follows its account, no policy             |
+| `authenticator_app_setups`   | `user_id` (cascade)                                     | None: follows its account, no policy             |
+| `security_key_registrations` | `user_id` (cascade)                                     | None: follows its account, no policy             |
+| `sign_in_challenges`         | `id`, unique `user_id`, unique `token_hash` (cascade)   | None: follows its account, no policy             |
+| `federated_account_links`    | digest of provider, issuer and subject, account cascade | None: follows its account, no policy             |
+| `federated_sign_in_flows`    | `id`, unique state and optional receipt digest          | None: follows a browser-bound sign-in, no policy |
 
 Created by `migrations/0001_accounts_and_sessions.sql`; `users.sign_up_count` by
 `migrations/0002_sign_up_count.sql`, which backfills it from the version; `users.display_name`,
@@ -102,6 +104,13 @@ nothing to force: the barrier is that every query names its account by id, or it
 code by account and purpose, or its link by the hash of its token, and that a user reaches only the
 account of its verified internal token. The application role `identity_app` reads and writes their
 rows and runs no DDL on them.
+
+Migration `0008_federated_sign_in.sql` creates the two global federated sign-in tables. The link
+pins a verified provider identity to a local account. The flow stores state, browser and callback
+receipt digests, a version and an indexed retention deadline. The repositories require a system
+transaction and lock the flow before advancing its version or redeeming a receipt. A failed
+transaction leaves the receipt available for its legitimate browser to retry. The provider calls,
+federated session admission and expired-flow cleanup are wired separately.
 
 The `account.deletion-sweep`, `account.delete` and `account.avatar-upload-expiry` queues live in
 the `pgboss` schema of `@cadenway/nest-jobs`, provisioned by `src/migrate.ts`. The avatar sweep

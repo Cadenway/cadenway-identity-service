@@ -88,6 +88,8 @@ const businessTables = [
   'backup_codes',
   'code_requests',
   'email_changes',
+  'federated_account_links',
+  'federated_sign_in_flows',
   'memberships',
   'one_time_codes',
   'organization_choices',
@@ -110,7 +112,7 @@ const businessTables = [
 const allTables = [...platformTables, ...businessTables].sort();
 
 /** Migrations of `migrations/meta/_journal.json`. */
-const migrationCount = 8;
+const migrationCount = 9;
 
 /**
  * Runs `docker compose` on the throwaway project.
