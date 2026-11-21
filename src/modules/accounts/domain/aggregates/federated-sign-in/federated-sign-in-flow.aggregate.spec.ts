@@ -32,11 +32,10 @@ function start(connection: FederatedConnection = google): FederatedSignInFlow {
 }
 
 function linkedAccount(connection: FederatedConnection = google): LinkedFederatedAccount {
-  const { issuer, provider } = connection;
   return {
     id: 'link',
     userId: camilleId,
-    identity: { provider, issuer, subject },
+    identity: { ...connection, subject },
     status: 'active',
   };
 }
@@ -123,6 +122,34 @@ describe('FederatedSignInFlow', () => {
         flow.complete({ connection, subject }, linkedAccount(saml), receiptHash, checkedAt),
       ).toThrow(FederatedSignInRefusedError);
     }
+  });
+
+  it('requires a SAML account link in the same organization and connection at completion and redemption', () => {
+    const claimed = start(saml).claim(
+      { provider: 'saml', stateHash, browserBindingHash },
+      checkedAt,
+    );
+    const flow = complete(saml);
+    for (const other of [
+      { ...saml, organizationId: anotherOrganizationId },
+      { ...saml, connectionId: 'another-connection' },
+    ]) {
+      const link = linkedAccount(other);
+      expect(() =>
+        claimed.complete({ connection: saml, subject }, link, receiptHash, checkedAt),
+      ).toThrow(FederatedSignInRefusedError);
+      expect(flow.redeem(receiptHash, { ...authority(saml), link }, checkedAt).decision).toEqual({
+        kind: 'refused',
+      });
+    }
+  });
+
+  it('refuses to restore a legacy SAML receipt whose link identity has no authority scope', () => {
+    const state = complete(saml).snapshot;
+    if (state.phase.kind !== 'complete') throw new Error('Expected a SAML continuation.');
+    Reflect.deleteProperty(state.phase.continuation.identity, 'organizationId');
+    Reflect.deleteProperty(state.phase.continuation.identity, 'connectionId');
+    expect(() => FederatedSignInFlow.restore(state)).toThrow(FederatedSignInRefusedError);
   });
 
   it('redeems once with the original persistence choice and explicit two-step decision', () => {

@@ -64,6 +64,13 @@
       "when": 1795268352475,
       "tag": "0008_federated_sign_in",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1795277216601,
+      "tag": "0009_saml_account_link_scope",
+      "breakpoints": true
     }
   ]
 }

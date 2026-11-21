@@ -97,6 +97,7 @@ const businessTables = [
   'password_reset_links',
   'password_reset_requests',
   'realtime_tickets',
+  'saml_account_links',
   'security_key_registrations',
   'security_keys',
   'sessions',
@@ -112,7 +113,7 @@ const businessTables = [
 const allTables = [...platformTables, ...businessTables].sort();
 
 /** Migrations of `migrations/meta/_journal.json`. */
-const migrationCount = 9;
+const migrationCount = 10;
 
 /**
  * Runs `docker compose` on the throwaway project.
@@ -427,6 +428,7 @@ describe('identity-service wiring', () => {
       'organization_choices',
       'outbox_events',
       'realtime_tickets',
+      'saml_account_links',
       'sessions',
     ]);
     expect(tables.rows).toEqual(
@@ -451,6 +453,7 @@ describe('identity-service wiring', () => {
       },
       { tablename: 'outbox_events', policyname: 'outbox_events_organization_isolation' },
       { tablename: 'realtime_tickets', policyname: 'realtime_tickets_organization_isolation' },
+      { tablename: 'saml_account_links', policyname: 'saml_account_links_organization_isolation' },
       { tablename: 'sessions', policyname: 'sessions_organization_isolation' },
     ]);
   });

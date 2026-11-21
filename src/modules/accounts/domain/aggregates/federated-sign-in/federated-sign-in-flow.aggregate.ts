@@ -115,10 +115,22 @@ function isExistingLink(
     link.status === 'active' &&
     link.id.trim().length > 0 &&
     link.userId.trim().length > 0 &&
-    link.identity.provider === identity.provider &&
-    link.identity.issuer === identity.issuer &&
+    isSameConnection(identity, link.identity) &&
     link.identity.subject === identity.subject
   );
+}
+
+function identityOf(connection: FederatedConnection, subject: string): FederatedIdentity {
+  const { provider, issuer } = connection;
+  return provider === 'saml'
+    ? {
+        provider,
+        issuer,
+        organizationId: connection.organizationId,
+        connectionId: connection.connectionId,
+        subject,
+      }
+    : { provider, issuer, subject };
 }
 
 // Copy allowed fields so a caller cannot inadvertently persist additional provider credentials.
@@ -132,7 +144,7 @@ function persistedPhase(phase: FlowPhase): FlowPhase {
     kind: 'complete',
     claimedAtMs,
     continuation: {
-      identity: { provider: identity.provider, issuer: identity.issuer, subject: identity.subject },
+      identity: identityOf(identity, identity.subject),
       linkId,
       userId,
       receiptHash,
@@ -208,8 +220,7 @@ export class FederatedSignInFlow {
         !sha256Hex.test(receipt.receiptHash) ||
         receipt.receiptHash === stateHash ||
         receipt.receiptHash === browserBindingHash ||
-        receipt.identity.provider !== connection.provider ||
-        receipt.identity.issuer !== connection.issuer ||
+        !isSameConnection(connection, receipt.identity) ||
         receipt.identity.subject.trim().length === 0 ||
         receipt.linkId.trim().length === 0 ||
         receipt.userId.trim().length === 0 ||
@@ -267,11 +278,7 @@ export class FederatedSignInFlow {
   ): FederatedSignInFlow {
     const { connection, phase, expiresAtMs } = this.state;
     const issuedAtMs = now.getTime();
-    const identity = {
-      provider: connection.provider,
-      issuer: connection.issuer,
-      subject: proof.subject,
-    };
+    const identity = identityOf(connection, proof.subject);
     if (
       phase.kind !== 'claimed' ||
       !timeWithin(issuedAtMs, phase.claimedAtMs, expiresAtMs) ||
