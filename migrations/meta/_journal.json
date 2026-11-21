@@ -71,6 +71,20 @@
       "when": 1795277216601,
       "tag": "0009_saml_account_link_scope",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1795284748958,
+      "tag": "0010_saml_assertion_replay",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1795285934407,
+      "tag": "0011_federated_challenge_and_retention",
+      "breakpoints": true
     }
   ]
 }

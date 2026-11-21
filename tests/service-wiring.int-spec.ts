@@ -1,6 +1,5 @@
 import { execFileSync } from 'node:child_process';
 import { createHash, generateKeyPairSync, randomUUID } from 'node:crypto';
-import { createServer } from 'node:net';
 import { fileURLToPath } from 'node:url';
 
 import {
@@ -36,6 +35,7 @@ import { SessionNotFound } from '../src/modules/sessions/application/models/sess
 import { IssueRealtimeTicket } from '../src/modules/sessions/application/use-cases/commands/realtime-ticket/issue-realtime-ticket/issue-realtime-ticket.use-case.js';
 import { RedeemRealtimeTicket } from '../src/modules/sessions/application/use-cases/commands/realtime-ticket/redeem-realtime-ticket/redeem-realtime-ticket.use-case.js';
 import { SystemExpiredRealtimeTicketsUnitOfWork } from '../src/modules/sessions/infrastructure/persistence/drizzle/transactions/session/system-expired-realtime-tickets.unit-of-work.js';
+import { freePort } from './support/loopback-port.fixture.js';
 
 // The service as main.ts assembles it, on a disposable PostgreSQL and NATS. `@cadenway/nest-testing`
 // does not export its container fixtures yet and a service never depends on `testcontainers` itself,
@@ -98,6 +98,7 @@ const businessTables = [
   'password_reset_requests',
   'realtime_tickets',
   'saml_account_links',
+  'saml_assertion_replays',
   'security_key_registrations',
   'security_keys',
   'sessions',
@@ -113,7 +114,7 @@ const businessTables = [
 const allTables = [...platformTables, ...businessTables].sort();
 
 /** Migrations of `migrations/meta/_journal.json`. */
-const migrationCount = 10;
+const migrationCount = 12;
 
 /**
  * Runs `docker compose` on the throwaway project.
@@ -148,28 +149,6 @@ function brokerAccepts(env: Readonly<Record<string, string>>, ...args: readonly 
   } catch {
     return false;
   }
-}
-
-/**
- * Finds a port of the loopback interface that nothing listens on.
- *
- * @returns A free port, released before it is returned.
- */
-async function freePort(): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const server = createServer();
-    server.once('error', reject);
-    server.listen(0, '127.0.0.1', () => {
-      const address = server.address();
-      server.close(() => {
-        if (address === null || typeof address === 'string') {
-          reject(new Error('The probe server has no TCP address.'));
-        } else {
-          resolve(String(address.port));
-        }
-      });
-    });
-  });
 }
 
 /**
@@ -429,6 +408,7 @@ describe('identity-service wiring', () => {
       'outbox_events',
       'realtime_tickets',
       'saml_account_links',
+      'saml_assertion_replays',
       'sessions',
     ]);
     expect(tables.rows).toEqual(
@@ -454,6 +434,10 @@ describe('identity-service wiring', () => {
       { tablename: 'outbox_events', policyname: 'outbox_events_organization_isolation' },
       { tablename: 'realtime_tickets', policyname: 'realtime_tickets_organization_isolation' },
       { tablename: 'saml_account_links', policyname: 'saml_account_links_organization_isolation' },
+      {
+        tablename: 'saml_assertion_replays',
+        policyname: 'saml_assertion_replays_organization_isolation',
+      },
       { tablename: 'sessions', policyname: 'sessions_organization_isolation' },
     ]);
   });
@@ -1181,9 +1165,17 @@ describe('identity-service wiring', () => {
       'account.delete.dead-letter',
       'account.deletion-sweep',
       'account.deletion-sweep.dead-letter',
+      'account.federation-expiry',
+      'account.federation-expiry.dead-letter',
       'session.realtime-ticket-expiry',
       'session.realtime-ticket-expiry.dead-letter',
     ]);
+    const federationSchedule = await system.run((tx) =>
+      tx.client.query('select cron, timezone from pgboss.schedule where name = $1', [
+        'account.federation-expiry',
+      ]),
+    );
+    expect(federationSchedule.rows).toEqual([{ cron: '* * * * *', timezone: 'UTC' }]);
     await expect(
       system.run((tx) => tx.client.query('create table pgboss.wiring_probe (id integer)')),
     ).rejects.toMatchObject({ code: '42501' });

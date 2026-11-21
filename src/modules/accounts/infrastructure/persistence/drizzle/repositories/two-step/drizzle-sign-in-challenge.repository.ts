@@ -1,10 +1,27 @@
 import type { TransactionDatabase } from '@cadenway/nest-common/database';
 import { eq, sql } from 'drizzle-orm';
+import { z } from 'zod';
 
 import type { SignInChallengeRepository } from '../../../../../application/ports/outbound/persistence/two-step/sign-in-challenge-repository.port.js';
 import type { SignInChallengeIssue } from '../../../../../domain/aggregates/two-step/sign-in-challenge-issue.aggregate.js';
 import { SignInChallenge } from '../../../../../domain/aggregates/two-step/sign-in-challenge.aggregate.js';
 import challenges from '../../schemas/two-step/sign-in-challenge.schema.js';
+
+const federatedBindingSchema = z.strictObject({
+  linkId: z.uuid(),
+  connection: z.discriminatedUnion('provider', [
+    z.strictObject({
+      provider: z.enum(['google', 'github', 'microsoft', 'gitlab']),
+      issuer: z.string().min(1),
+    }),
+    z.strictObject({
+      provider: z.literal('saml'),
+      issuer: z.string().min(1),
+      organizationId: z.uuid(),
+      connectionId: z.string().min(1),
+    }),
+  ]),
+});
 
 /**
  * Function toSignInChallenge
@@ -22,6 +39,8 @@ function toSignInChallenge(row: typeof challenges.$inferSelect): SignInChallenge
     tokenHash: row.tokenHash,
     persistent: row.persistent,
     expiresAt: row.expiresAt,
+    federatedBinding:
+      row.federatedBinding === null ? null : federatedBindingSchema.parse(row.federatedBinding),
     assertionChallenge: row.assertionChallenge,
     assertionExpiresAt: row.assertionExpiresAt,
   });
@@ -83,6 +102,7 @@ export class DrizzleSignInChallengeRepository implements SignInChallengeReposito
         tokenHash: issue.tokenHash,
         persistent: issue.persistent,
         expiresAt: issue.expiresAt,
+        federatedBinding: issue.federatedBinding,
       })
       .onConflictDoUpdate({
         target: challenges.userId,
@@ -91,6 +111,7 @@ export class DrizzleSignInChallengeRepository implements SignInChallengeReposito
           tokenHash: issue.tokenHash,
           persistent: issue.persistent,
           expiresAt: issue.expiresAt,
+          federatedBinding: issue.federatedBinding,
           assertionChallenge: null,
           assertionExpiresAt: null,
           createdAt: sql`now()`,

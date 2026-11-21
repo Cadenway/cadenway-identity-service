@@ -21,7 +21,8 @@ import { completeSignIn } from '../authentication/sign-in-completion.service.js'
  * two-step verification of the account, the lock order of every flow that writes them (the account
  * before its two-step rows). A token that is malformed, unknown, answered, replaced or expired, a
  * challenge whose account is gone or has no two-step verification any more, answer
- * `auth.challenge-expired`, checked first, so it counts no attempt.
+ * `auth.challenge-expired`, checked first, so it counts no attempt. A federated challenge also
+ * requires the original link and connection to remain authorized in the answer transaction.
  *
  * @param {AccountsStore} store - The repositories of the transaction.
  * @param {ChallengeTokens} tokens - Hashes the token.
@@ -53,6 +54,14 @@ export async function lockChallenge(
   const verification: TwoStepVerification | null =
     user === null ? null : await store.twoStep.lock(user.id);
   if (user === null || challenge?.isUsableAt(now) !== true || verification === null) {
+    return { reason: 'challenge-expired' };
+  }
+  const binding = challenge.snapshot.federatedBinding;
+  if (
+    binding !== null &&
+    (!user.isVerified || !(await store.mayFinishFederatedChallenge(user.id, binding)))
+  ) {
+    await store.challenges.deleteOfUser(user.id);
     return { reason: 'challenge-expired' };
   }
   return { user, challenge, verification };

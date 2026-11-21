@@ -1,0 +1,2 @@
+ALTER TABLE "sign_in_challenges" ADD COLUMN "federated_binding" jsonb;--> statement-breakpoint
+CREATE INDEX "saml_assertion_replays_expiry_index" ON "saml_assertion_replays" USING btree ("expires_at","id");

@@ -6,6 +6,9 @@ import { messagingConfigShape } from '@cadenway/nest-messaging';
 import type { MessagingConfig } from '@cadenway/nest-messaging';
 import { z } from 'zod';
 
+import { samlSignInConfigShape, type SamlSignInConfig } from './saml-sign-in-config.js';
+import { socialSignInConfigShape, type SocialSignInConfig } from './social-sign-in-config.js';
+
 /**
  * Type AppConfig
  *
@@ -40,7 +43,9 @@ export type AppConfig = BaseConfig &
   MessagingConfig &
   InternalTokenVerifierConfig &
   PasswordPepperConfig &
-  WebAuthnConfig;
+  WebAuthnConfig &
+  SocialSignInConfig &
+  SamlSignInConfig;
 
 /**
  * Interface PasswordPepperConfig
@@ -224,6 +229,8 @@ export const appConfigSchema: z.ZodType<AppConfig> = z
     NOTIFICATION_SERVICE_INTERNAL_TOKEN_PUBLIC_JWKS: notificationPublicKeys,
     ...passwordPepperConfigShape,
     ...webAuthnConfigShape,
+    ...socialSignInConfigShape,
+    ...samlSignInConfigShape,
   })
   .refine(originsMatchRelyingParty, {
     path: ['WEBAUTHN_ORIGINS'],

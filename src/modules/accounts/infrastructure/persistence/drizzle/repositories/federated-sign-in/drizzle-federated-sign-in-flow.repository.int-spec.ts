@@ -4,16 +4,23 @@ import { fileURLToPath } from 'node:url';
 
 import { runWithOrganizationContext } from '@cadenway/nest-common';
 import { SystemTransactionRunner, TenantTransactionRunner } from '@cadenway/nest-common/database';
+import { inArray } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { FederatedSignInFlow } from '../../../../../domain/aggregates/federated-sign-in/federated-sign-in-flow.aggregate.js';
+import { SignInChallenge } from '../../../../../domain/aggregates/two-step/sign-in-challenge.aggregate.js';
+import { federatedSignInFlows } from '../../schemas/federated-sign-in/federated-sign-in-flow.schema.js';
 import { samlAccountLinks } from '../../schemas/federated-sign-in/saml-account-link.schema.js';
+import { samlAssertionReplays } from '../../schemas/federated-sign-in/saml-assertion-replay.schema.js';
+import { SystemExpiredFederationUnitOfWork } from '../../transactions/federated-sign-in/system-expired-federation.unit-of-work.js';
 import { SystemSocialFlowUnitOfWork } from '../../transactions/federated-sign-in/system-social-flow.unit-of-work.js';
+import { DrizzleSignInChallengeRepository } from '../two-step/drizzle-sign-in-challenge.repository.js';
 import { DrizzleFederatedAccountLinkRepository } from './drizzle-federated-account-link.repository.js';
 import { DrizzleFederatedSignInFlowRepository } from './drizzle-federated-sign-in-flow.repository.js';
+import { DrizzleSamlAssertionReplayGuard } from './drizzle-saml-assertion-replay-guard.repository.js';
 
 const composeFile = fileURLToPath(
   new URL('../../../../../../../../compose.dev.yaml', import.meta.url),
@@ -58,7 +65,7 @@ describe('federated sign-in persistence', () => {
   let tenantRunner: TenantTransactionRunner;
 
   beforeAll(async () => {
-    compose('up', '--detach', '--wait', '--wait-timeout', '120', 'postgres');
+    compose('up', '--detach', '--wait', '--wait-timeout', '120', '--pull', 'never', 'postgres');
     const port = compose('port', 'postgres', '5432').trim().split(':').at(-1);
     if (port === undefined) throw new Error('PostgreSQL has no test port.');
     const migrator = new pg.Pool({
@@ -166,6 +173,35 @@ describe('federated sign-in persistence', () => {
     );
   });
 
+  it('claims each assertion once across connections to PostgreSQL and isolates other tenants', async () => {
+    const first = new DrizzleSamlAssertionReplayGuard(runner);
+    const second = new DrizzleSamlAssertionReplayGuard(runner);
+    const expiry = new Date(Date.now() + 120_000);
+    const key = JSON.stringify(['assertion', saml.issuer, '_same-test-assertion']);
+    const results = await Promise.all([
+      first.claim(saml, key, expiry),
+      second.claim(saml, key, expiry),
+    ]);
+    expect(results.sort()).toEqual([false, true]);
+    const otherOrganization = { ...saml, organizationId: anotherOrganizationId };
+    await expect(second.claim(otherOrganization, key, expiry)).resolves.toBe(true);
+    await expect(
+      second.claim({ ...saml, connectionId: 'another-directory' }, key, expiry),
+    ).resolves.toBe(true);
+
+    await runWithOrganizationContext(
+      { organizationId, actor: { type: 'user', id: userId }, role: null, scopes: [] },
+      () =>
+        tenantRunner.run(async ({ db }) => {
+          expect(
+            await db
+              .select({ organizationId: samlAssertionReplays.organizationId })
+              .from(samlAssertionReplays),
+          ).toEqual([{ organizationId }, { organizationId }]);
+        }),
+    );
+  });
+
   it('claims once, rolls back an interrupted completion and consumes an authorization refusal', async () => {
     const currentIdentity = { ...identity, subject: 'subject-2' };
     const link = await runner.run((scope) =>
@@ -263,6 +299,44 @@ describe('federated sign-in persistence', () => {
     });
   });
 
+  it('round trips a bound challenge and clears its authority on ordinary sign-in replacement', async () => {
+    const federation = {
+      connection: saml,
+      linkId: '01938f6e-0000-7000-8000-000000000079',
+    } as const;
+    const binding = {
+      linkId: federation.linkId,
+      connection: {
+        provider: federation.connection.provider,
+        issuer: federation.connection.issuer,
+        organizationId: federation.connection.organizationId,
+        connectionId: federation.connection.connectionId,
+      },
+    };
+    const boundHash = '8'.repeat(64);
+    const ordinaryHash = '9'.repeat(64);
+    await runner.run(async ({ db }) => {
+      const repository = new DrizzleSignInChallengeRepository(db);
+      await repository.replace(
+        SignInChallenge.issue(anotherUserId, boundHash, true, issuedAt, binding),
+      );
+    });
+    await runner.run(async ({ db }) => {
+      const repository = new DrizzleSignInChallengeRepository(db);
+      const stored = await repository.findByTokenHash(boundHash, true);
+      expect(stored?.snapshot.federatedBinding).toEqual(binding);
+      if (stored === null) throw new Error('Expected a federated challenge.');
+      await repository.saveAssertion(stored.withAssertion('challenge', checkedAt));
+      const withOptions = await repository.findByTokenHash(boundHash, true);
+      expect(withOptions?.snapshot.federatedBinding).toEqual(binding);
+      const ordinary = await repository.replace(
+        SignInChallenge.issue(anotherUserId, ordinaryHash, false, checkedAt),
+      );
+      expect(ordinary.snapshot.federatedBinding).toBeNull();
+      await expect(repository.findByTokenHash(boundHash, true)).resolves.toBeNull();
+    });
+  });
+
   it('commits a social claim before returning and rejects an enclosing transaction', async () => {
     const social = new SystemSocialFlowUnitOfWork(runner, () => Promise.resolve(true));
     const hash = 'e'.repeat(64);
@@ -357,6 +431,125 @@ describe('federated sign-in persistence', () => {
     );
     await expect(unavailable.run((store) => store.isEligible(userId, connection))).rejects.toThrow(
       'Policy unavailable.',
+    );
+  });
+
+  it('sweeps only expired federation rows in bounded batches and skips locked rows', async () => {
+    const expired = [0, 1, 2].map((index) => ({
+      flowId: `01938f6e-0000-7000-8000-00000000013${String(index)}`,
+      markerId: `01938f6e-0000-7000-8000-00000000014${String(index)}`,
+      hash: createHash('sha256')
+        .update(`expiry fixture ${String(index)}`)
+        .digest('hex'),
+      issuedAt: new Date(index * 1_000),
+    }));
+    const liveFlowId = '01938f6e-0000-7000-8000-000000000150';
+    const liveStateHash = createHash('sha256').update('live federation flow fixture').digest('hex');
+    const guard = new DrizzleSamlAssertionReplayGuard(runner);
+    const retainedConnection = { ...saml, connectionId: 'retention-margin-test' };
+    const retainedKey = 'assertion recently expired at the provider';
+    const retainedKeyHash = createHash('sha256').update(retainedKey).digest('hex');
+    const assertionExpiry = new Date(Date.now() - 1_000);
+    expect(await guard.claim(retainedConnection, retainedKey, assertionExpiry)).toBe(true);
+    await runner.run(async (scope) => {
+      const flows = new DrizzleFederatedSignInFlowRepository(scope);
+      for (const fixture of expired) {
+        await flows.insert(
+          FederatedSignInFlow.issue(
+            {
+              id: fixture.flowId,
+              connection,
+              stateHash: fixture.hash,
+              browserBindingHash,
+              persistent: false,
+            },
+            fixture.issuedAt,
+          ),
+        );
+      }
+      await flows.insert(
+        FederatedSignInFlow.issue(
+          {
+            id: liveFlowId,
+            connection,
+            stateHash: liveStateHash,
+            browserBindingHash,
+            persistent: false,
+          },
+          new Date(),
+        ),
+      );
+      await scope.db.insert(samlAssertionReplays).values(
+        expired.map((fixture, index) => ({
+          id: fixture.markerId,
+          organizationId: index === 1 ? anotherOrganizationId : organizationId,
+          connectionId: 'old-directory',
+          keyHash: fixture.hash,
+          expiresAt: fixture.issuedAt,
+        })),
+      );
+    });
+
+    const [oldest, next, last] = expired;
+    if (oldest === undefined || next === undefined || last === undefined) {
+      throw new Error('Federation expiry needs three ordered fixtures.');
+    }
+    const flowIds = [oldest.flowId, next.flowId, last.flowId, liveFlowId];
+    const markerHashes = [oldest.hash, next.hash, last.hash, retainedKeyHash];
+    let markLocked = (): void => {
+      throw new Error('The lock barrier is not initialized.');
+    };
+    let releaseLock = (): void => {
+      throw new Error('The release barrier is not initialized.');
+    };
+    const locked = new Promise<void>((resolve) => {
+      markLocked = resolve;
+    });
+    const release = new Promise<void>((resolve) => {
+      releaseLock = resolve;
+    });
+    const holding = runner.run(async ({ client }) => {
+      await client.query('select id from federated_sign_in_flows where id = $1 for update', [
+        oldest.flowId,
+      ]);
+      await client.query('select id from saml_assertion_replays where id = $1 for update', [
+        oldest.markerId,
+      ]);
+      markLocked();
+      await release;
+    });
+    const work = new SystemExpiredFederationUnitOfWork(runner);
+    const retained = () =>
+      runner.run(async ({ db }) => {
+        const flows = await db
+          .select({ id: federatedSignInFlows.id })
+          .from(federatedSignInFlows)
+          .where(inArray(federatedSignInFlows.id, flowIds))
+          .orderBy(federatedSignInFlows.id);
+        const markers = await db
+          .select({ hash: samlAssertionReplays.keyHash })
+          .from(samlAssertionReplays)
+          .where(inArray(samlAssertionReplays.keyHash, markerHashes))
+          .orderBy(samlAssertionReplays.keyHash);
+        return { flows: flows.map(({ id }) => id), markers: markers.map(({ hash }) => hash) };
+      });
+
+    try {
+      await Promise.race([locked, holding]);
+      await expect(work.deleteBatch(1)).resolves.toEqual({ flows: 1, assertions: 1 });
+      expect(await retained()).toEqual({
+        flows: [oldest.flowId, last.flowId, liveFlowId],
+        markers: [oldest.hash, last.hash, retainedKeyHash].sort(),
+      });
+    } finally {
+      releaseLock();
+      await holding;
+    }
+
+    await work.deleteBatch(100);
+    expect(await retained()).toEqual({ flows: [liveFlowId], markers: [retainedKeyHash] });
+    await expect(guard.claim(retainedConnection, retainedKey, assertionExpiry)).resolves.toBe(
+      false,
     );
   });
 });

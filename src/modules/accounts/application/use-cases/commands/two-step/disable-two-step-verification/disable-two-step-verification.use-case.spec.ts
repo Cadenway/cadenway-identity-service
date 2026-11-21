@@ -73,6 +73,7 @@ describe('DisableTwoStepVerification', () => {
       tokenHash: 'hash:challenge-1',
       persistent: false,
       expiresAt: new Date('2026-11-09T13:25:00Z'),
+      federatedBinding: null,
       assertionChallenge: null,
       assertionExpiresAt: null,
     });

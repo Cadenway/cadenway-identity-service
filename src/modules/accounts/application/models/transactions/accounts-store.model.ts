@@ -2,6 +2,7 @@ import type { BackupCodeRepository } from '../../ports/outbound/persistence/two-
 import type { PendingTwoStepRepository } from '../../ports/outbound/persistence/two-step/pending-two-step-repository.port.js';
 import type { SecurityKeyRepository } from '../../ports/outbound/persistence/two-step/security-key-repository.port.js';
 import type { SignInChallengeRepository } from '../../ports/outbound/persistence/two-step/sign-in-challenge-repository.port.js';
+import type { FederatedChallengeBinding } from '../../../domain/value-objects/federated-sign-in/federated-challenge-binding.value-object.js';
 import type { TwoStepVerificationRepository } from '../../ports/outbound/persistence/two-step/two-step-verification-repository.port.js';
 import type { AccountDeletionQueue } from '../../ports/outbound/jobs/accounts/account-deletion-queue.port.js';
 import type { AccountEvents } from '../../ports/outbound/messaging/accounts/account-events.port.js';
@@ -186,5 +187,10 @@ export interface AccountsStore {
    * @readonly
    */
   readonly challenges: SignInChallengeRepository;
+  // #endregion
+
+  // #region Methods
+  /** Locks the current first-factor authority for a federated two-step answer. */
+  mayFinishFederatedChallenge(userId: string, binding: FederatedChallengeBinding): Promise<boolean>;
   // #endregion
 }

@@ -5,6 +5,8 @@ import type { JobProducer } from '@cadenway/nest-jobs/runtime';
 import type { AccountsStore } from '../../../../../application/models/transactions/accounts-store.model.js';
 import type { UnitOfWorkOptions } from '../../../../../application/models/transactions/unit-of-work-options.model.js';
 import type { AccountsUnitOfWork } from '../../../../../application/ports/outbound/transactions/accounts/accounts-unit-of-work.port.js';
+import type { FederatedFinishStore } from '../../../../../application/ports/outbound/transactions/federation/federated-finish-store.port.js';
+import type { FederatedChallengeBinding } from '../../../../../domain/value-objects/federated-sign-in/federated-challenge-binding.value-object.js';
 import { JobsAccountDeletionQueue } from '../../../../jobs/pg-boss/accounts/jobs-account-deletion-queue.adapter.js';
 import { OutboxAccountEvents } from '../../../../messaging/outbox/accounts/outbox-account-events.adapter.js';
 import { DrizzlePasswordCredentialRepository } from '../../repositories/accounts/drizzle-password-credential.repository.js';
@@ -13,6 +15,7 @@ import { DrizzleUserRepository } from '../../repositories/accounts/drizzle-user.
 import { DrizzleCodeRequestRepository } from '../../repositories/authentication/drizzle-code-request.repository.js';
 import { DrizzleOneTimeCodeRepository } from '../../repositories/authentication/drizzle-one-time-code.repository.js';
 import { DrizzleEmailChangeRepository } from '../../repositories/email-change/drizzle-email-change.repository.js';
+import { DrizzleFederatedAccountLinkRepository } from '../../repositories/federated-sign-in/drizzle-federated-account-link.repository.js';
 import { DrizzlePasswordResetLinkRepository } from '../../repositories/password-reset/drizzle-password-reset-link.repository.js';
 import { DrizzlePasswordResetRequestRepository } from '../../repositories/password-reset/drizzle-password-reset-request.repository.js';
 import { DrizzleBackupCodeRepository } from '../../repositories/two-step/drizzle-backup-code.repository.js';
@@ -98,6 +101,7 @@ export class SystemAccountsUnitOfWork implements AccountsUnitOfWork {
    * @param {OutboxWriter} outbox - The outbox writer.
    * @param {OutboxRelay} relay - The outbox relay.
    * @param {JobProducer} jobs - The job producer.
+   * @param {Pick<FederatedFinishStore, 'isAllowed' | 'hasActiveMembership'>} federation - The current federated sign-in authority, if available.
    * @constructor
    */
   public constructor(
@@ -105,6 +109,7 @@ export class SystemAccountsUnitOfWork implements AccountsUnitOfWork {
     outbox: OutboxWriter,
     relay: OutboxRelay,
     jobs: JobProducer,
+    private readonly federation?: Pick<FederatedFinishStore, 'isAllowed' | 'hasActiveMembership'>,
   ) {
     this.runner = runner;
     this.outbox = outbox;
@@ -145,6 +150,8 @@ export class SystemAccountsUnitOfWork implements AccountsUnitOfWork {
           securityKeys: new DrizzleSecurityKeyRepository(transaction.db),
           pendingTwoStep: new DrizzlePendingTwoStepRepository(transaction.db),
           challenges: new DrizzleSignInChallengeRepository(transaction.db),
+          mayFinishFederatedChallenge: (userId, binding) =>
+            this.mayFinishFederatedChallenge(transaction, userId, binding),
           deletionQueue: new JobsAccountDeletionQueue(transaction, this.jobs),
           events: new OutboxAccountEvents(transaction, this.outbox, (): void => {
             appends.count += 1;
@@ -156,6 +163,28 @@ export class SystemAccountsUnitOfWork implements AccountsUnitOfWork {
       this.relay.wake();
     }
     return result;
+  }
+
+  /** Rechecks the locked link and, for SAML, the active membership of its organization. */
+  private async mayFinishFederatedChallenge(
+    transaction: TransactionScope,
+    userId: string,
+    binding: FederatedChallengeBinding,
+  ): Promise<boolean> {
+    if (this.federation === undefined) return false;
+    const { connection, linkId } = binding;
+    const link = await new DrizzleFederatedAccountLinkRepository(transaction).findById(
+      userId,
+      linkId,
+      connection,
+    );
+    if (link?.status !== 'active' || !(await this.federation.isAllowed(userId, connection))) {
+      return false;
+    }
+    return (
+      connection.provider !== 'saml' ||
+      (await this.federation.hasActiveMembership(userId, connection.organizationId))
+    );
   }
   // #endregion
 }

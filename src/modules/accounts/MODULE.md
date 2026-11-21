@@ -110,8 +110,7 @@ Migration `0008_federated_sign_in.sql` creates the two global federated sign-in 
 pins a verified provider identity to a local account. The flow stores state, browser and callback
 receipt digests, a version and an indexed retention deadline. The repositories require a system
 transaction and lock the flow before advancing its version or redeeming a receipt. A failed
-transaction leaves the receipt available for its legitimate browser to retry. The provider
-callbacks, federated session admission and expired-flow cleanup are wired separately.
+transaction leaves the receipt available for its legitimate browser to retry.
 
 Migration `0009_saml_account_link_scope.sql` adds isolated SAML links. Identity uses the
 organization and connection of the claimed flow for each link lookup and recheck in its existing
@@ -122,6 +121,16 @@ from the earlier schema, whose trusted connection cannot be recovered. A replace
 connection gets a new ID even if it uses the same issuer. Rollback retains the table. Disable
 SAML before reverting to an image without scoped links.
 
+Migration `0010_saml_assertion_replay.sql` records accepted assertion digests until the end of
+their validity window. It uses forced RLS and scopes each assertion to the configured organization
+and connection. A provisioned SAML connection is selected by its verified work domain and then
+bound to the browser flow. The callback checks the original request, the pinned signing authority
+and the current account link and membership before issuing a receipt.
+
+Migration `0011_federated_challenge_and_retention.sql` adds the optional connection and link reference to
+pending MFA challenges. Every second-factor response rechecks the exact link and current authority
+before issuing a session. It also adds an expiry index for scanning assertion markers globally.
+
 The social provider port exchanges codes after the original provider, state and browser binding
 have been claimed. Google, Microsoft and GitLab use fixed HTTPS authority endpoints and verify the
 ID token signature, issuer, audience, expiration, nonce and subject. Microsoft configuration uses a
@@ -130,14 +139,22 @@ fixed user endpoint. Both adapters use S256 and the exact configured callback, a
 provider identity required to look up an existing link. The callback orchestration owns claiming
 state and calls the provider outside the database transaction.
 
-The `account.deletion-sweep`, `account.delete` and `account.avatar-upload-expiry` queues live in
-the `pgboss` schema of `@cadenway/nest-jobs`, provisioned by `src/migrate.ts`. The avatar sweep
-has no payload.
+The `account.deletion-sweep`, `account.delete`, `account.avatar-upload-expiry` and
+`account.federation-expiry` queues live in the `pgboss` schema of `@cadenway/nest-jobs`,
+provisioned by `src/migrate.ts`. The avatar sweep and federation sweep have no payload.
+Every UTC minute, the federation sweep handles up to four transactions of at most 250 expired
+flows and 250 eligible assertion markers each, skipping rows locked by other transactions.
 
 ## API
 
 From `openapi/internal/identity-service.yaml` of the installed `@cadenway/contracts`. The account
 routes below accept `api-gateway`.
+
+Federated sign-in uses the anonymous Gateway actor with no organization claim. The four endpoints
+are `POST /internal/v1/auth/sign-in/federated/start`, `/oauth/callback`, `/saml/callback` and
+`/finish` under the same prefix. Start returns a browser binding and authorization URL. Callbacks
+return a one-use receipt. Finish rechecks the configured authority, account link and membership
+where applicable, then uses the ordinary session and two-step policies.
 
 | Route                                                           | Actor       | Success                      | Refusals                                                                                                                                                                                                            |
 | --------------------------------------------------------------- | ----------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

@@ -14,6 +14,11 @@ function derive(key: KeyObject, purpose: 'nonce' | 'pkce', state: string): strin
     .digest('base64url');
 }
 
+/** Hashes an opaque browser credential for durable storage and lookup. */
+export function digestFederatedCredential(value: string): string {
+  return createHash('sha256').update(value, 'utf8').digest('hex');
+}
+
 /** Issues independent browser credentials and derives provider values without storing them. */
 export class VersionedSocialFlowCredentials implements SocialFlowCredentials {
   // #region Properties
@@ -57,7 +62,7 @@ export class VersionedSocialFlowCredentials implements SocialFlowCredentials {
 
   /** Hashes an opaque browser credential for durable storage and lookup. */
   public digest(value: string): string {
-    return createHash('sha256').update(value, 'utf8').digest('hex');
+    return digestFederatedCredential(value);
   }
 
   /** Uses the issued version to reproduce the verifier, S256 challenge and nonce. */

@@ -47,6 +47,12 @@ export const AVATAR_UPLOAD_EXPIRY_QUEUE: string = 'account.avatar-upload-expiry'
 /** Runs one bounded expiration sweep every minute in UTC. */
 export const AVATAR_UPLOAD_EXPIRY_CRON: string = '* * * * *';
 
+/** System-only queue for removing expired sign-in flows and SAML replay markers. */
+export const FEDERATION_EXPIRY_QUEUE: string = 'account.federation-expiry';
+
+/** Runs bounded federation retention every minute in UTC. */
+export const FEDERATION_EXPIRY_CRON: string = '* * * * *';
+
 /**
  * Constant jobQueues
  *
@@ -68,6 +74,8 @@ export const AVATAR_UPLOAD_EXPIRY_CRON: string = '* * * * *';
  *   because the expiry time on the ticket determines eligibility.
  * - `account.avatar-upload-expiry` takes up to 100 candidates per occurrence. Two retries cover
  *   transient failures, and a later sweep retries candidates without a committed decision.
+ * - `account.federation-expiry` removes expired sign-in flows and replay markers in bounded batches
+ *   with two retries for transient failures.
  *
  * @type {readonly JobQueueDeclaration[]}
  */
@@ -106,6 +114,17 @@ export const jobQueues: readonly JobQueueDeclaration[] = [
   },
   {
     name: AVATAR_UPLOAD_EXPIRY_QUEUE,
+    retryLimit: 2,
+    retryDelaySeconds: 10,
+    retryBackoff: true,
+    retryDelayMaxSeconds: 60,
+    expireInSeconds: 120,
+    retentionSeconds: 3_600,
+    deleteAfterSeconds: 3_600,
+    deadLetterRetentionSeconds: 86_400,
+  },
+  {
+    name: FEDERATION_EXPIRY_QUEUE,
     retryLimit: 2,
     retryDelaySeconds: 10,
     retryBackoff: true,

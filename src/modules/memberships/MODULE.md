@@ -29,7 +29,7 @@ the sessions.
 | --------------------------------------------- | ------------------------------ |
 | `memberships.module`                          | sessions, api-tokens, accounts |
 | `public/membership/find-active-membership`    | sessions, api-tokens           |
-| `public/membership/lock-active-membership`    | sessions                       |
+| `public/membership/lock-active-membership`    | accounts, sessions             |
 | `public/membership/find-owned-organizations`  | accounts                       |
 | `public/membership/find-user-memberships`     | sessions                       |
 | `public/membership/find-organization-member`  | sessions                       |
