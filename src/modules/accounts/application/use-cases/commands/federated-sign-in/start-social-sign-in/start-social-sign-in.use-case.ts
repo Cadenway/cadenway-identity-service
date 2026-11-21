@@ -35,18 +35,20 @@ export class StartSocialSignIn {
     } catch {
       return { kind: 'unavailable' };
     }
-    const flow = FederatedSignInFlow.issue(
-      {
-        id: issued.id,
-        connection: provider.connection,
-        stateHash: this.credentials.digest(issued.state),
-        browserBindingHash: this.credentials.digest(issued.browserBinding),
-        persistent: input.rememberMe,
-      },
-      this.clock.now(),
-    );
-    await this.work.run(async (store) => {
+    const flow = await this.work.run(async (store) => {
+      const id = await store.nextFlowId();
+      const flow = FederatedSignInFlow.issue(
+        {
+          id,
+          connection: provider.connection,
+          stateHash: this.credentials.digest(issued.state),
+          browserBindingHash: this.credentials.digest(issued.browserBinding),
+          persistent: input.rememberMe,
+        },
+        this.clock.now(),
+      );
       await store.insert(flow);
+      return flow;
     });
     return {
       kind: 'started',

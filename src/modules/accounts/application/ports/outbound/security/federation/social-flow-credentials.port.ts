@@ -1,8 +1,8 @@
 /** Generates independent browser credentials and reconstructs provider secrets server-side. */
 export interface SocialFlowCredentials {
   // #region Methods
-  /** Draws a fresh 256-bit state, browser binding and flow identifier. */
-  issue(): { readonly id: string; readonly state: string; readonly browserBinding: string };
+  /** Draws a fresh 256-bit state and browser binding. */
+  issue(): { readonly state: string; readonly browserBinding: string };
 
   /** Draws a fresh 256-bit, single-use continuation receipt. */
   receipt(): string;

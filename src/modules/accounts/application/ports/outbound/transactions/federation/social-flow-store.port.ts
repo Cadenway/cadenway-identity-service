@@ -6,6 +6,9 @@ import type { LinkedFederatedAccount } from '../../../../../domain/value-objects
 /** Repositories bound to one global Identity transaction. */
 export interface SocialFlowStore {
   // #region Methods
+  /** Allocates a flow identifier from the database in this transaction. */
+  nextFlowId(): Promise<string>;
+
   /** Inserts an open flow under its unique state digest. */
   insert(flow: FederatedSignInFlow): Promise<void>;
 

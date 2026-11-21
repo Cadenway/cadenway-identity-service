@@ -11,6 +11,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { FederatedSignInFlow } from '../../../../../domain/aggregates/federated-sign-in/federated-sign-in-flow.aggregate.js';
 import { samlAccountLinks } from '../../schemas/federated-sign-in/saml-account-link.schema.js';
+import { SystemSocialFlowUnitOfWork } from '../../transactions/federated-sign-in/system-social-flow.unit-of-work.js';
 import { DrizzleFederatedAccountLinkRepository } from './drizzle-federated-account-link.repository.js';
 import { DrizzleFederatedSignInFlowRepository } from './drizzle-federated-sign-in-flow.repository.js';
 
@@ -260,5 +261,102 @@ describe('federated sign-in persistence', () => {
       expect(await flows.save(result.flow, stored.version)).toBe(true);
       expect(await flows.save(result.flow, stored.version)).toBe(false);
     });
+  });
+
+  it('commits a social claim before returning and rejects an enclosing transaction', async () => {
+    const social = new SystemSocialFlowUnitOfWork(runner, () => Promise.resolve(true));
+    const hash = 'e'.repeat(64);
+    const socialIdentity = { ...identity, subject: 'unit-of-work-subject' };
+    const link = await runner.run((scope) =>
+      new DrizzleFederatedAccountLinkRepository(scope).insert(userId, socialIdentity),
+    );
+    expect(link).not.toBeNull();
+    expect(await social.run((store) => store.findLink(socialIdentity))).toEqual(link);
+    expect(
+      await social.run((store) => store.findLink({ ...socialIdentity, subject: 'different' })),
+    ).toBeNull();
+    await social.run(async (store) => {
+      const allocatedId = await store.nextFlowId();
+      expect(allocatedId).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+      );
+      await store.insert(
+        FederatedSignInFlow.issue(
+          {
+            id: allocatedId,
+            connection,
+            stateHash: hash,
+            browserBindingHash,
+            persistent: false,
+          },
+          issuedAt,
+        ),
+      );
+    });
+    await social.run(async (store) => {
+      const record = await store.findByStateHash(hash);
+      if (record === null) throw new Error('Missing flow.');
+      const claimed = record.flow.claim(
+        { provider: 'google', stateHash: hash, browserBindingHash },
+        checkedAt,
+      );
+      expect(await store.save(claimed, record.version)).toBe(true);
+    });
+    await runner.run(async (scope) => {
+      const record = await new DrizzleFederatedSignInFlowRepository(scope).findByStateHash(hash);
+      expect(record?.flow.snapshot.phase.kind).toBe('claimed');
+      await expect(social.run(() => Promise.resolve(undefined))).rejects.toThrow();
+    });
+    const rolledBackHash = 'f'.repeat(64);
+    await expect(
+      social.run(async (store) => {
+        await store.insert(
+          FederatedSignInFlow.issue(
+            {
+              id: await store.nextFlowId(),
+              connection,
+              stateHash: rolledBackHash,
+              browserBindingHash,
+              persistent: false,
+            },
+            issuedAt,
+          ),
+        );
+        throw new Error('Rollback social flow.');
+      }),
+    ).rejects.toThrow('Rollback social flow.');
+    await runner.run(async (scope) => {
+      const record = await new DrizzleFederatedSignInFlowRepository(scope).findByStateHash(
+        rolledBackHash,
+      );
+      expect(record).toBeNull();
+    });
+  });
+
+  it('requires a verified locked account and an approving transaction-bound policy', async () => {
+    let called = 0;
+    const social = new SystemSocialFlowUnitOfWork(runner, (scope, candidate, authority) => {
+      expect(scope.kind).toBe('system');
+      expect(candidate).toBe(userId);
+      expect(authority).toEqual(connection);
+      called += 1;
+      return Promise.resolve(false);
+    });
+    expect(await social.run((store) => store.isEligible(userId, connection))).toBe(false);
+    expect(called).toBe(0);
+    await runner.run((scope) =>
+      scope.client.query('update users set email_verified_at = now() where id = $1', [userId]),
+    );
+    expect(await social.run((store) => store.isEligible(userId, connection))).toBe(false);
+    expect(called).toBe(1);
+    const allowed = new SystemSocialFlowUnitOfWork(runner, () => Promise.resolve(true));
+    expect(await allowed.run((store) => store.isEligible(userId, connection))).toBe(true);
+    expect(await allowed.run((store) => store.isEligible(anotherUserId, connection))).toBe(false);
+    const unavailable = new SystemSocialFlowUnitOfWork(runner, () =>
+      Promise.reject(new Error('Policy unavailable.')),
+    );
+    await expect(unavailable.run((store) => store.isEligible(userId, connection))).rejects.toThrow(
+      'Policy unavailable.',
+    );
   });
 });

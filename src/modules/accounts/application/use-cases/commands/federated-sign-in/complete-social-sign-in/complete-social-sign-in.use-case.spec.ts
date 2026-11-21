@@ -17,7 +17,7 @@ function fixture() {
   let completedTransactions = 0;
   const connection = { provider: 'google' as const, issuer: 'https://issuer.example' };
   const credentials: SocialFlowCredentials = {
-    issue: () => ({ id: 'flow-id', state: 'opaque-state', browserBinding: 'opaque-browser' }),
+    issue: () => ({ state: 'opaque-state', browserBinding: 'opaque-browser' }),
     receipt: () => 'opaque-receipt',
     digest: (value) => createHash('sha256').update(value).digest('hex'),
     providerSecrets: () => ({
@@ -35,6 +35,7 @@ function fixture() {
   const isEligible = vi.fn(() => Promise.resolve(true));
   const findLink = vi.fn((): Promise<typeof link | null> => Promise.resolve(link));
   const store: SocialFlowStore = {
+    nextFlowId: () => Promise.resolve('flow-id'),
     insert: (next) => {
       flow = next;
       version = 1;
@@ -88,7 +89,16 @@ function fixture() {
     browserBinding: 'opaque-browser',
     response: { outcome: 'authorized' as const, code: 'provider-code' },
   };
-  return { start, complete, callback, verify, isEligible, findLink, current: () => flow };
+  return {
+    start,
+    complete,
+    callback,
+    credentials,
+    verify,
+    isEligible,
+    findLink,
+    current: () => flow,
+  };
 }
 
 describe('social sign-in flow', () => {
@@ -96,6 +106,7 @@ describe('social sign-in flow', () => {
     const f = fixture();
     const started = await f.start.execute({ provider: 'google', rememberMe: true });
     expect(started.kind).toBe('started');
+    expect(f.current()?.snapshot.id).toBe('flow-id');
     expect(JSON.stringify(f.current()?.snapshot)).not.toContain('opaque-state');
     expect(JSON.stringify(f.current()?.snapshot)).not.toContain('opaque-browser');
     const results = await Promise.all([
@@ -136,6 +147,18 @@ describe('social sign-in flow', () => {
     await f.start.execute({ provider: 'google', rememberMe: false });
     await expect(f.complete.execute(f.callback)).resolves.toEqual({ kind: 'unavailable' });
     await expect(f.complete.execute(f.callback)).resolves.toEqual({ kind: 'refused' });
+  });
+
+  it('keeps unavailable credential versions opaque and consumes the claimed state', async () => {
+    const f = fixture();
+    await f.start.execute({ provider: 'google', rememberMe: false });
+    vi.spyOn(f.credentials, 'providerSecrets').mockImplementation(() => {
+      throw new Error('sensitive key configuration details');
+    });
+    await expect(f.complete.execute(f.callback)).resolves.toEqual({ kind: 'unavailable' });
+    await expect(f.complete.execute(f.callback)).resolves.toEqual({ kind: 'refused' });
+    expect(f.verify).not.toHaveBeenCalled();
+    expect(f.findLink).not.toHaveBeenCalled();
   });
 
   it('refuses a disabled account without issuing a continuation', async () => {

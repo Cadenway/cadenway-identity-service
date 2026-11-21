@@ -45,9 +45,9 @@ export class CompleteSocialSignIn {
       provider.connection.issuer !== claimed.issuer
     )
       return { kind: 'unavailable' };
-    const { pkceVerifier, nonce } = this.credentials.providerSecrets(input.state);
     let proof;
     try {
+      const { pkceVerifier, nonce } = this.credentials.providerSecrets(input.state);
       proof = await provider.verify({
         code: input.response.code,
         state: input.state,
