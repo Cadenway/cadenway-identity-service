@@ -118,7 +118,14 @@ describe('UpdateAuthenticationPolicy', () => {
   beforeEach(() => {
     store = new InMemorySessions();
     const members: FakeOrganizationMembers = new FakeOrganizationMembers();
-    update = new UpdateAuthenticationPolicy(store, members, new FixedClock(NOW.toISOString()));
+    update = new UpdateAuthenticationPolicy(store, members, new FixedClock(NOW.toISOString()), {
+      find: async (organizationId, userId) => {
+        const role = await members.roleOf(organizationId, userId);
+        return role === null
+          ? null
+          : { organizationId, memberId: '019a6b10-0000-7000-8000-000000000001', role };
+      },
+    });
     get = new GetAuthenticationPolicy(store, members);
     putSession('two-step');
     store.enrollments.add(CAMILLE_ID);
@@ -179,6 +186,53 @@ describe('UpdateAuthenticationPolicy', () => {
         expectedVersions: null,
       }),
     ).rejects.toMatchObject({ reason: 'organization-not-found' });
+  });
+
+  it('refuses a demoted administrator even if the local projection still grants ownership', async () => {
+    const members = new FakeOrganizationMembers();
+    const current = new UpdateAuthenticationPolicy(
+      store,
+      members,
+      new FixedClock(NOW.toISOString()),
+      {
+        find: () =>
+          Promise.resolve({
+            organizationId: ATELIER_NORD,
+            memberId: '019a6b10-0000-7000-8000-000000000001',
+            role: 'member',
+          }),
+      },
+    );
+
+    await expect(
+      current.execute({
+        actorUserId: CAMILLE_ID,
+        organizationId: ATELIER_NORD,
+        sessionId: SESSION_ID,
+        expectedVersions: null,
+        sessionInactivityTimeoutMinutes: 60,
+      }),
+    ).rejects.toMatchObject({ reason: 'role-forbidden' });
+    expect(store.policies.size).toBe(0);
+  });
+
+  it('refuses policy updates when the membership authority is not configured', async () => {
+    const current = new UpdateAuthenticationPolicy(
+      store,
+      new FakeOrganizationMembers(),
+      new FixedClock(NOW.toISOString()),
+      null,
+    );
+    await expect(
+      current.execute({
+        actorUserId: CAMILLE_ID,
+        organizationId: ATELIER_NORD,
+        sessionId: SESSION_ID,
+        expectedVersions: null,
+        sessionInactivityTimeoutMinutes: 60,
+      }),
+    ).rejects.toThrow('Organization membership authority is required');
+    expect(store.policies.size).toBe(0);
   });
 
   it('checks If-Match before the two-step verification of the actor and the recent authentication', async () => {

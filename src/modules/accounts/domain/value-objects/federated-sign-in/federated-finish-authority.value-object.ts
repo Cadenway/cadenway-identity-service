@@ -6,7 +6,11 @@ export interface FederatedFinishAuthority {
   /** The current account behind the selected link, when it still exists. */
   readonly account: { readonly id: string; readonly enabled: boolean } | null;
   readonly link: LinkedFederatedAccount | null;
-  readonly activeMembership: { readonly organizationId: string; readonly userId: string } | null;
+  readonly activeMembership: {
+    readonly organizationId: string;
+    readonly userId: string;
+    readonly memberId: string;
+  } | null;
   readonly maySignIn: boolean;
   readonly twoStep: 'not-required' | 'challenge-required' | 'trusted-device';
   // #endregion

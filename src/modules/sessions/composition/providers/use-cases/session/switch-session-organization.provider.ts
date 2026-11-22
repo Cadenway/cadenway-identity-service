@@ -1,5 +1,6 @@
 import type { FactoryProvider } from '@nestjs/common';
 
+import { FindAuthoritativeMembership } from '../../../../../memberships/public/membership/find-authoritative-membership.js';
 import type { ActiveMemberships } from '../../../../application/ports/outbound/memberships/session/active-memberships.port.js';
 import type { Clock } from '../../../../application/ports/outbound/time/session/clock.port.js';
 import type { SessionsUnitOfWork } from '../../../../application/ports/outbound/transactions/session/sessions-unit-of-work.port.js';
@@ -19,11 +20,19 @@ import { UNIT_OF_WORK } from '../../../tokens/session/unit-of-work.token.js';
  */
 export const switchSessionOrganizationProvider: FactoryProvider<SwitchSessionOrganization> = {
   provide: SwitchSessionOrganization,
-  inject: [UNIT_OF_WORK, ACTIVE_MEMBERSHIPS, CLOCK],
+  inject: [UNIT_OF_WORK, ACTIVE_MEMBERSHIPS, CLOCK, FindAuthoritativeMembership],
   useFactory: (
     unitOfWork: SessionsUnitOfWork,
     memberships: ActiveMemberships,
     systemClock: Clock,
+    authority: FindAuthoritativeMembership | null,
   ): SwitchSessionOrganization =>
-    new SwitchSessionOrganization(unitOfWork, memberships, systemClock),
+    new SwitchSessionOrganization(
+      unitOfWork,
+      memberships,
+      systemClock,
+      authority === null
+        ? null
+        : { find: (organizationId, userId) => authority.execute({ organizationId, userId }) },
+    ),
 };

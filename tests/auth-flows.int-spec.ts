@@ -55,6 +55,7 @@ import {
   subject as samlSubject,
 } from './support/federated-saml.fixture.js';
 import { freePort } from './support/loopback-port.fixture.js';
+import { startOrganizationMembershipAuthority } from './support/organization-membership.fixture.js';
 
 // The seven authentication flows, the introspection, the revocation and the reading of a user,
 // through HTTP as the API gateway calls them, on the service as main.ts assembles it, against a
@@ -259,6 +260,9 @@ describe('identity-service authentication flows', () => {
   let gateway: InternalTokenSigner;
   let realtime: InternalTokenSigner;
   let migrator: pg.Pool;
+  let membershipAuthority:
+    Awaited<ReturnType<typeof startOrganizationMembershipAuthority>> | undefined;
+  const liveMemberships = new Map<string, { memberId: string; role: 'member'; version: number }>();
   let camilleId = '';
   let camilleToken = '';
   let camilleSessionId = '';
@@ -418,6 +422,7 @@ describe('identity-service authentication flows', () => {
     expect(replay.status).toBe(422);
     expect(replay.body).toMatchObject({ code: 'auth.federated-sign-in-refused' });
     expect(await federatedSessionCount(accountId)).toBe(1);
+    return session;
   }
 
   /**
@@ -599,10 +604,19 @@ describe('identity-service authentication flows', () => {
       ]),
     );
 
+    const authority = await startOrganizationMembershipAuthority((organizationId, userId) =>
+      Promise.resolve(liveMemberships.get(`${organizationId}/${userId}`) ?? null),
+    );
+    membershipAuthority = authority;
+    vi.stubEnv('ORGANIZATION_SERVICE_URL', membershipAuthority.origin);
+    vi.stubEnv('IDENTITY_SERVICE_INTERNAL_TOKEN_PRIVATE_JWK', membershipAuthority.privateJwk);
     const config = loadConfig(appConfigSchema);
     // The provider captures fetch as it is built. Delegate to MSW only during the OIDC case.
     const nativeFetch = globalThis.fetch;
     const fetchForFixture: typeof fetch = (...input) => {
+      if (input[0] === `${authority.origin}/internal/v1/search-membership`) {
+        return nativeFetch(...input);
+      }
       const activeFetch = globalThis.fetch;
       if (activeFetch === nativeFetch || activeFetch === fetchForFixture) {
         return Promise.reject(new Error('Provider access requires the active local mock.'));
@@ -647,6 +661,7 @@ describe('identity-service authentication flows', () => {
       await app.close();
       await migrator.end();
     } finally {
+      await membershipAuthority?.close();
       vi.unstubAllEnvs();
       compose('down', '--volumes', '--remove-orphans');
     }
@@ -751,12 +766,26 @@ describe('identity-service authentication flows', () => {
       }
     });
 
-    it('checks SAML membership again at receipt redemption and when answering MFA', async () => {
+    it('rechecks SAML membership at redemption and MFA and fences a session in another organization', async () => {
       const accountId = await linkedAccount({ ...samlConnection, subject: samlSubject });
       const memberId = randomUUID();
+      const otherOrganization = randomUUID();
+      const otherMemberId = randomUUID();
+      const sourceKey = `${samlConnection.organizationId}/${accountId}`;
+      liveMemberships.set(sourceKey, { memberId, role: 'member', version: 1 });
+      liveMemberships.set(`${otherOrganization}/${accountId}`, {
+        memberId: otherMemberId,
+        role: 'member',
+        version: 1,
+      });
       await systemQuery(
-        "insert into memberships (id, organization_id, user_id, role, version) values ($1, $2, $3, 'member', 1)",
-        [memberId, samlConnection.organizationId, accountId],
+        `insert into memberships (id, organization_id, user_id, role, version)
+         values ($1, $2, $3, 'member', 1), ($4, $5, $3, 'member', 1)`,
+        [memberId, samlConnection.organizationId, accountId, otherMemberId, otherOrganization],
+      );
+      await systemQuery(
+        'insert into organization_choices (user_id, organization_id) values ($1, $2)',
+        [accountId, otherOrganization],
       );
 
       const proveSaml = async () => {
@@ -788,7 +817,9 @@ describe('identity-service authentication flows', () => {
         return CompleteSamlSignInInternalResponse.parse(completed.body as unknown).receipt;
       };
 
-      await finishFederated(await proveSaml(), accountId, false);
+      const session = await finishFederated(await proveSaml(), accountId, false);
+      const before = await post('/internal/v1/tokens/introspect', { token: session.token }, system);
+      expect(before.body).toMatchObject({ active: true, organizationId: otherOrganization });
       const revokedReceipt = await proveSaml();
       const backupCode = await enrollFederatedAccount(accountId);
       const challengeReceipt = await proveSaml();
@@ -800,9 +831,12 @@ describe('identity-service authentication flows', () => {
       expect(challenged.status).toBe(202);
       const challenge = InspectSignInChallengeInternalResponse.parse(challenged.body as unknown);
       secrets.push(challenge.token);
-      await systemQuery('update memberships set removed_at = now(), version = 2 where id = $1', [
-        memberId,
-      ]);
+      liveMemberships.delete(sourceKey);
+      expect(
+        await systemQuery('select removed_at from memberships where id = $1', [memberId]),
+      ).toEqual([{ removed_at: null }]);
+      const ended = await post('/internal/v1/tokens/introspect', { token: session.token }, system);
+      expect(ended.body).toEqual({ active: false });
       const refusal = await post(`${federationBase}/finish`, { receipt: revokedReceipt, client });
       expect(refusal.status).toBe(422);
       expect(refusal.body).toMatchObject({ code: 'auth.federated-sign-in-refused' });
@@ -2013,7 +2047,7 @@ describe('identity-service authentication flows', () => {
           }).toThrow();
           return Promise.resolve(true);
         },
-        hasActiveMembership: () => Promise.resolve(false),
+        activeMembershipId: () => Promise.resolve(null),
       });
       const redeem = (rollback: boolean) =>
         work.run(async (store) => {

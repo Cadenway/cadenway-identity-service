@@ -134,6 +134,9 @@ export class IntrospectToken {
         if (!session?.isActiveAt(now)) {
           return { active: false };
         }
+        if (session.snapshot.samlMembership != null) {
+          return { active: false };
+        }
         const membership =
           session.organizationId === null
             ? null
@@ -152,11 +155,28 @@ export class IntrospectToken {
       selected.organizationId === null
         ? null
         : await authority.find(selected.organizationId, selected.userId);
+    const source = selected.snapshot.samlMembership ?? null;
+    if (source !== null) {
+      const sourceMembership =
+        source.organizationId === selected.organizationId
+          ? membership
+          : await authority.find(source.organizationId, selected.userId);
+      if (sourceMembership?.memberId !== source.memberId) {
+        return { active: false };
+      }
+    }
 
     return this.unitOfWork.run(async (store): Promise<IntrospectTokenOutput> => {
       const current = await store.sessions.findByTokenHash(tokenHash);
       const now = this.clock.now();
       if (!current?.isActiveAt(now) || current.id !== selected.id) {
+        return { active: false };
+      }
+      const currentSource = current.snapshot.samlMembership ?? null;
+      if (
+        currentSource?.organizationId !== source?.organizationId ||
+        currentSource?.memberId !== source?.memberId
+      ) {
         return { active: false };
       }
       const sameSelection =

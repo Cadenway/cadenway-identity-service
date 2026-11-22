@@ -29,7 +29,7 @@ the sessions.
 | ------------------------------------------------- | ------------------------------ |
 | `memberships.module`                              | sessions, api-tokens, accounts |
 | `public/membership/find-active-membership`        | sessions, api-tokens           |
-| `public/membership/find-authoritative-membership` | sessions, api-tokens           |
+| `public/membership/find-authoritative-membership` | accounts, sessions, api-tokens |
 | `public/membership/lock-active-membership`        | accounts, sessions             |
 | `public/membership/find-owned-organizations`      | accounts                       |
 | `public/membership/find-user-memberships`         | sessions                       |
@@ -45,15 +45,15 @@ called from a tenant transaction (the kit refuses to open a system transaction i
 caller, the routes of the authentication policy, and join it.
 
 `FindAuthoritativeMembership` proves the current membership against Organization for credential
-introspection. It runs outside the caller's transaction. When
+introspection, SAML sign-in, realtime redemption, organization choice and authentication policy
+writes. It runs outside the caller's transaction. When
 `ORGANIZATION_SERVICE_URL` and `IDENTITY_SERVICE_INTERNAL_TOKEN_PRIVATE_JWK` are configured,
 the adapter calls `GET /internal/v1/search-membership` at the trusted origin. The Identity token
 names the verified account and organization with no delegated role or scopes. A confirmed
 `organization.not-found` means that the membership is absent. An unavailable or invalid response
-fails with `503 organization.unavailable`. The introspections use the projection during rollout
-while both variables are unset. Once configured they rely on the proof and never fall back to
-the projection, even when Organization is unavailable. Organization must first trust the Identity
-issuer for that operation.
+fails with `503 organization.unavailable`, as do proof-dependent decisions when both settings are
+missing in a local process. The projection cannot grant access when the authoritative lookup is
+unavailable. Organization must first trust the Identity issuer for that operation.
 
 ## Owned tables
 

@@ -5,8 +5,10 @@ import { SystemTransactionRunner } from '@cadenway/nest-common/database';
 import type { FactoryProvider } from '@nestjs/common';
 
 import type { AppConfig } from '../../../../../../config/app-config.js';
+import { FindAuthoritativeMembership } from '../../../../../memberships/public/membership/find-authoritative-membership.js';
 import { LockActiveMembership } from '../../../../../memberships/public/membership/lock-active-membership.js';
 import type { Clock } from '../../../../application/ports/outbound/clock/accounts/clock.port.js';
+import type { FederatedMembershipAuthority } from '../../../../application/ports/outbound/identity/memberships/federated-membership-authority.port.js';
 import { CompleteSamlSignIn } from '../../../../application/use-cases/commands/federated-sign-in/complete-saml-sign-in/complete-saml-sign-in.use-case.js';
 import { CompleteSocialSignIn } from '../../../../application/use-cases/commands/federated-sign-in/complete-social-sign-in/complete-social-sign-in.use-case.js';
 import { StartSamlSignIn } from '../../../../application/use-cases/commands/federated-sign-in/start-saml-sign-in/start-saml-sign-in.use-case.js';
@@ -17,6 +19,7 @@ import { ConfiguredSamlSignInCatalog } from '../../../../infrastructure/adapters
 import { DrizzleSamlAssertionReplayGuard } from '../../../../infrastructure/persistence/drizzle/repositories/federated-sign-in/drizzle-saml-assertion-replay-guard.repository.js';
 import { SystemSocialFlowUnitOfWork } from '../../../../infrastructure/persistence/drizzle/transactions/federated-sign-in/system-social-flow.unit-of-work.js';
 import { CLOCK } from '../../../tokens/accounts/clock.token.js';
+import { FEDERATED_MEMBERSHIP_AUTHORITY } from '../../../tokens/federated-sign-in/federated-membership-authority.token.js';
 import { FEDERATED_SIGN_IN_AUTHORITY } from '../../../tokens/federated-sign-in/federated-sign-in-authority.token.js';
 import { createSocialSignInRuntime } from '../../adapters/federated-sign-in/social-sign-in-runtime.provider.js';
 
@@ -39,7 +42,7 @@ interface FederationAuthority {
   readonly isAllowed: (userId: string, connection: FederatedConnection) => Promise<boolean>;
 
   /** Locks and checks an active membership in the caller's transaction. */
-  readonly hasActiveMembership: (userId: string, organizationId: string) => Promise<boolean>;
+  readonly activeMembershipId: (userId: string, organizationId: string) => Promise<string | null>;
   // #endregion
 }
 
@@ -70,6 +73,16 @@ export const federatedSignInProviders: readonly FactoryProvider[] = [
     }),
   },
   {
+    provide: FEDERATED_MEMBERSHIP_AUTHORITY,
+    inject: [FindAuthoritativeMembership],
+    useFactory: (
+      authority: FindAuthoritativeMembership | null,
+    ): FederatedMembershipAuthority | null =>
+      authority === null
+        ? null
+        : { find: (organizationId, userId) => authority.execute({ organizationId, userId }) },
+  },
+  {
     provide: FEDERATED_SIGN_IN_AUTHORITY,
     inject: [federationRuntime, LockActiveMembership],
     useFactory: (
@@ -83,21 +96,26 @@ export const federatedSignInProviders: readonly FactoryProvider[] = [
             : runtime.social?.providers.find(connection.provider)?.connection.issuer ===
                 connection.issuer,
         ),
-      hasActiveMembership: async (userId, organizationId) =>
-        (await memberships.execute({ organizationId, userId })) !== null,
+      activeMembershipId: async (userId, organizationId) =>
+        (await memberships.execute({ organizationId, userId }))?.memberId ?? null,
     }),
   },
   {
     provide: federationWork,
     inject: [SystemTransactionRunner, FEDERATED_SIGN_IN_AUTHORITY],
     useFactory: (runner: SystemTransactionRunner, authority: FederationAuthority) =>
-      new SystemSocialFlowUnitOfWork(runner, async (_scope, userId, connection) => {
-        if (!(await authority.isAllowed(userId, connection))) return false;
-        return (
-          connection.provider !== 'saml' ||
-          (await authority.hasActiveMembership(userId, connection.organizationId))
-        );
-      }),
+      new SystemSocialFlowUnitOfWork(
+        runner,
+        async (_scope, userId, connection, expectedMemberId) => {
+          if (!(await authority.isAllowed(userId, connection))) return false;
+          return (
+            connection.provider !== 'saml' ||
+            (expectedMemberId !== undefined &&
+              (await authority.activeMembershipId(userId, connection.organizationId)) ===
+                expectedMemberId)
+          );
+        },
+      ),
   },
   {
     provide: StartSocialSignIn,
@@ -123,8 +141,15 @@ export const federatedSignInProviders: readonly FactoryProvider[] = [
   },
   {
     provide: CompleteSamlSignIn,
-    inject: [federationRuntime, CLOCK, federationWork],
-    useFactory: ({ saml }: FederationRuntime, clock: Clock, work: SystemSocialFlowUnitOfWork) =>
-      saml === null ? null : new CompleteSamlSignIn(saml, samlCredentials, clock, work),
+    inject: [federationRuntime, CLOCK, federationWork, FEDERATED_MEMBERSHIP_AUTHORITY],
+    useFactory: (
+      { saml }: FederationRuntime,
+      clock: Clock,
+      work: SystemSocialFlowUnitOfWork,
+      memberships: FederatedMembershipAuthority | null,
+    ): CompleteSamlSignIn | null =>
+      saml === null
+        ? null
+        : new CompleteSamlSignIn(saml, samlCredentials, clock, work, memberships),
   },
 ];

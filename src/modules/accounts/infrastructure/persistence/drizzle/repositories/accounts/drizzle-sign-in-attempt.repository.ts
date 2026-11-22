@@ -47,25 +47,37 @@ export class DrizzleSignInAttemptRepository implements SignInAttemptRepository {
    * Method lock
    *
    * @description
-   * Creates the row of the address when it is missing, then locks it and reads the lockout.
+   * Locks the existing counter, or atomically creates and locks it when missing.
+   * Cleanup may remove an expired counter before this transaction can lock it.
    *
    * @param {EmailAddress} email - The normalized address.
    * @returns {Promise<PasswordLockout>} The lockout of the address.
    * @throws {Error} When the row is missing right after its insert, which never happens.
    */
   public async lock(email: EmailAddress): Promise<PasswordLockout> {
-    await this.db.insert(signInAttempts).values({ email: email.value }).onConflictDoNothing();
-    const rows: { failedAttempts: number; lockedUntil: Date | null }[] = await this.db
-      .select({
-        failedAttempts: signInAttempts.failedAttempts,
-        lockedUntil: signInAttempts.lockedUntil,
-      })
+    const fields = {
+      failedAttempts: signInAttempts.failedAttempts,
+      lockedUntil: signInAttempts.lockedUntil,
+    };
+    const [existing] = await this.db
+      .select(fields)
       .from(signInAttempts)
       .where(eq(signInAttempts.email, email.value))
       .for('update');
-    const row: { failedAttempts: number; lockedUntil: Date | null } | undefined = rows[0];
+    const row: { failedAttempts: number; lockedUntil: Date | null } | undefined =
+      existing ??
+      (
+        await this.db
+          .insert(signInAttempts)
+          .values({ email: email.value })
+          .onConflictDoUpdate({
+            target: signInAttempts.email,
+            set: { updatedAt: sql`${signInAttempts.updatedAt}` },
+          })
+          .returning(fields)
+      )[0];
     if (row === undefined) {
-      throw new Error('The lockout row of an address is missing after its insert.');
+      throw new Error('The lockout row of an address could not be read after its upsert.');
     }
     return PasswordLockout.restore(row);
   }

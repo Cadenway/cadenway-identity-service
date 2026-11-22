@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { check, integer, pgTable, text, timestamp } from 'drizzle-orm/pg-core';
+import { check, index, integer, pgTable, text, timestamp } from 'drizzle-orm/pg-core';
 
 /**
  * Table `sign_in_attempts`: the password lockout of each normalized address, whether or not an account
@@ -16,6 +16,7 @@ export default pgTable(
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
+    index('sign_in_attempts_retention_index').on(table.updatedAt, table.email),
     check('sign_in_attempts_failed_attempts_check', sql`${table.failedAttempts} between 0 and 5`),
   ],
 );

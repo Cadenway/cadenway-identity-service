@@ -4,6 +4,7 @@ import { toClientDescription } from '../../mappers/sessions/client-description.m
 import { toNewDeviceNotice } from '../../mappers/sessions/new-device-notice.mapper.js';
 import type { OpenedSession } from '../../models/sessions/opened-session.model.js';
 import type { SessionClient } from '../../models/sessions/session-client.model.js';
+import type { SamlMembership } from '../../models/sessions/saml-membership.model.js';
 import type { TrustedDeviceGrant } from '../../models/sessions/trusted-device-grant.model.js';
 import type { AccountsStore } from '../../models/transactions/accounts-store.model.js';
 import type { DeviceReader } from '../../ports/outbound/device/accounts/device-reader.port.js';
@@ -42,12 +43,14 @@ export async function completeSignIn(
   client: SessionClient,
   authentication: 'password' | 'two-step' | null,
   trustedDevice: TrustedDeviceGrant | null = null,
+  samlMembership: SamlMembership | null = null,
 ): Promise<SessionIssuedView> {
   const session: OpenedSession = await sessions.open({
     userId: user.id,
     persistent,
     client,
     authentication,
+    ...(samlMembership === null ? {} : { samlMembership }),
     newDeviceNotice: toNewDeviceNotice(user),
   });
   const current: User = user.cancelDeletion();

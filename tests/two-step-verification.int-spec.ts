@@ -3,6 +3,7 @@ import { generateKeyPairSync, randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 import { userTwoStepVerificationChangedV1Schema } from '@cadenway/contracts/events/identity-service';
+import type { SearchMembership } from '@cadenway/contracts/types/internal/organization-service';
 import {
   AddSecurityKeyInternalResponse,
   AnswerSignInChallengeWithAuthenticatorAppInternalResponse,
@@ -32,6 +33,7 @@ import { AppModule } from '../src/app.module.js';
 import { appConfigSchema } from '../src/config/app-config.js';
 import { Argon2PasswordHasher } from '../src/modules/accounts/infrastructure/adapters/security/argon2-password-hasher.adapter.js';
 import { SoftwareAuthenticator } from '../src/modules/accounts/infrastructure/adapters/security/software-authenticator.fixture.js';
+import { startOrganizationMembershipAuthority } from './support/organization-membership.fixture.js';
 
 // Two-step verification (P2c-2): the setup of an authenticator app and its confirmation, the
 // two-step challenge of the sign-ins answered with the app, a backup code or a security key, the
@@ -184,6 +186,9 @@ describe('identity-service two-step verification', () => {
   let app: NestExpressApplication;
   let gateway: InternalTokenSigner;
   let migrator: pg.Pool;
+  let membershipAuthority:
+    Awaited<ReturnType<typeof startOrganizationMembershipAuthority>> | undefined;
+  const liveRoles = new Map<string, SearchMembership['role']>();
   let passwordHash = '';
   let accounts = 0;
 
@@ -471,6 +476,20 @@ describe('identity-service two-step verification', () => {
     vi.stubEnv('WEBAUTHN_RP_ID', rpId);
     vi.stubEnv('WEBAUTHN_ORIGINS', origin);
 
+    membershipAuthority = await startOrganizationMembershipAuthority(
+      async (organizationId, userId) => {
+        const [membership] = await systemQuery<SearchMembership>(
+          `select id as "memberId", role, version from memberships
+          where organization_id = $1 and user_id = $2 and removed_at is null`,
+          [organizationId, userId],
+        );
+        if (membership === undefined) return null;
+        const role = liveRoles.get(`${organizationId}/${userId}`) ?? membership.role;
+        return { ...membership, role };
+      },
+    );
+    vi.stubEnv('ORGANIZATION_SERVICE_URL', membershipAuthority.origin);
+    vi.stubEnv('IDENTITY_SERVICE_INTERNAL_TOKEN_PRIVATE_JWK', membershipAuthority.privateJwk);
     const config = loadConfig(appConfigSchema);
     app = await createApplication(AppModule, {
       service: 'identity-service',
@@ -500,6 +519,7 @@ describe('identity-service two-step verification', () => {
       await app.close();
       await migrator.end();
     } finally {
+      await membershipAuthority?.close();
       vi.unstubAllEnvs();
       compose('down', '--volumes', '--remove-orphans');
     }
@@ -1005,6 +1025,17 @@ describe('identity-service two-step verification', () => {
         twoStepVerificationRequiredFor: 'admins',
         membersWithoutTwoStepVerification: { admins: 1 },
       });
+      liveRoles.set(`${organization}/${ines.userId}`, 'member');
+      const denied = await call(
+        'patch',
+        `/internal/v1/organization/authentication-policy?sessionId=${ines.sessionId}`,
+        user(ines.userId, organization),
+        { twoStepVerificationRequiredFor: 'nobody' },
+        String(updated.headers.etag),
+      );
+      liveRoles.delete(`${organization}/${ines.userId}`);
+      expect(denied.status).toBe(403);
+      expect(denied.body).toMatchObject({ code: 'organization.role-forbidden' });
       const session = await call('post', '/internal/v1/tokens/introspect', system, {
         token: ines.token,
       });

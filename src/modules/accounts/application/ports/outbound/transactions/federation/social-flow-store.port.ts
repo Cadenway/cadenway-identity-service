@@ -24,6 +24,10 @@ export interface SocialFlowStore {
   findLink(identity: FederatedIdentity): Promise<LinkedFederatedAccount | null>;
 
   /** Locks and checks the account and current authority policy without bypassing MFA. */
-  isEligible(userId: string, connection: FederatedConnection): Promise<boolean>;
+  isEligible(
+    userId: string,
+    connection: FederatedConnection,
+    expectedMemberId?: string,
+  ): Promise<boolean>;
   // #endregion
 }

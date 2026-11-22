@@ -47,7 +47,19 @@ describe('appConfigSchema', () => {
       PASSWORD_PEPPER: 'local-development-password-pepper-0000000000',
       WEBAUTHN_RP_ID: 'app.cadenway.localhost',
       WEBAUTHN_ORIGINS: ['http://app.cadenway.localhost'],
+      AUTHENTICATION_COUNTER_RETENTION_ENABLED: false,
     });
+  });
+
+  it('requires an explicit opt-in for authentication counter retention', () => {
+    const config = loadConfig(appConfigSchema, {
+      ...complete,
+      AUTHENTICATION_COUNTER_RETENTION_ENABLED: 'true',
+    });
+    expect(config.AUTHENTICATION_COUNTER_RETENTION_ENABLED).toBe(true);
+    expect(() =>
+      loadConfig(appConfigSchema, { ...complete, AUTHENTICATION_COUNTER_RETENTION_ENABLED: '1' }),
+    ).toThrow(/AUTHENTICATION_COUNTER_RETENTION_ENABLED/u);
   });
 
   it('accepts one transaction attempt to disable retries', () => {
@@ -57,6 +69,22 @@ describe('appConfigSchema', () => {
     });
 
     expect(config.DATABASE_TRANSACTION_MAX_ATTEMPTS).toBe(1);
+  });
+
+  it('trusts the separate public Organization issuer without replacing existing issuers', () => {
+    const key = { kty: 'OKP', crv: 'Ed25519', x: 'C'.repeat(43), kid: 'organization-fixture' };
+    const config = loadConfig(appConfigSchema, {
+      ...complete,
+      ORGANIZATION_SERVICE_INTERNAL_TOKEN_PUBLIC_JWKS: JSON.stringify(key),
+    });
+    expect(config.INTERNAL_TOKEN_TRUSTED_ISSUERS).toMatchObject({ 'organization-service': [key] });
+    expect(config.INTERNAL_TOKEN_TRUSTED_ISSUERS['api-gateway']).toHaveLength(1);
+    expect(() =>
+      loadConfig(appConfigSchema, {
+        ...complete,
+        ORGANIZATION_SERVICE_INTERNAL_TOKEN_PUBLIC_JWKS: JSON.stringify({ ...key, d: 'fixture' }),
+      }),
+    ).toThrow(/ORGANIZATION_SERVICE_INTERNAL_TOKEN_PUBLIC_JWKS/u);
   });
 
   describe('current membership authority', () => {

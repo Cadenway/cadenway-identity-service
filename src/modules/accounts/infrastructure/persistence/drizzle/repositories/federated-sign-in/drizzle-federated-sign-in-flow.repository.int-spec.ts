@@ -287,7 +287,7 @@ describe('federated sign-in persistence', () => {
         {
           account: { id: userId, enabled: true },
           link,
-          activeMembership: { organizationId, userId },
+          activeMembership: null,
           maySignIn: false,
           twoStep: 'not-required',
         },
@@ -306,6 +306,7 @@ describe('federated sign-in persistence', () => {
     } as const;
     const binding = {
       linkId: federation.linkId,
+      memberId: '01938f6e-0000-7000-8000-000000000078',
       connection: {
         provider: federation.connection.provider,
         issuer: federation.connection.issuer,

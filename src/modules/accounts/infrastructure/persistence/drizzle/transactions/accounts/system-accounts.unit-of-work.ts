@@ -101,7 +101,7 @@ export class SystemAccountsUnitOfWork implements AccountsUnitOfWork {
    * @param {OutboxWriter} outbox - The outbox writer.
    * @param {OutboxRelay} relay - The outbox relay.
    * @param {JobProducer} jobs - The job producer.
-   * @param {Pick<FederatedFinishStore, 'isAllowed' | 'hasActiveMembership'>} federation - The current federated sign-in authority, if available.
+   * @param {Pick<FederatedFinishStore, 'isAllowed' | 'activeMembershipId'>} federation - The current federated sign-in authority, if available.
    * @constructor
    */
   public constructor(
@@ -109,7 +109,7 @@ export class SystemAccountsUnitOfWork implements AccountsUnitOfWork {
     outbox: OutboxWriter,
     relay: OutboxRelay,
     jobs: JobProducer,
-    private readonly federation?: Pick<FederatedFinishStore, 'isAllowed' | 'hasActiveMembership'>,
+    private readonly federation?: Pick<FederatedFinishStore, 'isAllowed' | 'activeMembershipId'>,
   ) {
     this.runner = runner;
     this.outbox = outbox;
@@ -150,8 +150,8 @@ export class SystemAccountsUnitOfWork implements AccountsUnitOfWork {
           securityKeys: new DrizzleSecurityKeyRepository(transaction.db),
           pendingTwoStep: new DrizzlePendingTwoStepRepository(transaction.db),
           challenges: new DrizzleSignInChallengeRepository(transaction.db),
-          mayFinishFederatedChallenge: (userId, binding) =>
-            this.mayFinishFederatedChallenge(transaction, userId, binding),
+          mayFinishFederatedChallenge: (userId, binding, expectedMemberId) =>
+            this.mayFinishFederatedChallenge(transaction, userId, binding, expectedMemberId),
           deletionQueue: new JobsAccountDeletionQueue(transaction, this.jobs),
           events: new OutboxAccountEvents(transaction, this.outbox, (): void => {
             appends.count += 1;
@@ -170,6 +170,7 @@ export class SystemAccountsUnitOfWork implements AccountsUnitOfWork {
     transaction: TransactionScope,
     userId: string,
     binding: FederatedChallengeBinding,
+    expectedMemberId?: string,
   ): Promise<boolean> {
     if (this.federation === undefined) return false;
     const { connection, linkId } = binding;
@@ -183,7 +184,9 @@ export class SystemAccountsUnitOfWork implements AccountsUnitOfWork {
     }
     return (
       connection.provider !== 'saml' ||
-      (await this.federation.hasActiveMembership(userId, connection.organizationId))
+      (expectedMemberId !== undefined &&
+        (await this.federation.activeMembershipId(userId, connection.organizationId)) ===
+          expectedMemberId)
     );
   }
   // #endregion

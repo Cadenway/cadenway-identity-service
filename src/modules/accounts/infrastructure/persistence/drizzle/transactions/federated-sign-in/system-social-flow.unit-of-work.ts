@@ -16,12 +16,13 @@ import { DrizzleFederatedSignInFlowRepository } from '../../repositories/federat
  * Checks the current authority policy using the supplied transaction. This callback must perform
  * database work only because the system runner may retry the transaction.
  *
- * @type {(scope: TransactionScope, userId: string, connection: FederatedConnection) => Promise<boolean>}
+ * @type {(scope: TransactionScope, userId: string, connection: FederatedConnection, expectedMemberId?: string) => Promise<boolean>}
  */
 type CheckSocialAuthority = (
   scope: TransactionScope,
   userId: string,
   connection: FederatedConnection,
+  expectedMemberId?: string,
 ) => Promise<boolean>;
 
 /**
@@ -82,10 +83,10 @@ export class SystemSocialFlowUnitOfWork implements SocialFlowUnitOfWork {
         findByStateHash: (hash) => flows.findByStateHash(hash),
         save: (flow, version) => flows.save(flow, version),
         findLink: (identity) => links.findByIdentity(identity),
-        isEligible: async (userId, connection) => {
+        isEligible: async (userId, connection, expectedMemberId) => {
           const user = await users.lock(userId);
           if (!user?.isVerified) return false;
-          return this.checkAuthority(scope, userId, connection);
+          return this.checkAuthority(scope, userId, connection, expectedMemberId);
         },
       });
     });

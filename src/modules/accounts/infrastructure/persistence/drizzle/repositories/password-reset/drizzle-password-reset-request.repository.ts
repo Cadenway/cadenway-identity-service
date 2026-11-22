@@ -48,29 +48,39 @@ export class DrizzlePasswordResetRequestRepository implements PasswordResetReque
    * Method lock
    *
    * @description
-   * Creates the row of the address when missing, then reads and locks it, so concurrent requests
-   * of one address are counted one after the other.
+   * Locks the existing counter, or atomically creates and locks it when missing.
+   * Cleanup may remove an expired counter before this transaction can lock it.
    *
    * @param {EmailAddress} email - The normalized address.
    * @returns {Promise<PasswordResetThrottle>} The throttle.
    */
   public async lock(email: EmailAddress): Promise<PasswordResetThrottle> {
-    await this.db
-      .insert(passwordResetRequests)
-      .values({ email: email.value })
-      .onConflictDoNothing();
-    const rows: CodeRequestThrottleState[] = await this.db
-      .select({
-        lastRequestedAt: passwordResetRequests.lastRequestedAt,
-        windowStartedAt: passwordResetRequests.windowStartedAt,
-        windowRequests: passwordResetRequests.windowRequests,
-      })
+    const fields = {
+      lastRequestedAt: passwordResetRequests.lastRequestedAt,
+      windowStartedAt: passwordResetRequests.windowStartedAt,
+      windowRequests: passwordResetRequests.windowRequests,
+    };
+    const [existing] = await this.db
+      .select(fields)
       .from(passwordResetRequests)
       .where(eq(passwordResetRequests.email, email.value))
       .for('update');
-    const row: CodeRequestThrottleState | undefined = rows[0];
+    const row: CodeRequestThrottleState | undefined =
+      existing ??
+      (
+        await this.db
+          .insert(passwordResetRequests)
+          .values({ email: email.value })
+          .onConflictDoUpdate({
+            target: passwordResetRequests.email,
+            set: { updatedAt: sql`${passwordResetRequests.updatedAt}` },
+          })
+          .returning(fields)
+      )[0];
     if (row === undefined) {
-      throw new Error('The throttle row of a password reset request is missing after its insert.');
+      throw new Error(
+        'The throttle row of a password reset request could not be read after its upsert.',
+      );
     }
     return PasswordResetThrottle.restore(row);
   }

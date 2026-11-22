@@ -9,6 +9,7 @@ import { accountApiTokensProvider } from './composition/providers/adapters/accou
 import { accountDeletionSweepHandlerProvider } from './composition/providers/adapters/accounts/account-deletion-sweep-handler.provider.js';
 import { accountSessionsProvider } from './composition/providers/adapters/accounts/account-sessions.provider.js';
 import { accountsUnitOfWorkProvider } from './composition/providers/adapters/accounts/accounts-unit-of-work.provider.js';
+import { authenticationCounterSweepProvider } from './composition/providers/adapters/accounts/authentication-counter-sweep.provider.js';
 import { clockProvider } from './composition/providers/adapters/accounts/clock.provider.js';
 import { completeAccountDeletionHandlerProvider } from './composition/providers/adapters/accounts/complete-account-deletion-handler.provider.js';
 import { compromisedPasswordsProvider } from './composition/providers/adapters/accounts/compromised-passwords.provider.js';
@@ -66,6 +67,7 @@ import { startAuthenticatorAppSetupProvider } from './composition/providers/use-
 import { startSecurityKeyRegistrationProvider } from './composition/providers/use-cases/two-step/start-security-key-registration.provider.js';
 import { AccountSecurityController } from './presentation/http/controllers/accounts/account-security.controller.js';
 import { NotificationRecipientController } from './presentation/http/controllers/accounts/notification-recipient.controller.js';
+import { VerifiedEmailController } from './presentation/http/controllers/accounts/verified-email.controller.js';
 import { UsersController } from './presentation/http/controllers/accounts/users.controller.js';
 import { AuthController } from './presentation/http/controllers/authentication/auth.controller.js';
 import { FederatedSignInController } from './presentation/http/controllers/authentication/federated-sign-in.controller.js';
@@ -102,12 +104,14 @@ import { TwoStepVerificationController } from './presentation/http/controllers/t
     ReauthenticationController,
     UsersController,
     NotificationRecipientController,
+    VerifiedEmailController,
     AvatarsController,
     AccountSecurityController,
     TwoStepVerificationController,
   ],
   providers: [
     accountsUnitOfWorkProvider,
+    authenticationCounterSweepProvider,
     ...avatarProviders,
     passwordHasherProvider,
     oneTimeCodeSecretsProvider,

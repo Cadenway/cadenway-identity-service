@@ -19,7 +19,7 @@ import type { FederatedFinishUnitOfWork } from '../../../../ports/outbound/trans
 import { FinishFederatedSignIn } from './finish-federated-sign-in.use-case.js';
 import { FederatedFinishRefusal } from '../../../../models/authentication/federated-finish-refusal.model.js';
 
-function fixture() {
+function fixture(saml = false) {
   const accounts = new InMemoryAccounts();
   const user = accounts.seedUser('camille.martin@ateliernord.fr', true, 'hashed:x');
   const sessions = new FakeSessionOpener(accounts);
@@ -35,7 +35,14 @@ function fixture() {
       nonce: 'nonce',
     }),
   };
-  const connection = { provider: 'google' as const, issuer: 'https://issuer.example' };
+  const connection = saml
+    ? {
+        provider: 'saml' as const,
+        issuer: 'https://issuer.example',
+        organizationId: '01938f6e-0000-7000-8000-000000000071',
+        connectionId: 'directory',
+      }
+    : { provider: 'google' as const, issuer: 'https://issuer.example' };
   const identity = { ...connection, subject: 'subject' };
   const link = { id: 'link', userId: user.id, identity, status: 'active' as const };
   let flow = FederatedSignInFlow.issue(
@@ -49,12 +56,29 @@ function fixture() {
     clock.now(),
   )
     .claim(
-      { provider: 'google', stateHash: digest('state'), browserBindingHash: digest('browser') },
+      {
+        provider: connection.provider,
+        stateHash: digest('state'),
+        browserBindingHash: digest('browser'),
+      },
       clock.now(),
     )
-    .complete({ connection, subject: 'subject' }, link, digest('receipt'), clock.now());
+    .complete(
+      { connection, subject: 'subject' },
+      link,
+      digest('receipt'),
+      clock.now(),
+      saml ? 'member' : undefined,
+    );
   const findLink = vi.fn(() => Promise.resolve<typeof link | null>(link));
   const isAllowed = vi.fn(() => Promise.resolve(true));
+  const findMembership = vi.fn(() =>
+    Promise.resolve<{ organizationId: string; memberId: string } | null>(
+      connection.provider === 'saml'
+        ? { organizationId: connection.organizationId, memberId: 'member' }
+        : null,
+    ),
+  );
   const work: FederatedFinishUnitOfWork = {
     run: (operation) =>
       accounts.run((store) =>
@@ -68,7 +92,7 @@ function fixture() {
           },
           findLink,
           isAllowed,
-          hasActiveMembership: () => Promise.resolve(true),
+          activeMembershipId: () => Promise.resolve('member'),
         }),
       ),
   };
@@ -80,9 +104,10 @@ function fixture() {
     new FakeDeviceReader(),
     new FakeTrustedDevices(),
     new FakeChallengeTokens(),
+    { find: findMembership },
   );
   const input = { receipt: 'receipt', client: { ipAddress: '86.247.12.30', userAgent: null } };
-  return { finish, input, sessions, findLink, isAllowed, clock, accounts, user };
+  return { finish, input, sessions, findLink, isAllowed, findMembership, clock, accounts, user };
 }
 
 describe('FinishFederatedSignIn', () => {
@@ -128,5 +153,50 @@ describe('FinishFederatedSignIn', () => {
     });
     expect(f.sessions.opened).toHaveLength(0);
     await expect(f.finish.execute(f.input)).rejects.toBeInstanceOf(FederatedFinishRefusal);
+  });
+
+  it('refuses a SAML receipt when Organization confirms the member was removed', async () => {
+    const f = fixture(true);
+    f.findMembership.mockResolvedValueOnce(null);
+
+    await expect(f.finish.execute(f.input)).rejects.toBeInstanceOf(FederatedFinishRefusal);
+    expect(f.sessions.opened).toHaveLength(0);
+  });
+
+  it('does not issue a SAML session when the membership authority is unavailable', async () => {
+    const f = fixture(true);
+    f.findMembership.mockRejectedValueOnce(new Error('authority unavailable'));
+
+    await expect(f.finish.execute(f.input)).rejects.toThrow('authority unavailable');
+    expect(f.sessions.opened).toHaveLength(0);
+  });
+
+  it('retains the proven SAML membership in the issued session', async () => {
+    const f = fixture(true);
+    await expect(f.finish.execute(f.input)).resolves.toMatchObject({ kind: 'signed-in' });
+    expect(f.sessions.opened[0]?.request.samlMembership).toEqual({
+      organizationId: '01938f6e-0000-7000-8000-000000000071',
+      memberId: 'member',
+    });
+  });
+
+  it('refuses a SAML receipt when the original member was replaced', async () => {
+    const f = fixture(true);
+    f.findMembership.mockResolvedValueOnce({
+      organizationId: '01938f6e-0000-7000-8000-000000000071',
+      memberId: 'new-member',
+    });
+    await expect(f.finish.execute(f.input)).rejects.toBeInstanceOf(FederatedFinishRefusal);
+    expect(f.sessions.opened).toHaveLength(0);
+  });
+
+  it('binds a SAML second-factor challenge to the original member', async () => {
+    const f = fixture(true);
+    seedTwoStep(f.accounts, f.user.id, f.clock.now());
+
+    await expect(f.finish.execute(f.input)).resolves.toMatchObject({ kind: 'challenge' });
+    expect(f.accounts.state.challenges.get(f.user.id)?.federatedBinding).toMatchObject({
+      memberId: 'member',
+    });
   });
 });

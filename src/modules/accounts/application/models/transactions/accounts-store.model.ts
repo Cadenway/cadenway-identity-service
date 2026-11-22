@@ -191,6 +191,10 @@ export interface AccountsStore {
 
   // #region Methods
   /** Locks the current first-factor authority for a federated two-step answer. */
-  mayFinishFederatedChallenge(userId: string, binding: FederatedChallengeBinding): Promise<boolean>;
+  mayFinishFederatedChallenge(
+    userId: string,
+    binding: FederatedChallengeBinding,
+    expectedMemberId?: string,
+  ): Promise<boolean>;
   // #endregion
 }

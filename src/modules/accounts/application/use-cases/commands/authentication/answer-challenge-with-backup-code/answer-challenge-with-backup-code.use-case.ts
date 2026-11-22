@@ -4,12 +4,14 @@ import type { AccountsStore } from '../../../../models/transactions/accounts-sto
 import type { Clock } from '../../../../ports/outbound/clock/accounts/clock.port.js';
 import type { DeviceReader } from '../../../../ports/outbound/device/accounts/device-reader.port.js';
 import type { SessionOpener } from '../../../../ports/outbound/identity/sessions/session-opener.port.js';
+import type { FederatedMembershipAuthority } from '../../../../ports/outbound/identity/memberships/federated-membership-authority.port.js';
 import type { TrustedDevices } from '../../../../ports/outbound/identity/sessions/trusted-devices.port.js';
 import type { BackupCodeSecrets } from '../../../../ports/outbound/security/two-step/backup-code-secrets.port.js';
 import type { ChallengeTokens } from '../../../../ports/outbound/security/two-step/challenge-tokens.port.js';
 import type { AccountsUnitOfWork } from '../../../../ports/outbound/transactions/accounts/accounts-unit-of-work.port.js';
 import type { SessionIssuedView } from '../../../../projections/authentication/session-issued-view.projection.js';
 import {
+  authorizeChallenge,
   finishChallenge,
   lockChallenge,
   lockoutRefusal,
@@ -105,6 +107,9 @@ export class AnswerChallengeWithBackupCode {
    * @readonly
    */
   private readonly clock: Clock;
+
+  /** Resolves the SAML membership outside the answer transaction. */
+  private readonly membershipAuthority: FederatedMembershipAuthority | null;
   // #endregion
 
   // #region Constructor
@@ -131,6 +136,7 @@ export class AnswerChallengeWithBackupCode {
     devices: DeviceReader,
     trustedDevices: TrustedDevices,
     clock: Clock,
+    membershipAuthority: FederatedMembershipAuthority | null = null,
   ) {
     this.unitOfWork = unitOfWork;
     this.challengeTokens = challengeTokens;
@@ -139,6 +145,7 @@ export class AnswerChallengeWithBackupCode {
     this.devices = devices;
     this.trustedDevices = trustedDevices;
     this.clock = clock;
+    this.membershipAuthority = membershipAuthority;
   }
   // #endregion
 
@@ -154,14 +161,38 @@ export class AnswerChallengeWithBackupCode {
    * @throws {AccountRefusal} `auth.challenge-expired`, `auth.two-step-code-invalid` or `auth.two-step-locked`.
    */
   public async execute(input: AnswerChallengeWithBackupCodeInput): Promise<SessionIssuedView> {
+    const authority = await authorizeChallenge(
+      this.unitOfWork,
+      this.challengeTokens,
+      input.token,
+      this.clock.now(),
+      this.membershipAuthority,
+    );
+    if (authority === null) throw new AccountRefusal({ reason: 'challenge-expired' });
     const now: Date = this.clock.now();
     const outcome: SessionIssuedView | Refusal = await this.unitOfWork.run(
       async (store: AccountsStore): Promise<SessionIssuedView | Refusal> => {
-        const located = await lockChallenge(store, this.challengeTokens, input.token, now);
+        const located = await lockChallenge(
+          store,
+          this.challengeTokens,
+          input.token,
+          now,
+          authority,
+        );
         if ('reason' in located) {
           return located;
         }
         const { user, challenge, verification } = located;
+        const binding = challenge.snapshot.federatedBinding;
+        if (
+          challenge.id !== authority.challengeId ||
+          user.id !== authority.userId ||
+          (binding?.connection.provider === 'saml'
+            ? authority.samlMembership?.organizationId !== binding.connection.organizationId
+            : authority.samlMembership !== null)
+        ) {
+          return { reason: 'challenge-expired' };
+        }
         const locked: Refusal | null = lockoutRefusal(verification, now);
         if (locked !== null) {
           return locked;
@@ -177,6 +208,7 @@ export class AnswerChallengeWithBackupCode {
           challenge,
           verification.recordRightAnswer(null),
           input,
+          authority,
         );
       },
     );

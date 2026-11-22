@@ -13,7 +13,7 @@ export class SystemFederatedFinishUnitOfWork implements FederatedFinishUnitOfWor
   public constructor(
     private readonly runner: SystemTransactionRunner,
     private readonly accounts: AccountsUnitOfWork,
-    private readonly authority: Pick<FederatedFinishStore, 'isAllowed' | 'hasActiveMembership'>,
+    private readonly authority: Pick<FederatedFinishStore, 'isAllowed' | 'activeMembershipId'>,
   ) {}
   // #endregion
 
@@ -30,8 +30,8 @@ export class SystemFederatedFinishUnitOfWork implements FederatedFinishUnitOfWor
           save: (flow, version) => flows.save(flow, version),
           findLink: (identity) => links.findByIdentity(identity),
           isAllowed: (userId, connection) => this.authority.isAllowed(userId, connection),
-          hasActiveMembership: (userId, organizationId) =>
-            this.authority.hasActiveMembership(userId, organizationId),
+          activeMembershipId: (userId, organizationId) =>
+            this.authority.activeMembershipId(userId, organizationId),
         });
       }),
     );

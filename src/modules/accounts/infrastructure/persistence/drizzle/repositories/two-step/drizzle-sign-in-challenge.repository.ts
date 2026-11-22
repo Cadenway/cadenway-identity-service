@@ -9,6 +9,7 @@ import challenges from '../../schemas/two-step/sign-in-challenge.schema.js';
 
 const federatedBindingSchema = z.strictObject({
   linkId: z.uuid(),
+  memberId: z.uuid().optional(),
   connection: z.discriminatedUnion('provider', [
     z.strictObject({
       provider: z.enum(['google', 'github', 'microsoft', 'gitlab']),

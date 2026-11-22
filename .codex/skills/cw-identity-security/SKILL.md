@@ -108,7 +108,8 @@ verified. A value below is changed here first, then in code.
 - Lockout: five consecutive failed password sign-ins of an address, account or not, lock its
   password sign-in for 15 minutes; `remainingAttempts` counts down from 4 to 1 (the mockup's "Il vous
   reste 3 tentatives" after two failures); a success, or the end of the lockout, resets the count. A
-  sign-in by email code is not locked.
+  sign-in by email code is not locked. A counter inactive for at least 24 hours and with no live
+  lockout is eligible for deletion, regardless of whether the address is registered.
 - One-time codes: 6 digits from `crypto.randomInt`; sign-up and sign-in codes expire after 10
   minutes, email-change codes after 15; single use; a newer code of the same account and purpose
   replaces the previous one; the fifth wrong attempt stops a code. Stored as HMAC-SHA-256 under a
@@ -129,7 +130,7 @@ verified. A value below is changed here first, then in code.
 - Password reset link (`@cadenway/contracts` 0.7.0): a token of 256 random bits in base64url, which
   travels only in the restricted `password-reset-link.issued.v1` and after `#token=` in the link;
   only its SHA-256 is stored. It works once, for 30 minutes, from any browser; a newer link of the
-  account, and a change of address, void it. Requests of an address are throttled apart from the
+  account, a change of address and an authenticated password change void it. Requests of an address are throttled apart from the
   codes: 45 seconds and 5 in an hour, account or not, with the same answer whatever the account. A
   reset ends the lockout of the address, drops a pending change of address, closes every session
   unless unticked (and ends their recent authentication otherwise), keeps the API tokens and never

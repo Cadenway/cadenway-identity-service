@@ -70,5 +70,8 @@ export interface OpenSessionInput {
    * @readonly
    */
   readonly authentication: 'password' | 'two-step' | null;
+
+  /** The originating SAML membership when the session depends on a SAML sign-in. */
+  readonly samlMembership?: { readonly organizationId: string; readonly memberId: string } | null;
   // #endregion
 }

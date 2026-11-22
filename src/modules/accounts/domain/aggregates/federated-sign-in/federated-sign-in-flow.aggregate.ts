@@ -50,6 +50,10 @@ interface Continuation {
   readonly identity: FederatedIdentity;
   readonly linkId: string;
   readonly userId: string;
+
+  /** Membership proved at the SAML callback. Legacy receipts carry no usable membership proof. */
+  readonly memberId?: string;
+
   readonly receiptHash: string;
   readonly issuedAtMs: number;
   readonly expiresAtMs: number;
@@ -138,7 +142,7 @@ function persistedPhase(phase: FlowPhase): FlowPhase {
   if (phase.kind === 'open') return { kind: 'open' };
   const claimedAtMs = phase.claimedAtMs;
   if (phase.kind === 'claimed') return { kind: 'claimed', claimedAtMs };
-  const { identity, linkId, userId, receiptHash, issuedAtMs, expiresAtMs, redeemedAtMs } =
+  const { identity, linkId, userId, memberId, receiptHash, issuedAtMs, expiresAtMs, redeemedAtMs } =
     phase.continuation;
   return {
     kind: 'complete',
@@ -147,6 +151,7 @@ function persistedPhase(phase: FlowPhase): FlowPhase {
       identity: identityOf(identity, identity.subject),
       linkId,
       userId,
+      ...(memberId === undefined ? {} : { memberId }),
       receiptHash,
       issuedAtMs,
       expiresAtMs,
@@ -224,6 +229,8 @@ export class FederatedSignInFlow {
         receipt.identity.subject.trim().length === 0 ||
         receipt.linkId.trim().length === 0 ||
         receipt.userId.trim().length === 0 ||
+        (receipt.memberId !== undefined &&
+          (provider !== 'saml' || receipt.memberId.trim().length === 0)) ||
         !timeWithin(receipt.issuedAtMs, phase.claimedAtMs, expiresAtMs) ||
         !validLifetime(receipt.issuedAtMs, receipt.expiresAtMs, receiptLifetimeMs) ||
         (receipt.redeemedAtMs !== null &&
@@ -275,6 +282,7 @@ export class FederatedSignInFlow {
     link: LinkedFederatedAccount | null,
     receiptHash: string,
     now: Date,
+    memberId?: string,
   ): FederatedSignInFlow {
     const { connection, phase, expiresAtMs } = this.state;
     const issuedAtMs = now.getTime();
@@ -283,7 +291,8 @@ export class FederatedSignInFlow {
       phase.kind !== 'claimed' ||
       !timeWithin(issuedAtMs, phase.claimedAtMs, expiresAtMs) ||
       !isSameConnection(connection, proof.connection) ||
-      !isExistingLink(link, identity)
+      !isExistingLink(link, identity) ||
+      (connection.provider === 'saml' && memberId === undefined)
     ) {
       throw new FederatedSignInRefusedError();
     }
@@ -296,6 +305,7 @@ export class FederatedSignInFlow {
           identity,
           linkId: link.id,
           userId: link.userId,
+          ...(memberId === undefined ? {} : { memberId }),
           receiptHash,
           issuedAtMs,
           expiresAtMs: issuedAtMs + receiptLifetimeMs,
@@ -345,8 +355,10 @@ export class FederatedSignInFlow {
       !current.maySignIn ||
       !twoStepDecisions.includes(current.twoStep) ||
       (organizationId !== null &&
-        (current.activeMembership?.organizationId !== organizationId ||
-          current.activeMembership.userId !== receipt.userId))
+        (receipt.memberId === undefined ||
+          current.activeMembership?.organizationId !== organizationId ||
+          current.activeMembership.userId !== receipt.userId ||
+          current.activeMembership.memberId !== receipt.memberId))
     ) {
       return { kind: 'refused' };
     }

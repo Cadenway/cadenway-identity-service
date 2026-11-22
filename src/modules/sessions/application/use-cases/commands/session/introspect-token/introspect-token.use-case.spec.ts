@@ -83,13 +83,48 @@ describe('IntrospectToken', () => {
     });
   });
 
+  it('stops a SAML session when its originating membership was revoked', async () => {
+    memberships.join(CAMILLE_ID, {
+      memberId: MEMBER_ID,
+      organizationId: ATELIER_NORD,
+      role: 'admin',
+    });
+    store.choices.set(CAMILLE_ID, ATELIER_NORD);
+    const samlSession = await new OpenSession(
+      store,
+      tokens,
+      new FakeDeviceReader(),
+      memberships,
+      clock,
+    ).execute({
+      userId: CAMILLE_ID,
+      persistent: false,
+      client: { ipAddress: '86.247.12.30', userAgent: null },
+      authentication: null,
+      newDeviceNotice: null,
+      samlMembership: { organizationId: ANOTHER_ORGANIZATION, memberId: 'original-member' },
+    });
+    const authority = {
+      find: vi.fn((organizationId: string) =>
+        Promise.resolve(
+          organizationId === ATELIER_NORD
+            ? { organizationId, memberId: MEMBER_ID, role: 'admin' as const }
+            : null,
+        ),
+      ),
+    };
+    const current = new IntrospectToken(store, tokens, memberships, clock, authority);
+
+    await expect(current.execute({ token: samlSession.token })).resolves.toEqual({ active: false });
+  });
+
   it('answers the current organization and the role of the account there', async () => {
     memberships.join(CAMILLE_ID, {
       memberId: MEMBER_ID,
       organizationId: ATELIER_NORD,
       role: 'admin',
     });
-    await new SwitchSessionOrganization(store, memberships, clock).execute({
+    await new SwitchSessionOrganization(store, memberships, clock, memberships).execute({
       actorUserId: CAMILLE_ID,
       sessionId: opened.id,
       organizationId: ATELIER_NORD,
@@ -114,7 +149,7 @@ describe('IntrospectToken', () => {
       organizationId: ATELIER_NORD,
       role: 'admin',
     });
-    await new SwitchSessionOrganization(store, memberships, clock).execute({
+    await new SwitchSessionOrganization(store, memberships, clock, memberships).execute({
       actorUserId: CAMILLE_ID,
       sessionId: opened.id,
       organizationId: ATELIER_NORD,
@@ -147,7 +182,7 @@ describe('IntrospectToken', () => {
       organizationId: ATELIER_NORD,
       role: 'admin',
     });
-    await new SwitchSessionOrganization(store, memberships, clock).execute({
+    await new SwitchSessionOrganization(store, memberships, clock, memberships).execute({
       actorUserId: CAMILLE_ID,
       sessionId: opened.id,
       organizationId: ATELIER_NORD,
@@ -167,7 +202,7 @@ describe('IntrospectToken', () => {
       organizationId: ATELIER_NORD,
       role: 'member',
     });
-    await new SwitchSessionOrganization(store, memberships, clock).execute({
+    await new SwitchSessionOrganization(store, memberships, clock, memberships).execute({
       actorUserId: CAMILLE_ID,
       sessionId: opened.id,
       organizationId: ATELIER_NORD,
@@ -239,7 +274,7 @@ describe('IntrospectToken', () => {
       find.mockReset();
       find.mockResolvedValue(proof);
       memberships.join(CAMILLE_ID, { ...proof, role: 'owner' });
-      await new SwitchSessionOrganization(store, memberships, clock).execute({
+      await new SwitchSessionOrganization(store, memberships, clock, memberships).execute({
         actorUserId: CAMILLE_ID,
         sessionId: opened.id,
         organizationId: ATELIER_NORD,
@@ -304,7 +339,7 @@ describe('IntrospectToken', () => {
       } as const;
       memberships.join(CAMILLE_ID, next);
       find.mockImplementationOnce(async () => {
-        await new SwitchSessionOrganization(store, memberships, clock).execute({
+        await new SwitchSessionOrganization(store, memberships, clock, memberships).execute({
           actorUserId: CAMILLE_ID,
           sessionId: opened.id,
           organizationId: ANOTHER_ORGANIZATION,

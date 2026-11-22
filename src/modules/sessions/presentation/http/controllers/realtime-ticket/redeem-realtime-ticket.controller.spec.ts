@@ -16,6 +16,10 @@ const userId = '019a5f3c-8d2e-7c4a-9b1f-3e5d7a9c1b30';
 const organizationId = '019a5f3c-8d2e-7c4a-9b1f-3e5d7a9c1b2f';
 const sessionId = '019a6a2e-4b1c-7d3e-8f5a-2c9b7e1d4a60';
 const memberId = '019a5f3c-8d2e-7c4a-9b1f-3e5d7a9c1b31';
+const samlSourceMembership = {
+  organizationId: '019a5f3c-8d2e-7c4a-9b1f-3e5d7a9c1b32',
+  memberId: '019a5f3c-8d2e-7c4a-9b1f-3e5d7a9c1b33',
+};
 const ticket = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFA';
 const issue = vi
   .fn()
@@ -28,6 +32,7 @@ const redeem = vi.fn().mockResolvedValue({
   memberId,
   role: 'owner',
   sessionExpiresAt: new Date('2026-11-20T20:00:00Z'),
+  samlSourceMembership,
 });
 
 @Module({
@@ -123,6 +128,16 @@ describe('signed realtime ticket routes', () => {
     expect(good.status).toBe(200);
     expect(good.headers['cache-control']).toBe('no-store');
     expect(good.body).toMatchObject({ sessionId, organizationId, userId, memberId });
+    expect(good.body).not.toHaveProperty('samlSourceMembership');
+    expect(good.headers['preference-applied']).toBeUndefined();
+    const withSource = await request(app.getHttpServer())
+      .post('/internal/v1/realtime/tickets/redemption')
+      .set('Authorization', `Bearer ${auth}`)
+      .set('Prefer', 'cadenway-saml-source-membership')
+      .send({ token: ticket });
+    expect(withSource.status).toBe(200);
+    expect(withSource.body).toMatchObject({ samlSourceMembership });
+    expect(withSource.headers['preference-applied']).toBe('cadenway-saml-source-membership');
     const scoped = await realtime.sign('identity-service', {
       actor: { type: 'system', id: null },
       organizationId,

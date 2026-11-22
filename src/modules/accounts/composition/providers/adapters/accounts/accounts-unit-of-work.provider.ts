@@ -31,6 +31,6 @@ export const accountsUnitOfWorkProvider: FactoryProvider<AccountsUnitOfWork> = {
     outbox: OutboxWriter,
     relay: OutboxRelay,
     jobs: JobProducer,
-    federation: Pick<FederatedFinishStore, 'isAllowed' | 'hasActiveMembership'>,
+    federation: Pick<FederatedFinishStore, 'isAllowed' | 'activeMembershipId'>,
   ): AccountsUnitOfWork => new SystemAccountsUnitOfWork(runner, outbox, relay, jobs, federation),
 };

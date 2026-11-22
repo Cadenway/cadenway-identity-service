@@ -236,6 +236,10 @@ describe('configured SAML sign-in', () => {
       Promise.resolve({ identity, status: 'active', id: 'linked-account', userId: 'linked-user' }),
     );
     const isEligible = vi.fn<SocialFlowStore['isEligible']>(() => Promise.resolve(true));
+    const samlMembership = {
+      organizationId: samlConnection.organizationId,
+      memberId: '01938f6e-0000-7000-8000-000000000078',
+    };
     const store: SocialFlowStore = {
       nextFlowId: () => Promise.resolve(`flow-${String(++flowCount)}`),
       insert: (flow) => {
@@ -262,13 +266,25 @@ describe('configured SAML sign-in', () => {
       findLink,
       isEligible,
       start: new StartSamlSignIn(catalog, credentials, clock, work),
-      complete: new CompleteSamlSignIn(catalog, credentials, clock, work),
+      samlMembership,
+      complete: new CompleteSamlSignIn(catalog, credentials, clock, work, {
+        find: () => Promise.resolve(samlMembership),
+      }),
     };
   }
 
   it('requires the original browser and signs in only the linked subject of the verified domain', async () => {
-    const { start, complete, store, claim, credentials, samlConnection, findLink, isEligible } =
-      setup();
+    const {
+      start,
+      complete,
+      store,
+      claim,
+      credentials,
+      samlConnection,
+      findLink,
+      isEligible,
+      samlMembership,
+    } = setup();
     await expect(start.execute({ email: 'person@unverified.example.test' })).resolves.toEqual({
       kind: 'refused',
     });
@@ -298,7 +314,7 @@ describe('configured SAML sign-in', () => {
     const issued = await complete.execute(callback);
     if (issued.kind !== 'issued') throw new Error('The linked account did not receive a receipt.');
     expect(findLink).toHaveBeenCalledWith({ ...samlConnection, subject });
-    expect(isEligible).toHaveBeenCalledWith('linked-user', samlConnection);
+    expect(isEligible).toHaveBeenCalledWith('linked-user', samlConnection, samlMembership.memberId);
     expect(claim).toHaveBeenCalledWith(
       samlConnection,
       expect.stringContaining(assertionId),

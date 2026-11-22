@@ -53,6 +53,12 @@ export const FEDERATION_EXPIRY_QUEUE: string = 'account.federation-expiry';
 /** Runs bounded federation retention every minute in UTC. */
 export const FEDERATION_EXPIRY_CRON: string = '* * * * *';
 
+/** System-only queue for removing inactive authentication counters. */
+export const AUTHENTICATION_COUNTER_SWEEP_QUEUE: string = 'account.authentication-counter-sweep';
+
+/** Runs bounded counter retention every minute in UTC. */
+export const AUTHENTICATION_COUNTER_SWEEP_CRON: string = '* * * * *';
+
 /**
  * Constant jobQueues
  *
@@ -76,10 +82,23 @@ export const FEDERATION_EXPIRY_CRON: string = '* * * * *';
  *   transient failures, and a later sweep retries candidates without a committed decision.
  * - `account.federation-expiry` removes expired sign-in flows and replay markers in bounded batches
  *   with two retries for transient failures.
+ * - `account.authentication-counter-sweep` removes inactive counters with two retries. A later
+ *   sweep resumes any remaining rows.
  *
  * @type {readonly JobQueueDeclaration[]}
  */
 export const jobQueues: readonly JobQueueDeclaration[] = [
+  {
+    name: AUTHENTICATION_COUNTER_SWEEP_QUEUE,
+    retryLimit: 2,
+    retryDelaySeconds: 10,
+    retryBackoff: true,
+    retryDelayMaxSeconds: 60,
+    expireInSeconds: 120,
+    retentionSeconds: 3_600,
+    deleteAfterSeconds: 3_600,
+    deadLetterRetentionSeconds: 86_400,
+  },
   {
     name: ACCOUNT_DELETION_SWEEP_QUEUE,
     retryLimit: 2,

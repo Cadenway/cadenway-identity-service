@@ -22,6 +22,6 @@ export interface FederatedFinishStore extends AccountsStore {
   isAllowed(userId: string, connection: FederatedConnection): Promise<boolean>;
 
   /** Checks the current organization membership in the same transaction. */
-  hasActiveMembership(userId: string, organizationId: string): Promise<boolean>;
+  activeMembershipId(userId: string, organizationId: string): Promise<string | null>;
   // #endregion
 }

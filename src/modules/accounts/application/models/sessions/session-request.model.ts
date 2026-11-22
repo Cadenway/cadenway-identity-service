@@ -1,5 +1,6 @@
 import type { NewDeviceNotice } from './new-device-notice.model.js';
 import type { SessionClient } from './session-client.model.js';
+import type { SamlMembership } from './saml-membership.model.js';
 
 /**
  * Interface SessionRequest
@@ -67,5 +68,8 @@ export interface SessionRequest {
    * @readonly
    */
   readonly authentication: 'password' | 'two-step' | null;
+
+  /** Membership on which SAML authentication depends, if applicable. */
+  readonly samlMembership?: SamlMembership | null;
   // #endregion
 }

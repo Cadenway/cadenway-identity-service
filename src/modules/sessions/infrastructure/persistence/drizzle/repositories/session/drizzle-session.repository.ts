@@ -147,6 +147,8 @@ export class DrizzleSessionRepository implements SessionRepository {
         deviceType: origin.device.type === 'unknown' ? null : origin.device.type,
         organizationId: start.organizationId,
         memberId: start.memberId,
+        samlOrganizationId: start.samlMembership?.organizationId ?? null,
+        samlMemberId: start.samlMembership?.memberId ?? null,
         lastActiveAt: start.lastActiveAt,
         expiresAt: start.expiresAt,
         signedInAt: start.signedInAt,

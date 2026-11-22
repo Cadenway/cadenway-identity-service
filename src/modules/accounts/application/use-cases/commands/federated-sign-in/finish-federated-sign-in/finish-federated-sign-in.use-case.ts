@@ -3,6 +3,7 @@ import type { FederatedFinishAuthority } from '../../../../../domain/value-objec
 import type { Clock } from '../../../../ports/outbound/clock/accounts/clock.port.js';
 import type { DeviceReader } from '../../../../ports/outbound/device/accounts/device-reader.port.js';
 import type { SessionOpener } from '../../../../ports/outbound/identity/sessions/session-opener.port.js';
+import type { FederatedMembershipAuthority } from '../../../../ports/outbound/identity/memberships/federated-membership-authority.port.js';
 import type { TrustedDevices } from '../../../../ports/outbound/identity/sessions/trusted-devices.port.js';
 import type { SocialFlowCredentials } from '../../../../ports/outbound/security/federation/social-flow-credentials.port.js';
 import type { ChallengeTokens } from '../../../../ports/outbound/security/two-step/challenge-tokens.port.js';
@@ -24,6 +25,7 @@ export class FinishFederatedSignIn {
     private readonly devices: DeviceReader,
     private readonly trustedDevices: TrustedDevices,
     private readonly challengeTokens: ChallengeTokens,
+    private readonly membershipAuthority: FederatedMembershipAuthority | null,
   ) {}
   // #endregion
 
@@ -31,19 +33,50 @@ export class FinishFederatedSignIn {
   /** Commits a policy refusal after consuming the receipt; unexpected failures roll it back. */
   public async execute(input: FinishFederatedSignInInput): Promise<SignInOutcome> {
     const receiptHash = this.credentials.digest(input.receipt);
+    const selected = await this.work.run((store) => store.findByReceiptHash(receiptHash));
+    if (selected === null) throw new FederatedFinishRefusal();
+    const selectedState = selected.flow.snapshot;
+    if (selectedState.phase.kind !== 'complete') throw new FederatedFinishRefusal();
+    const selectedUserId = selectedState.phase.continuation.userId;
+    let samlMembership = null;
+    if (selectedState.connection.provider === 'saml') {
+      if (this.membershipAuthority === null) {
+        throw new Error('Organization membership authority is required for SAML sign-in.');
+      }
+      samlMembership = await this.membershipAuthority.find(
+        selectedState.connection.organizationId,
+        selectedUserId,
+      );
+      if (
+        samlMembership === null ||
+        samlMembership.memberId !== selectedState.phase.continuation.memberId
+      ) {
+        throw new FederatedFinishRefusal();
+      }
+    }
     const result = await this.work.run(async (store): Promise<SignInOutcome | null> => {
       const record = await store.findByReceiptHash(receiptHash);
       if (record === null) return null;
       const { phase, connection } = record.flow.snapshot;
       if (phase.kind !== 'complete' || phase.continuation.redeemedAtMs !== null) return null;
       const { identity, userId } = phase.continuation;
+      if (
+        userId !== selectedUserId ||
+        record.flow.snapshot.id !== selectedState.id ||
+        (connection.provider === 'saml' &&
+          samlMembership?.organizationId !== connection.organizationId)
+      ) {
+        return null;
+      }
       const user = await store.users.lock(userId);
       const link = await store.findLink(identity);
       const maySignIn = user !== null && (await store.isAllowed(userId, connection));
       const activeMembership =
         connection.provider === 'saml' &&
-        (await store.hasActiveMembership(userId, connection.organizationId))
-          ? { userId, organizationId: connection.organizationId }
+        samlMembership !== null &&
+        (await store.activeMembershipId(userId, connection.organizationId)) ===
+          samlMembership.memberId
+          ? { userId, organizationId: connection.organizationId, memberId: samlMembership.memberId }
           : null;
       const verification = user === null ? null : await store.twoStep.find(userId);
       const trusted =
@@ -87,7 +120,12 @@ export class FinishFederatedSignIn {
           client: input.client,
           trustedDeviceToken: input.trustedDeviceToken,
           authentication: null,
-          federatedBinding: { linkId: redemption.decision.audit.linkId, connection },
+          federatedBinding: {
+            linkId: redemption.decision.audit.linkId,
+            connection,
+            ...(samlMembership === null ? {} : { memberId: samlMembership.memberId }),
+          },
+          samlMembership,
         },
         this.clock.now(),
       );

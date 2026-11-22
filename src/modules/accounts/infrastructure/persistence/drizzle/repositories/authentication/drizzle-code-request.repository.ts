@@ -48,28 +48,38 @@ export class DrizzleCodeRequestRepository implements CodeRequestRepository {
    * Method lock
    *
    * @description
-   * Creates the row of the address when it is missing, then locks it and reads its throttle. Two
-   * first requests at once both insert with `on conflict do nothing`; the second then waits on the
-   * lock of the first. The row is never deleted, so a waiting request always finds it.
+   * Locks the existing counter, or atomically creates and locks it when missing.
+   * Cleanup may remove an expired counter before this transaction can lock it.
    *
    * @param {EmailAddress} email - The normalized address.
    * @returns {Promise<CodeRequestThrottle>} The throttle of the address.
    * @throws {Error} When the row is missing right after its insert, which never happens.
    */
   public async lock(email: EmailAddress): Promise<CodeRequestThrottle> {
-    await this.db.insert(codeRequests).values({ email: email.value }).onConflictDoNothing();
-    const rows: CodeRequestThrottleState[] = await this.db
-      .select({
-        lastRequestedAt: codeRequests.lastRequestedAt,
-        windowStartedAt: codeRequests.windowStartedAt,
-        windowRequests: codeRequests.windowRequests,
-      })
+    const fields = {
+      lastRequestedAt: codeRequests.lastRequestedAt,
+      windowStartedAt: codeRequests.windowStartedAt,
+      windowRequests: codeRequests.windowRequests,
+    };
+    const [existing] = await this.db
+      .select(fields)
       .from(codeRequests)
       .where(eq(codeRequests.email, email.value))
       .for('update');
-    const row: CodeRequestThrottleState | undefined = rows[0];
+    const row: CodeRequestThrottleState | undefined =
+      existing ??
+      (
+        await this.db
+          .insert(codeRequests)
+          .values({ email: email.value })
+          .onConflictDoUpdate({
+            target: codeRequests.email,
+            set: { updatedAt: sql`${codeRequests.updatedAt}` },
+          })
+          .returning(fields)
+      )[0];
     if (row === undefined) {
-      throw new Error('The throttle row of a code request is missing after its insert.');
+      throw new Error('The throttle row of a code request could not be read after its upsert.');
     }
     return CodeRequestThrottle.restore(row);
   }

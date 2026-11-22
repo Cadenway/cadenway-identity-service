@@ -119,6 +119,19 @@ another service, without a foreign key.
 the session version, the account, the selected organization and membership, and the issuance,
 expiry and redemption times. Deleting a session also deletes its tickets.
 
+`migrations/0012_saml_session_membership.sql` adds the source organization and exact membership
+generation of a SAML session. These nullable columns stay fixed when a user chooses another
+organization. Introspection and ticket redemption recheck the original membership even when the
+session acts elsewhere. Existing sessions do not have reliable sign-in provenance and keep null
+bindings until they expire. SAML receipts or challenges created before membership binding need a
+fresh sign-in. Roll out the expanded database before this binary and keep the membership authority
+configured whenever this binary serves SAML, scoped session changes, or ticket redemption.
+To retire older sessions immediately, revoke the existing sessions of accounts with SAML links,
+including revoked links. This also ends their sessions opened through other methods because
+pre-migration records cannot be classified reliably. Disable SAML before rolling back to a binary
+that ignores the source membership. A fresh sign-in also replaces any SAML MFA challenge the old
+binary cannot read.
+
 ## API
 
 From `openapi/internal/identity-service.yaml` of the installed `@cadenway/contracts`; issuer

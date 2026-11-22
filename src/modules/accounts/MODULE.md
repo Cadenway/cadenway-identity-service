@@ -139,11 +139,21 @@ fixed user endpoint. Both adapters use S256 and the exact configured callback, a
 provider identity required to look up an existing link. The callback orchestration owns claiming
 state and calls the provider outside the database transaction.
 
-The `account.deletion-sweep`, `account.delete`, `account.avatar-upload-expiry` and
-`account.federation-expiry` queues live in the `pgboss` schema of `@cadenway/nest-jobs`,
-provisioned by `src/migrate.ts`. The avatar sweep and federation sweep have no payload.
+The deletion, avatar expiry, federation expiry and authentication counter queues live in the
+`pgboss` schema of `@cadenway/nest-jobs`, provisioned by `src/migrate.ts`. The avatar, federation
+and authentication counter sweeps have no payload.
 Every UTC minute, the federation sweep handles up to four transactions of at most 250 expired
 flows and 250 eligible assertion markers each, skipping rows locked by other transactions.
+The `account.authentication-counter-sweep` removes counters that have been inactive for at least
+24 hours, including addresses without an account. It preserves active password lockouts and
+skips rows locked by requests. Each UTC minute it runs up to four transactions of at most
+500 rows per counter table. It starts only when `AUTHENTICATION_COUNTER_RETENTION_ENABLED=true`.
+Enable the sweep after every running replica uses the counter lock that tolerates deleted rows.
+Before rolling back to a release with the old counter lock, disable the sweep on all replicas
+and wait for the workers to stop.
+Migration 0013 uses short lock and statement deadlines. If the tables are too large for a
+transactional build, provision the same indexes with `CREATE INDEX CONCURRENTLY` outside the
+Drizzle migration transaction, verify that the indexes are valid and retry the migration.
 
 ## API
 
@@ -205,6 +215,10 @@ the verified current email address, language, IANA time zone and account version
 account row. A missing, unverified or scheduled-for-deletion account returns `404 user.not-found`.
 An account state the service cannot read returns `503 upstream.unavailable`. All responses carry
 `Cache-Control: no-store`. The read appends no event.
+
+Organization calls `GET /internal/v1/users/{userId}/verified-email` to resolve addressed
+invitations. Only its unscoped system token is accepted. This read applies the same account
+eligibility check and exposes just the current verified email, with the same cache and error policy.
 
 The avatar routes are under `/internal/v1/users/{userId}`. The API gateway reserves an upload
 with `POST /avatar/uploads`, reads its state with `GET /avatar/uploads/{uploadId}`, and sets or
@@ -313,9 +327,10 @@ None.
   recent authentication of the session of the request (a password one, none for an account with
   two-step verification, whose proof stays), ends the recent authentication of the others, and
   drops a pending change of address (decision 3 of P2c).
-- A reset link works once, for 30 minutes, from any browser; a newer link of the account and a
-  change of address void it. A request answers the same way whether or not a verified account uses
-  the address; requests of an address are throttled apart from the codes: 45 seconds and 5 an hour
+- A reset link works once, for 30 minutes, from any browser. A newer link of the account, a
+  change of address or an authenticated password change voids it. A request answers the same way
+  whether or not a verified account uses the address. Requests of an address are throttled apart
+  from the codes: 45 seconds and 5 an hour
   (`auth.reset-throttled`). Reading a link does not use it. A reset checks the link first, then the
   new password, which leaves the link usable; it never signs in, closes every session unless
   `closeOtherSessions` is `false` (and ends their recent authentication otherwise), ends the lockout

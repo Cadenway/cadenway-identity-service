@@ -32,6 +32,8 @@ import {
  * while both are equal, so a password window a previous version writes during a rollout, which moves
  * `authenticated_at` alone, never passes for one. The inactivity of a session follows the
  * policy of the organization it names (`authentication_policies`), 12 hours without one.
+ * `saml_organization_id` and `saml_member_id` bind a SAML sign-in to the exact membership that
+ * vouched for it, independently of the organization selected later.
  * `browser`, `operating_system` and `device_type` are written for the record only: the list reads the
  * device from `user_agent`.
  */
@@ -51,6 +53,8 @@ export default pgTable(
     deviceType: text('device_type'),
     organizationId: uuid('organization_id'),
     memberId: uuid('member_id'),
+    samlOrganizationId: uuid('saml_organization_id'),
+    samlMemberId: uuid('saml_member_id'),
     lastActiveAt: timestamp('last_active_at', { withTimezone: true }).notNull(),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
     revokedAt: timestamp('revoked_at', { withTimezone: true }),
@@ -70,6 +74,10 @@ export default pgTable(
     check(
       'sessions_membership_check',
       sql`(${table.organizationId} is null) = (${table.memberId} is null)`,
+    ),
+    check(
+      'sessions_saml_membership_check',
+      sql`(${table.samlOrganizationId} is null) = (${table.samlMemberId} is null)`,
     ),
     organizationPolicy('sessions_organization_isolation'),
   ],

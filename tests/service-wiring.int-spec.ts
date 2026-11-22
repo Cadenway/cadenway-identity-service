@@ -114,7 +114,7 @@ const businessTables = [
 const allTables = [...platformTables, ...businessTables].sort();
 
 /** Migrations of `migrations/meta/_journal.json`. */
-const migrationCount = 12;
+const migrationCount = 14;
 
 /**
  * Runs `docker compose` on the throwaway project.
@@ -240,9 +240,11 @@ class WiringProbeController {
 describe('identity-service wiring', () => {
   const gateway = keyPair();
   const notification = keyPair('test-notification-service');
+  const organization = keyPair('test-organization-service');
   let app: NestExpressApplication | undefined;
   let signer: InternalTokenSigner;
   let notificationSigner: InternalTokenSigner;
+  let organizationSigner: InternalTokenSigner;
   let migrator: pg.Pool;
 
   /**
@@ -304,8 +306,13 @@ describe('identity-service wiring', () => {
       'NOTIFICATION_SERVICE_INTERNAL_TOKEN_PUBLIC_JWKS',
       JSON.stringify(notification.publicJwk),
     );
+    vi.stubEnv(
+      'ORGANIZATION_SERVICE_INTERNAL_TOKEN_PUBLIC_JWKS',
+      JSON.stringify(organization.publicJwk),
+    );
     vi.stubEnv('PASSWORD_PEPPER', 'integration-test-password-pepper-000000000000');
     vi.stubEnv('WEBAUTHN_RP_ID', 'app.cadenway.localhost');
+    vi.stubEnv('AUTHENTICATION_COUNTER_RETENTION_ENABLED', 'true');
     vi.stubEnv('WEBAUTHN_ORIGINS', 'http://app.cadenway.localhost');
 
     @Module({
@@ -338,6 +345,10 @@ describe('identity-service wiring', () => {
     notificationSigner = await InternalTokenSigner.create({
       issuer: 'notification-service',
       privateJwk: notification.privateJwk,
+    });
+    organizationSigner = await InternalTokenSigner.create({
+      issuer: 'organization-service',
+      privateJwk: organization.privateJwk,
     });
   });
 
@@ -545,6 +556,23 @@ describe('identity-service wiring', () => {
       expect(original.body).toEqual(expected);
       expect(GetNotificationRecipientInternalResponse.parse(original.body)).toEqual(expected);
 
+      const organizationAuth = await organizationSigner.sign('identity-service', {
+        actor: { type: 'system', id: 'organization-service' },
+        organizationId: null,
+      });
+      const verifiedEmail = (id: string, token = organizationAuth) =>
+        request(service().getHttpServer())
+          .get(`/internal/v1/users/${id}/verified-email`)
+          .set('Authorization', `Bearer ${token}`)
+          .set('If-None-Match', '*');
+      const proof = await verifiedEmail(userId);
+      expect(proof.status).toBe(200);
+      expect(proof.headers['cache-control']).toBe('no-store');
+      expect(proof.body).toEqual({ email });
+      expect((await verifiedEmail(unverifiedId)).status).toBe(404);
+      expect((await verifiedEmail(scheduledId)).status).toBe(404);
+      expect((await verifiedEmail(userId, auth)).status).toBe(403);
+
       await system.run(({ client }) =>
         client.query(
           `update users set email = $2, language = 'en', time_zone = 'America/New_York',
@@ -553,6 +581,7 @@ describe('identity-service wiring', () => {
         ),
       );
       const current = await read(userId);
+      expect((await verifiedEmail(userId)).body).toEqual({ email: pendingEmail });
       expect(current.status).toBe(200);
       expect(current.body).toEqual({
         email: pendingEmail,
@@ -1159,6 +1188,8 @@ describe('identity-service wiring', () => {
     );
 
     expect(queues.map(({ name }) => name)).toEqual([
+      'account.authentication-counter-sweep',
+      'account.authentication-counter-sweep.dead-letter',
       'account.avatar-upload-expiry',
       'account.avatar-upload-expiry.dead-letter',
       'account.delete',
@@ -1176,6 +1207,12 @@ describe('identity-service wiring', () => {
       ]),
     );
     expect(federationSchedule.rows).toEqual([{ cron: '* * * * *', timezone: 'UTC' }]);
+    const authenticationSchedule = await system.run((tx) =>
+      tx.client.query('select cron, timezone from pgboss.schedule where name = $1', [
+        'account.authentication-counter-sweep',
+      ]),
+    );
+    expect(authenticationSchedule.rows).toEqual([{ cron: '* * * * *', timezone: 'UTC' }]);
     await expect(
       system.run((tx) => tx.client.query('create table pgboss.wiring_probe (id integer)')),
     ).rejects.toMatchObject({ code: '42501' });

@@ -200,6 +200,7 @@ export class Session {
    * @param {SessionAuthenticationMethod | null} authentication - The proof the sign-in brought,
    * which opens the window of recent authentication; `null` for a sign-in on a trusted device of an
    * account with two-step verification, which opens none.
+   * @param {SessionMembership | null} samlMembership - The membership that vouched for a SAML sign-in.
    * @returns {SessionStart} The session to store.
    */
   public static start(
@@ -208,12 +209,14 @@ export class Session {
     now: Date,
     membership: SessionMembership | null = null,
     authentication: SessionAuthenticationMethod | null = 'password',
+    samlMembership: SessionMembership | null = null,
   ): SessionStart {
     return {
       userId,
       persistent,
       organizationId: membership?.organizationId ?? null,
       memberId: membership?.memberId ?? null,
+      samlMembership,
       lastActiveAt: now,
       expiresAt: new Date(now.getTime() + Session.ABSOLUTE_LIFETIME_MS),
       signedInAt: now,

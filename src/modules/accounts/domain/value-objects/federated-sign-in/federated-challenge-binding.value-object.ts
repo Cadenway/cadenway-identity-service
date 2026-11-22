@@ -8,5 +8,8 @@ export interface FederatedChallengeBinding {
 
   /** The exact provider connection that authenticated the first factor. */
   readonly connection: FederatedConnection;
+
+  /** Exact membership that vouched for SAML before MFA. Older challenges lack this proof. */
+  readonly memberId?: string;
   // #endregion
 }

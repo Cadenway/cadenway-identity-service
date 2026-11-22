@@ -7,6 +7,7 @@ import type { LinkedFederatedAccount } from '../../value-objects/federated-sign-
 import { FederatedSignInFlow } from './federated-sign-in-flow.aggregate.js';
 
 const camilleId = '01938f6e-8a42-7d5b-b2c9-5e1f3a6d9c24';
+const memberId = '01938f6e-0000-7000-8000-000000000078';
 const atelierNordId = '01938f6e-6d1a-7c3e-9a51-2f0c4b8d7e10';
 const anotherOrganizationId = '01938f6e-0000-7000-8000-000000000002';
 const startedAt = new Date('2026-11-21T12:00:00Z');
@@ -43,7 +44,13 @@ function linkedAccount(connection: FederatedConnection = google): LinkedFederate
 function complete(connection: FederatedConnection = google): FederatedSignInFlow {
   return start(connection)
     .claim({ provider: connection.provider, stateHash, browserBindingHash }, checkedAt)
-    .complete({ connection, subject }, linkedAccount(connection), receiptHash, checkedAt);
+    .complete(
+      { connection, subject },
+      linkedAccount(connection),
+      receiptHash,
+      checkedAt,
+      connection.provider === 'saml' ? memberId : undefined,
+    );
 }
 
 function authority(connection: FederatedConnection = google): FederatedFinishAuthority {
@@ -52,7 +59,7 @@ function authority(connection: FederatedConnection = google): FederatedFinishAut
     link: linkedAccount(connection),
     activeMembership:
       connection.provider === 'saml'
-        ? { userId: camilleId, organizationId: connection.organizationId }
+        ? { userId: camilleId, organizationId: connection.organizationId, memberId }
         : null,
     maySignIn: true,
     twoStep: 'not-required',
@@ -119,7 +126,13 @@ describe('FederatedSignInFlow', () => {
       { ...saml, issuer: 'https://different-issuer.example' },
     ]) {
       expect(() =>
-        flow.complete({ connection, subject }, linkedAccount(saml), receiptHash, checkedAt),
+        flow.complete(
+          { connection, subject },
+          linkedAccount(saml),
+          receiptHash,
+          checkedAt,
+          memberId,
+        ),
       ).toThrow(FederatedSignInRefusedError);
     }
   });
@@ -136,7 +149,7 @@ describe('FederatedSignInFlow', () => {
     ]) {
       const link = linkedAccount(other);
       expect(() =>
-        claimed.complete({ connection: saml, subject }, link, receiptHash, checkedAt),
+        claimed.complete({ connection: saml, subject }, link, receiptHash, checkedAt, memberId),
       ).toThrow(FederatedSignInRefusedError);
       expect(flow.redeem(receiptHash, { ...authority(saml), link }, checkedAt).decision).toEqual({
         kind: 'refused',
@@ -217,7 +230,7 @@ describe('FederatedSignInFlow', () => {
     });
   });
 
-  it('requires current SAML membership for the same account and organization', () => {
+  it('requires the exact live membership generation for the same SAML account and organization', () => {
     const flow = complete(saml);
     const current = authority(saml);
     expect(flow.redeem(receiptHash, current, checkedAt).decision).toMatchObject({
@@ -226,8 +239,9 @@ describe('FederatedSignInFlow', () => {
     });
     for (const activeMembership of [
       null,
-      { userId: camilleId, organizationId: anotherOrganizationId },
-      { userId: 'different-account', organizationId: atelierNordId },
+      { userId: camilleId, organizationId: anotherOrganizationId, memberId },
+      { userId: 'different-account', organizationId: atelierNordId, memberId },
+      { userId: camilleId, organizationId: atelierNordId, memberId: 'a-rejoined-membership' },
     ]) {
       expect(
         flow.redeem(receiptHash, { ...current, activeMembership }, checkedAt).decision,
@@ -235,6 +249,21 @@ describe('FederatedSignInFlow', () => {
         kind: 'refused',
       });
     }
+  });
+
+  it('does not issue a new SAML receipt or redeem an old one without a bound membership', () => {
+    const flow = start(saml).claim({ provider: 'saml', stateHash, browserBindingHash }, checkedAt);
+    expect(() =>
+      flow.complete({ connection: saml, subject }, linkedAccount(saml), receiptHash, checkedAt),
+    ).toThrow(FederatedSignInRefusedError);
+
+    const oldState = complete(saml).snapshot;
+    if (oldState.phase.kind !== 'complete') throw new Error('Expected a SAML continuation.');
+    Reflect.deleteProperty(oldState.phase.continuation, 'memberId');
+    expect(
+      FederatedSignInFlow.restore(oldState).redeem(receiptHash, authority(saml), checkedAt)
+        .decision,
+    ).toEqual({ kind: 'refused' });
   });
 
   it('refuses invalid stored lifetimes and raw credentials', () => {
