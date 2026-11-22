@@ -107,6 +107,16 @@ The `account.deletion-sweep`, `account.delete` and `account.avatar-upload-expiry
 the `pgboss` schema of `@cadenway/nest-jobs`, provisioned by `src/migrate.ts`. The avatar sweep
 has no payload.
 
+The `account.authentication-counter-sweep` removes counters that have been inactive for at least
+24 hours, including addresses without an account. It preserves active password lockouts and skips
+rows locked by requests. Each UTC minute it runs up to four transactions of at most 500 rows per
+counter table. It starts only when `AUTHENTICATION_COUNTER_RETENTION_ENABLED=true`.
+Enable the sweep after every replica uses the counter lock that tolerates deleted rows. Before
+rolling back to a release with the old counter lock, disable the sweep on all replicas and wait for
+its workers to stop.
+Migration 0008 bounds lock and statement waits. For large tables, provision the same indexes
+concurrently before the migration and verify each index is valid and matches its declared shape.
+
 ## API
 
 From `openapi/internal/identity-service.yaml` of the installed `@cadenway/contracts`. The account

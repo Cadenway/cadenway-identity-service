@@ -41,6 +41,8 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test:architecture
       - run: pnpm test:coverage
+      - name: Pull pinned integration images
+        run: docker compose -f compose.dev.yaml pull postgres nats nats-streams
       - run: pnpm test:integration
       - run: pnpm build
       - run: docker compose -f compose.dev.yaml config -q

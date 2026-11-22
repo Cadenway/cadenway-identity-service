@@ -108,7 +108,8 @@ verified. A value below is changed here first, then in code.
 - Lockout: five consecutive failed password sign-ins of an address, account or not, lock its
   password sign-in for 15 minutes; `remainingAttempts` counts down from 4 to 1 (the mockup's "Il vous
   reste 3 tentatives" after two failures); a success, or the end of the lockout, resets the count. A
-  sign-in by email code is not locked.
+  sign-in by email code is not locked. A counter inactive for at least 24 hours and with no live
+  lockout is eligible for deletion, regardless of whether the address is registered.
 - One-time codes: 6 digits from `crypto.randomInt`; sign-up and sign-in codes expire after 10
   minutes, email-change codes after 15; single use; a newer code of the same account and purpose
   replaces the previous one; the fifth wrong attempt stops a code. Stored as HMAC-SHA-256 under a

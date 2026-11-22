@@ -9,6 +9,7 @@ import { accountApiTokensProvider } from './composition/providers/adapters/accou
 import { accountDeletionSweepHandlerProvider } from './composition/providers/adapters/accounts/account-deletion-sweep-handler.provider.js';
 import { accountSessionsProvider } from './composition/providers/adapters/accounts/account-sessions.provider.js';
 import { accountsUnitOfWorkProvider } from './composition/providers/adapters/accounts/accounts-unit-of-work.provider.js';
+import { authenticationCounterSweepProvider } from './composition/providers/adapters/accounts/authentication-counter-sweep.provider.js';
 import { clockProvider } from './composition/providers/adapters/accounts/clock.provider.js';
 import { completeAccountDeletionHandlerProvider } from './composition/providers/adapters/accounts/complete-account-deletion-handler.provider.js';
 import { compromisedPasswordsProvider } from './composition/providers/adapters/accounts/compromised-passwords.provider.js';
@@ -102,6 +103,7 @@ import { TwoStepVerificationController } from './presentation/http/controllers/t
   ],
   providers: [
     accountsUnitOfWorkProvider,
+    authenticationCounterSweepProvider,
     ...avatarProviders,
     passwordHasherProvider,
     oneTimeCodeSecretsProvider,

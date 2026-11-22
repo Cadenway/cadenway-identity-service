@@ -47,6 +47,12 @@ export const AVATAR_UPLOAD_EXPIRY_QUEUE: string = 'account.avatar-upload-expiry'
 /** Runs one bounded expiration sweep every minute in UTC. */
 export const AVATAR_UPLOAD_EXPIRY_CRON: string = '* * * * *';
 
+/** System-only queue for retiring inactive authentication counters. */
+export const AUTHENTICATION_COUNTER_SWEEP_QUEUE: string = 'account.authentication-counter-sweep';
+
+/** Runs bounded counter retention every minute in UTC. */
+export const AUTHENTICATION_COUNTER_SWEEP_CRON: string = '* * * * *';
+
 /**
  * Constant jobQueues
  *
@@ -68,10 +74,23 @@ export const AVATAR_UPLOAD_EXPIRY_CRON: string = '* * * * *';
  *   because the expiry time on the ticket determines eligibility.
  * - `account.avatar-upload-expiry` takes up to 100 candidates per occurrence. Two retries cover
  *   transient failures, and a later sweep retries candidates without a committed decision.
+ * - `account.authentication-counter-sweep` removes inactive counters with two retries. A later
+ *   sweep resumes any remaining rows.
  *
  * @type {readonly JobQueueDeclaration[]}
  */
 export const jobQueues: readonly JobQueueDeclaration[] = [
+  {
+    name: AUTHENTICATION_COUNTER_SWEEP_QUEUE,
+    retryLimit: 2,
+    retryDelaySeconds: 10,
+    retryBackoff: true,
+    retryDelayMaxSeconds: 60,
+    expireInSeconds: 120,
+    retentionSeconds: 3_600,
+    deleteAfterSeconds: 3_600,
+    deadLetterRetentionSeconds: 86_400,
+  },
   {
     name: ACCOUNT_DELETION_SWEEP_QUEUE,
     retryLimit: 2,
