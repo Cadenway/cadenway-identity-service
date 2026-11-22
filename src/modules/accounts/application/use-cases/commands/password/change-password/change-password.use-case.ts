@@ -321,6 +321,7 @@ export class ChangePassword {
     const changed: User = user.changePassword(now);
     await store.credentials.save(user.id, passwordHash);
     await store.users.update(changed);
+    await store.resetLinks.replaceCurrent(user.id, now);
     await dropPendingEmailChange(store, user.id, now);
     await this.sessions.endRecentAuthentication(user.id, input.sessionId, 'every-window');
     await store.pendingTwoStep.dropOfOtherSessions(user.id, input.sessionId);
