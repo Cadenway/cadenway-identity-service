@@ -129,9 +129,10 @@ verified. A value below is changed here first, then in code.
 - Password reset link (`@cadenway/contracts` 0.7.0): a token of 256 random bits in base64url, which
   travels only in the restricted `password-reset-link.issued.v1` and after `#token=` in the link;
   only its SHA-256 is stored. It works once, for 30 minutes, from any browser; a newer link of the
-  account, and a change of address, void it. Requests of an address are throttled apart from the
-  codes: 45 seconds and 5 in an hour, account or not, with the same answer whatever the account. A
-  reset ends the lockout of the address, drops a pending change of address, closes every session
+  account, a change of address and an authenticated password change void it. Requests of an
+  address are throttled apart from the codes: 45 seconds and 5 in an hour, account or not, with
+  the same answer whatever the account. A reset ends the lockout of the address, drops a pending
+  change of address and closes every session
   unless unticked (and ends their recent authentication otherwise), keeps the API tokens and never
   signs in.
 - Recent authentication: a session records when its person last proved who they are (the sign-in,
