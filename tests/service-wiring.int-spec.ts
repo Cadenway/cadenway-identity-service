@@ -110,7 +110,7 @@ const businessTables = [
 const allTables = [...platformTables, ...businessTables].sort();
 
 /** Migrations of `migrations/meta/_journal.json`. */
-const migrationCount = 8;
+const migrationCount = 9;
 
 /**
  * Runs `docker compose` on the throwaway project.
@@ -1170,6 +1170,8 @@ describe('identity-service wiring', () => {
     );
 
     expect(queues.map(({ name }) => name)).toEqual([
+      'account.authentication-counter-sweep',
+      'account.authentication-counter-sweep.dead-letter',
       'account.avatar-upload-expiry',
       'account.avatar-upload-expiry.dead-letter',
       'account.delete',

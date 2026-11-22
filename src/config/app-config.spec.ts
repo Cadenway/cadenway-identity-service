@@ -28,6 +28,7 @@ describe('appConfigSchema', () => {
       PORT: 3010,
       LOG_LEVEL: 'info',
       LOG_PRETTY: false,
+      AUTHENTICATION_COUNTER_RETENTION_ENABLED: false,
       DATABASE_URL: 'postgres://identity_app:identity_app@localhost:5432/identity',
       DATABASE_TRANSACTION_MAX_ATTEMPTS: 3,
       NATS_URL: 'nats://localhost:4222',

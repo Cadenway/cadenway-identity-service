@@ -28,6 +28,8 @@ import { z } from 'zod';
  * - `PASSWORD_PEPPER`: `passwordPepperConfigShape`, the secret every key of the service derives
  *   from: the secret key of the password hashes, the key of the one-time code hashes, the key that
  *   seals the authenticator-app secrets and the key of the backup code hashes.
+ * - `AUTHENTICATION_COUNTER_RETENTION_ENABLED`: starts deletion of inactive counters after every
+ *   replica can safely lock missing counters. Defaults to false for rolling-upgrade compatibility.
  * - `WEBAUTHN_RP_ID` and `WEBAUTHN_ORIGINS`: `webAuthnConfigShape`, the relying party of the
  *   security keys and the exact origins a key may answer from.
  *
@@ -40,7 +42,9 @@ export type AppConfig = BaseConfig &
   MessagingConfig &
   InternalTokenVerifierConfig &
   PasswordPepperConfig &
-  WebAuthnConfig;
+  WebAuthnConfig & {
+    readonly AUTHENTICATION_COUNTER_RETENTION_ENABLED: boolean;
+  };
 
 /**
  * Interface PasswordPepperConfig
@@ -223,6 +227,10 @@ export const appConfigSchema: z.ZodType<AppConfig> = z
     ...internalTokenVerifierConfigShape,
     NOTIFICATION_SERVICE_INTERNAL_TOKEN_PUBLIC_JWKS: notificationPublicKeys,
     ...passwordPepperConfigShape,
+    AUTHENTICATION_COUNTER_RETENTION_ENABLED: z
+      .enum(['true', 'false'])
+      .default('false')
+      .transform((value) => value === 'true'),
     ...webAuthnConfigShape,
   })
   .refine(originsMatchRelyingParty, {
