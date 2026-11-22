@@ -1,9 +1,8 @@
 import { execFileSync } from 'node:child_process';
 import { generateKeyPairSync, randomUUID } from 'node:crypto';
-import { once } from 'node:events';
-import { createServer } from 'node:http';
 import { fileURLToPath } from 'node:url';
 
+import type { SearchMembership } from '@cadenway/contracts/types/internal/organization-service';
 import {
   ChangePasswordInternalResponse,
   ConfirmPasswordResetInternalResponse,
@@ -13,16 +12,10 @@ import {
   RequestPasswordResetInternalResponse,
   ScheduleAccountDeletionInternalResponse,
 } from '@cadenway/contracts/validators/internal/identity-service';
-import {
-  createApplication,
-  InternalTokenSigner,
-  InternalTokenVerifier,
-  loadConfig,
-} from '@cadenway/nest-common';
+import { createApplication, InternalTokenSigner, loadConfig } from '@cadenway/nest-common';
 import type {
   Ed25519PrivateJwk,
   Ed25519PublicJwk,
-  InternalPrincipal,
   InternalTokenClaims,
 } from '@cadenway/nest-common';
 import { SystemTransactionRunner } from '@cadenway/nest-common/database';
@@ -38,6 +31,7 @@ import { appConfigSchema } from '../src/config/app-config.js';
 import { CompleteAccountDeletion } from '../src/modules/accounts/application/use-cases/commands/deletion/complete-account-deletion/complete-account-deletion.use-case.js';
 import { EnqueueDueAccountDeletions } from '../src/modules/accounts/application/use-cases/commands/deletion/enqueue-due-account-deletions/enqueue-due-account-deletions.use-case.js';
 import { Argon2PasswordHasher } from '../src/modules/accounts/infrastructure/adapters/security/argon2-password-hasher.adapter.js';
+import { startOrganizationMembershipAuthority } from './support/organization-membership.fixture.js';
 
 // The security of an account (P2c-1): the change and the reset of the password, the recent
 // re-authentication and its guards, the open sessions and their revocation, the change of address,
@@ -221,7 +215,14 @@ interface SignedIn {
 describe('identity-service account security', () => {
   const apiGateway = keyPair('test-api-gateway');
   const hasher = new Argon2PasswordHasher(pepper);
+  const membershipProofs = new Map<string, SearchMembership | Error>();
+  const findMembershipProof = vi.fn((organizationId: string, userId: string) => {
+    const proof = membershipProofs.get(`${organizationId}/${userId}`);
+    return proof instanceof Error ? Promise.reject(proof) : Promise.resolve(proof ?? null);
+  });
   let app: NestExpressApplication;
+  let organizationAuthority:
+    Awaited<ReturnType<typeof startOrganizationMembershipAuthority>> | undefined;
   let gateway: InternalTokenSigner;
   let migrator: pg.Pool;
   let passwordHash = '';
@@ -375,24 +376,26 @@ describe('identity-service account security', () => {
   }
 
   /**
-   * Stores a membership in the copy, as the member events of organization-service would.
+   * Registers a live membership and seeds the copy, as the member events would.
    *
    * @param userId - The member.
    * @param role - Its role.
    * @param organizationId - The organization.
+   * @param memberId - Its id.
    * @returns The id of the membership.
    */
   async function seedMembership(
     userId: string,
-    role: 'owner' | 'admin' | 'member' | 'guest',
+    role: SearchMembership['role'],
     organizationId: string = atelierNord,
+    memberId: string = randomUUID(),
   ): Promise<string> {
-    const memberId = randomUUID();
     await systemQuery(
       `insert into memberships (id, organization_id, user_id, role, version)
        values ($1, $2, $3, $4, 1)`,
       [memberId, organizationId, userId, role],
     );
+    membershipProofs.set(`${organizationId}/${userId}`, { memberId, role, version: 1 });
     return memberId;
   }
 
@@ -518,6 +521,9 @@ describe('identity-service account security', () => {
     vi.stubEnv('PASSWORD_PEPPER', pepper);
     vi.stubEnv('WEBAUTHN_RP_ID', 'app.cadenway.localhost');
     vi.stubEnv('WEBAUTHN_ORIGINS', 'http://app.cadenway.localhost');
+    organizationAuthority = await startOrganizationMembershipAuthority(findMembershipProof);
+    vi.stubEnv('ORGANIZATION_SERVICE_URL', organizationAuthority.origin);
+    vi.stubEnv('IDENTITY_SERVICE_INTERNAL_TOKEN_PRIVATE_JWK', organizationAuthority.privateJwk);
 
     const config = loadConfig(appConfigSchema);
     app = await createApplication(AppModule, {
@@ -548,8 +554,12 @@ describe('identity-service account security', () => {
       await app.close();
       await migrator.end();
     } finally {
-      vi.unstubAllEnvs();
-      compose('down', '--volumes', '--remove-orphans');
+      try {
+        await organizationAuthority?.close();
+      } finally {
+        vi.unstubAllEnvs();
+        compose('down', '--volumes', '--remove-orphans');
+      }
     }
   });
 
@@ -1472,10 +1482,7 @@ describe('identity-service account security', () => {
     const camille = await seedAccount('Camille');
     const memberId = '019a6b10-0000-7000-8000-000000000001';
     const newMemberId = '019a6b10-0000-7000-8000-000000000002';
-    await systemQuery(
-      'insert into memberships (id, organization_id, user_id, role, version) values ($1, $2, $3, $4, 1)',
-      [memberId, atelierNord, camille.userId, 'owner'],
-    );
+    await seedMembership(camille.userId, 'owner', atelierNord, memberId);
     const session = await signIn(camille);
     const chosen = await call(
       'put',
@@ -1498,143 +1505,91 @@ describe('identity-service account security', () => {
     const { secret } = created.body as { secret: string };
     secrets.push(secret);
 
-    const identity = keyPair('test-identity');
-    const verifier = await InternalTokenVerifier.create({
-      audience: 'organization-service',
-      trustedIssuers: { 'identity-service': [identity.publicJwk] },
-    });
-    let answer: { status: number; body: unknown } = {
-      status: 200,
-      body: { memberId, role: 'guest', version: 2 },
-    };
-    const principals: InternalPrincipal[] = [];
-    const organization = createServer((incoming, outgoing) => {
-      if (incoming.method !== 'GET' || incoming.url !== '/internal/v1/search-membership') {
-        outgoing.writeHead(404).end();
-        return;
-      }
-      const header = incoming.headers.authorization;
-      if (!header?.startsWith('Bearer ')) {
-        outgoing.writeHead(401).end();
-        return;
-      }
-      void verifier.verify(header.slice('Bearer '.length)).then(
-        (principal) => {
-          principals.push(principal);
-          outgoing
-            .writeHead(answer.status, {
-              'Content-Type':
-                answer.status === 200 ? 'application/json' : 'application/problem+json',
-            })
-            .end(JSON.stringify(answer.body));
-        },
-        () => outgoing.writeHead(401).end(),
-      );
-    });
-    organization.listen(0, '127.0.0.1');
-    let configured: NestExpressApplication | undefined;
-    try {
-      await once(organization, 'listening');
-      const address = organization.address();
-      if (address === null || typeof address === 'string') {
-        throw new Error('The Organization test server has no TCP address.');
-      }
-      const config = loadConfig(appConfigSchema, {
-        ...process.env,
-        ORGANIZATION_SERVICE_URL: `http://127.0.0.1:${String(address.port)}`,
-        IDENTITY_SERVICE_INTERNAL_TOKEN_PRIVATE_JWK: JSON.stringify(identity.privateJwk),
-      });
-      configured = await createApplication(AppModule, {
-        service: 'identity-service',
-        config,
-        provideConfig: true,
-        internalToken: {
-          verifier: {
-            audience: config.INTERNAL_TOKEN_AUDIENCE,
-            trustedIssuers: config.INTERNAL_TOKEN_TRUSTED_ISSUERS,
-          },
-        },
-        logDestination: {
-          write: (line: string): void => {
-            logLines.push(line);
-          },
-        },
-      });
-      await configured.init();
-      const appWithProof = configured;
-      const signed = await gateway.sign('identity-service', system);
-      const introspect = async (credential: 'session' | 'api-token'): Promise<Response> =>
-        request(appWithProof.getHttpServer())
-          .post(
-            credential === 'session'
-              ? '/internal/v1/tokens/introspect'
-              : '/internal/v1/api-tokens/introspect',
-          )
-          .set('Authorization', `Bearer ${signed}`)
-          .send({ token: credential === 'session' ? session.token : secret });
+    const introspect = (credential: 'session' | 'api-token'): Promise<Response> =>
+      credential === 'session'
+        ? call('post', '/internal/v1/tokens/introspect', system, { token: session.token })
+        : call('post', '/internal/v1/api-tokens/introspect', system, { token: secret });
+    const proofKey = `${atelierNord}/${camille.userId}`;
+    findMembershipProof.mockClear();
+    membershipProofs.set(proofKey, { memberId, role: 'guest', version: 2 });
 
-      for (const credential of ['session', 'api-token'] as const) {
-        const attenuated = await introspect(credential);
-        expect(attenuated.status).toBe(200);
-        expect(attenuated.body).toMatchObject({ active: true, role: 'guest' });
-      }
-      answer = {
-        status: 404,
-        body: {
-          title: 'Not found',
-          type: 'about:blank',
-          status: 404,
-          code: 'organization.not-found',
-        },
-      };
-      expect((await introspect('session')).body).toMatchObject({
-        active: true,
-        organizationId: null,
-        role: null,
-      });
-      expect((await introspect('api-token')).body).toEqual({ active: false });
-
-      answer = { status: 503, body: {} };
-      for (const credential of ['session', 'api-token'] as const) {
-        const unavailable = await introspect(credential);
-        expect(unavailable.status).toBe(503);
-        expect(unavailable.body).toMatchObject({ code: 'organization.unavailable' });
-      }
-
-      answer = {
-        status: 200,
-        body: { memberId: newMemberId, role: 'member', version: 1 },
-      };
-      expect((await introspect('session')).body).toMatchObject({
-        active: true,
-        organizationId: null,
-      });
-      expect((await introspect('api-token')).body).toMatchObject({
-        active: true,
-        organizationId: atelierNord,
-        role: 'member',
-      });
-
-      expect(
-        await systemQuery('select organization_id, member_id from sessions where id = $1', [
-          session.sessionId,
-        ]),
-      ).toEqual([{ organization_id: atelierNord, member_id: memberId }]);
-      expect(principals).toHaveLength(8);
-      for (const principal of principals) {
-        expect(principal).toMatchObject({
-          issuer: 'identity-service',
-          actor: { type: 'user', id: camille.userId },
-          organizationId: atelierNord,
-          role: null,
-          scopes: [],
-        });
-      }
-    } finally {
-      organization.close();
-      await configured?.close();
+    for (const credential of ['session', 'api-token'] as const) {
+      const attenuated = await introspect(credential);
+      expect(attenuated.status).toBe(200);
+      expect(attenuated.body).toMatchObject({ active: true, role: 'guest' });
     }
+    membershipProofs.delete(proofKey);
+    expect((await introspect('session')).body).toMatchObject({
+      active: true,
+      organizationId: null,
+      role: null,
+    });
+    expect((await introspect('api-token')).body).toEqual({ active: false });
+
+    membershipProofs.set(proofKey, new Error('Organization is unavailable.'));
+    for (const credential of ['session', 'api-token'] as const) {
+      const unavailable = await introspect(credential);
+      expect(unavailable.status).toBe(503);
+      expect(unavailable.body).toMatchObject({ code: 'organization.unavailable' });
+    }
+
+    membershipProofs.set(proofKey, { memberId: newMemberId, role: 'member', version: 1 });
+    expect((await introspect('session')).body).toMatchObject({
+      active: true,
+      organizationId: null,
+    });
+    expect((await introspect('api-token')).body).toMatchObject({
+      active: true,
+      organizationId: atelierNord,
+      role: 'member',
+    });
+
+    expect(
+      await systemQuery('select organization_id, member_id from sessions where id = $1', [
+        session.sessionId,
+      ]),
+    ).toEqual([{ organization_id: atelierNord, member_id: memberId }]);
+    expect(findMembershipProof.mock.calls).toEqual(
+      Array.from({ length: 8 }, () => [atelierNord, camille.userId]),
+    );
   });
+
+  it.each(['source', 'target'] as const)(
+    'keeps the session and last choice when the live %s membership cannot be checked',
+    async (unavailable) => {
+      const account = await seedAccount('Camille');
+      const targetOrganization = randomUUID();
+      const sourceMemberId = await seedMembership(account.userId, 'member');
+      await seedMembership(account.userId, 'member', targetOrganization);
+      const session = await signIn(account);
+      const path = `/internal/v1/sessions/${session.sessionId}/organization`;
+      const actor = user(account.userId);
+      expect((await call('put', path, actor, { organizationId: atelierNord })).status).toBe(200);
+      await systemQuery(
+        'update sessions set saml_organization_id = $2, saml_member_id = $3 where id = $1',
+        [session.sessionId, atelierNord, sourceMemberId],
+      );
+
+      const unavailableOrganization = unavailable === 'source' ? atelierNord : targetOrganization;
+      membershipProofs.set(
+        `${unavailableOrganization}/${account.userId}`,
+        new Error('Organization is unavailable.'),
+      );
+      const selection = `select organization_id, member_id, saml_organization_id, saml_member_id,
+                                version from sessions where id = $1`;
+      const before = await systemQuery(selection, [session.sessionId]);
+      const response = await call('put', path, actor, { organizationId: targetOrganization });
+
+      expect(response.status).toBe(503);
+      expect(response.body).toMatchObject({ code: 'organization.unavailable' });
+      expect(await systemQuery(selection, [session.sessionId])).toEqual(before);
+      expect(
+        await systemQuery('select organization_id from organization_choices where user_id = $1', [
+          account.userId,
+        ]),
+      ).toEqual([{ organization_id: atelierNord }]);
+    },
+  );
 
   describe('the deletion of an account', () => {
     it('refuses an owner first, with its organizations, then a session without a recent authentication', async () => {
@@ -1677,14 +1632,13 @@ describe('identity-service account security', () => {
       await seedMembership(account.userId, 'member');
       const here = await signIn(account);
       const there = await signIn(account, iphone);
-      await call(
+      const choice = await call(
         'put',
         `/internal/v1/sessions/${here.sessionId}/organization`,
         user(account.userId),
-        {
-          organizationId: atelierNord,
-        },
+        { organizationId: atelierNord },
       );
+      expect(choice.status).toBe(200);
       const created = await call(
         'post',
         '/internal/v1/api-tokens',
@@ -1695,6 +1649,7 @@ describe('identity-service account security', () => {
           sessionId: here.sessionId,
         },
       );
+      expect(created.status).toBe(201);
       const secret = (created.body as { secret: string }).secret;
       secrets.push(secret);
       const before = Date.now();
@@ -1730,14 +1685,13 @@ describe('identity-service account security', () => {
       const account = await seedAccount('Ines');
       await seedMembership(account.userId, 'member');
       const here = await signIn(account);
-      await call(
+      const choice = await call(
         'put',
         `/internal/v1/sessions/${here.sessionId}/organization`,
         user(account.userId),
-        {
-          organizationId: atelierNord,
-        },
+        { organizationId: atelierNord },
       );
+      expect(choice.status).toBe(200);
       const created = await call(
         'post',
         '/internal/v1/api-tokens',
@@ -1748,6 +1702,7 @@ describe('identity-service account security', () => {
           sessionId: here.sessionId,
         },
       );
+      expect(created.status).toBe(201);
       const secret = (created.body as { secret: string }).secret;
       secrets.push(secret);
       const outbox = app.get(OutboxWriter);

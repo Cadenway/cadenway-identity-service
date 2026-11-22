@@ -6,6 +6,7 @@ import {
   GetNotificationRecipientInternalResponse,
   ReserveAvatarUploadInternalResponse,
 } from '@cadenway/contracts/validators/internal/identity-service';
+import type { SearchMembership } from '@cadenway/contracts/types/internal/organization-service';
 import {
   createApplication,
   InternalTokenSigner,
@@ -36,6 +37,7 @@ import { IssueRealtimeTicket } from '../src/modules/sessions/application/use-cas
 import { RedeemRealtimeTicket } from '../src/modules/sessions/application/use-cases/commands/realtime-ticket/redeem-realtime-ticket/redeem-realtime-ticket.use-case.js';
 import { SystemExpiredRealtimeTicketsUnitOfWork } from '../src/modules/sessions/infrastructure/persistence/drizzle/transactions/session/system-expired-realtime-tickets.unit-of-work.js';
 import { freePort } from './support/loopback-port.fixture.js';
+import { startOrganizationMembershipAuthority } from './support/organization-membership.fixture.js';
 
 // The service as main.ts assembles it, on a disposable PostgreSQL and NATS. `@cadenway/nest-testing`
 // does not export its container fixtures yet and a service never depends on `testcontainers` itself,
@@ -246,6 +248,9 @@ describe('identity-service wiring', () => {
   let notificationSigner: InternalTokenSigner;
   let organizationSigner: InternalTokenSigner;
   let migrator: pg.Pool;
+  let membershipAuthority:
+    Awaited<ReturnType<typeof startOrganizationMembershipAuthority>> | undefined;
+  const memberships = new Map<string, SearchMembership>();
 
   /**
    * The running application.
@@ -315,6 +320,12 @@ describe('identity-service wiring', () => {
     vi.stubEnv('AUTHENTICATION_COUNTER_RETENTION_ENABLED', 'true');
     vi.stubEnv('WEBAUTHN_ORIGINS', 'http://app.cadenway.localhost');
 
+    membershipAuthority = await startOrganizationMembershipAuthority((organizationId, userId) =>
+      Promise.resolve(memberships.get(`${organizationId}:${userId}`) ?? null),
+    );
+    vi.stubEnv('ORGANIZATION_SERVICE_URL', membershipAuthority.origin);
+    vi.stubEnv('IDENTITY_SERVICE_INTERNAL_TOKEN_PRIVATE_JWK', membershipAuthority.privateJwk);
+
     @Module({
       imports: [AppModule],
       controllers: [WiringProbeController],
@@ -358,6 +369,7 @@ describe('identity-service wiring', () => {
       await app?.close();
       await migrator.end();
     } finally {
+      await membershipAuthority?.close();
       vi.unstubAllEnvs();
       compose('down', '--volumes', '--remove-orphans');
     }
@@ -980,6 +992,7 @@ describe('identity-service wiring', () => {
           [sessionId, userId, organizationId, memberId, sessionHash],
         );
       });
+      memberships.set(`${organizationId}:${userId}`, { memberId, role: 'member', version: 1 });
       return { organizationId, userId, memberId, sessionId };
     }
 

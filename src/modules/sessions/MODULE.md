@@ -199,10 +199,11 @@ passes in; never the token nor the `User-Agent`.
 ## Events consumed
 
 None directly. A `member.removed.v1` reaches the sessions through the copy of the memberships (the
-memberships module). The copy serves organization selection and the introspection during rollout.
-When configured, introspection confirms the role and the membership directly with Organization
-even if removal or role changes have yet to reach the copy. An unavailable proof returns
-`503 organization.unavailable`; the credential and its local selection are unchanged.
+memberships module). Organization selection requires a live proof that agrees with the copy.
+Introspection confirms the role and membership directly with Organization even if removal or role
+changes have yet to reach the copy. Bound SAML sessions also require proof of their source
+membership. An unavailable proof returns `503 organization.unavailable` and preserves the session
+and its local selection.
 
 The change of an authentication policy, the trust and the forgetting of a device emit nothing: the
 contract declares no event for them. `user.two-step-verification-changed.v1` belongs to the
@@ -219,11 +220,11 @@ accounts module.
   and answers `session.not-found`.
 - A malformed, unknown, expired, inactive or revoked token introspects as `active: false`; so
   does a personal API token, introspected by its own route.
-- A session acts on at most one organization, through a membership of its account in the copy of
-  the memberships. Choosing it needs that membership to be active (`organization.not-found`
-  otherwise, also for the few seconds before `member.joined.v1` arrives); choosing the current one
-  again answers 200 and leaves the session as it is; any other choice takes the next version of the
-  session; every choice becomes the last choice of the account.
+- A session acts on at most one organization. Choosing it requires the same active membership ID
+  and role in Organization's live proof and the local copy. A missing target membership or a
+  projection that has yet to catch up returns `organization.not-found`. Choosing the current
+  organization again answers 200 and leaves the session as it is. Any other choice takes the next
+  version of the session. Every successful choice becomes the last choice of the account.
 - The introspection answers the organization and the role of the membership the session chose
   while that very membership is active, `null` for both otherwise: a removal ends the organization
   of the member's sessions there for good, and a person invited again chooses it again. A session
