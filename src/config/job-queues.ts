@@ -53,7 +53,7 @@ export const FEDERATION_EXPIRY_QUEUE: string = 'account.federation-expiry';
 /** Runs bounded federation retention every minute in UTC. */
 export const FEDERATION_EXPIRY_CRON: string = '* * * * *';
 
-/** System-only queue for removing inactive authentication counters. */
+/** System-only queue for retiring inactive authentication counters. */
 export const AUTHENTICATION_COUNTER_SWEEP_QUEUE: string = 'account.authentication-counter-sweep';
 
 /** Runs bounded counter retention every minute in UTC. */

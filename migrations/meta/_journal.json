@@ -61,43 +61,15 @@
     {
       "idx": 8,
       "version": "7",
-      "when": 1795268352475,
-      "tag": "0008_federated_sign_in",
+      "when": 1795371493891,
+      "tag": "0008_authentication_counter_retention",
       "breakpoints": true
     },
     {
       "idx": 9,
       "version": "7",
-      "when": 1795277216601,
-      "tag": "0009_saml_account_link_scope",
-      "breakpoints": true
-    },
-    {
-      "idx": 10,
-      "version": "7",
-      "when": 1795284748958,
-      "tag": "0010_saml_assertion_replay",
-      "breakpoints": true
-    },
-    {
-      "idx": 11,
-      "version": "7",
-      "when": 1795285934407,
-      "tag": "0011_federated_challenge_and_retention",
-      "breakpoints": true
-    },
-    {
-      "idx": 12,
-      "version": "7",
-      "when": 1795352798694,
-      "tag": "0012_saml_session_membership",
-      "breakpoints": true
-    },
-    {
-      "idx": 13,
-      "version": "7",
-      "when": 1795365800417,
-      "tag": "0013_authentication_counter_retention",
+      "when": 1795375265964,
+      "tag": "0009_federated_sign_in_and_saml_membership",
       "breakpoints": true
     }
   ]

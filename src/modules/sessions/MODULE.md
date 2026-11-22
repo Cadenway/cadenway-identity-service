@@ -119,7 +119,7 @@ another service, without a foreign key.
 the session version, the account, the selected organization and membership, and the issuance,
 expiry and redemption times. Deleting a session also deletes its tickets.
 
-`migrations/0012_saml_session_membership.sql` adds the source organization and exact membership
+Migration 0009 adds the source organization and exact membership
 generation of a SAML session. These nullable columns stay fixed when a user chooses another
 organization. Introspection and ticket redemption recheck the original membership even when the
 session acts elsewhere. Existing sessions do not have reliable sign-in provenance and keep null

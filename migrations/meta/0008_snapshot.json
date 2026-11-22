@@ -1,5 +1,5 @@
 {
-  "id": "ec65c022-97d7-4591-b6ca-5a1598b6957f",
+  "id": "d6401c3f-61c5-4ce6-8ce0-d2019b676211",
   "prevId": "bfef5788-b206-442d-82c5-67065e19a50e",
   "version": "7",
   "dialect": "postgresql",
@@ -88,7 +88,29 @@
           "default": "now()"
         }
       },
-      "indexes": {},
+      "indexes": {
+        "sign_in_attempts_retention_index": {
+          "name": "sign_in_attempts_retention_index",
+          "columns": [
+            {
+              "expression": "updated_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "email",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
@@ -307,7 +329,29 @@
           "default": "now()"
         }
       },
-      "indexes": {},
+      "indexes": {
+        "code_requests_retention_index": {
+          "name": "code_requests_retention_index",
+          "columns": [
+            {
+              "expression": "updated_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "email",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
@@ -686,264 +730,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.federated_account_links": {
-      "name": "federated_account_links",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "uuidv7()"
-        },
-        "user_id": {
-          "name": "user_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "provider": {
-          "name": "provider",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "issuer": {
-          "name": "issuer",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "subject": {
-          "name": "subject",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "identity_hash": {
-          "name": "identity_hash",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "status": {
-          "name": "status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "federated_account_links_identity_hash_unique": {
-          "name": "federated_account_links_identity_hash_unique",
-          "columns": [
-            {
-              "expression": "identity_hash",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "federated_account_links_user_id_index": {
-          "name": "federated_account_links_user_id_index",
-          "columns": [
-            {
-              "expression": "user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "federated_account_links_user_id_users_id_fk": {
-          "name": "federated_account_links_user_id_users_id_fk",
-          "tableFrom": "federated_account_links",
-          "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "federated_account_links_provider_check": {
-          "name": "federated_account_links_provider_check",
-          "value": "\"federated_account_links\".\"provider\" in ('google', 'github', 'microsoft', 'gitlab', 'saml')"
-        },
-        "federated_account_links_hash_check": {
-          "name": "federated_account_links_hash_check",
-          "value": "\"federated_account_links\".\"identity_hash\" ~ '^[0-9a-f]{64}$'"
-        },
-        "federated_account_links_status_check": {
-          "name": "federated_account_links_status_check",
-          "value": "\"federated_account_links\".\"status\" in ('active', 'revoked')"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.federated_sign_in_flows": {
-      "name": "federated_sign_in_flows",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "uuidv7()"
-        },
-        "state_hash": {
-          "name": "state_hash",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "receipt_hash": {
-          "name": "receipt_hash",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "state": {
-          "name": "state",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "expires_at": {
-          "name": "expires_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "version": {
-          "name": "version",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 1
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "federated_sign_in_flows_state_hash_unique": {
-          "name": "federated_sign_in_flows_state_hash_unique",
-          "columns": [
-            {
-              "expression": "state_hash",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "federated_sign_in_flows_receipt_hash_unique": {
-          "name": "federated_sign_in_flows_receipt_hash_unique",
-          "columns": [
-            {
-              "expression": "receipt_hash",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "federated_sign_in_flows_expires_at_index": {
-          "name": "federated_sign_in_flows_expires_at_index",
-          "columns": [
-            {
-              "expression": "expires_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "federated_sign_in_flows_state_hash_check": {
-          "name": "federated_sign_in_flows_state_hash_check",
-          "value": "\"federated_sign_in_flows\".\"state_hash\" ~ '^[0-9a-f]{64}$'"
-        },
-        "federated_sign_in_flows_receipt_hash_check": {
-          "name": "federated_sign_in_flows_receipt_hash_check",
-          "value": "\"federated_sign_in_flows\".\"receipt_hash\" is null or \"federated_sign_in_flows\".\"receipt_hash\" ~ '^[0-9a-f]{64}$'"
-        },
-        "federated_sign_in_flows_version_check": {
-          "name": "federated_sign_in_flows_version_check",
-          "value": "\"federated_sign_in_flows\".\"version\" > 0"
-        }
-      },
-      "isRLSEnabled": false
-    },
     "public.password_reset_links": {
       "name": "password_reset_links",
       "schema": "",
@@ -1091,7 +877,29 @@
           "default": "now()"
         }
       },
-      "indexes": {},
+      "indexes": {
+        "password_reset_requests_retention_index": {
+          "name": "password_reset_requests_retention_index",
+          "columns": [
+            {
+              "expression": "updated_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "email",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},

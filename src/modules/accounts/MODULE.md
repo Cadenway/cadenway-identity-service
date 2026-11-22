@@ -106,13 +106,13 @@ code by account and purpose, or its link by the hash of its token, and that a us
 account of its verified internal token. The application role `identity_app` reads and writes their
 rows and runs no DDL on them.
 
-Migration `0008_federated_sign_in.sql` creates the two global federated sign-in tables. The link
+Migration 0009 creates the two global federated sign-in tables. The link
 pins a verified provider identity to a local account. The flow stores state, browser and callback
 receipt digests, a version and an indexed retention deadline. The repositories require a system
 transaction and lock the flow before advancing its version or redeeming a receipt. A failed
 transaction leaves the receipt available for its legitimate browser to retry.
 
-Migration `0009_saml_account_link_scope.sql` adds isolated SAML links. Identity uses the
+The same migration adds isolated SAML links. Identity uses the
 organization and connection of the claimed flow for each link lookup and recheck in its existing
 system transaction. The same issuer and subject can identify different accounts in separate
 connections. The new table has a forced organization policy and leaves the global social
@@ -121,15 +121,15 @@ from the earlier schema, whose trusted connection cannot be recovered. A replace
 connection gets a new ID even if it uses the same issuer. Rollback retains the table. Disable
 SAML before reverting to an image without scoped links.
 
-Migration `0010_saml_assertion_replay.sql` records accepted assertion digests until the end of
+The SAML replay table records accepted assertion digests until the end of
 their validity window. It uses forced RLS and scopes each assertion to the configured organization
 and connection. A provisioned SAML connection is selected by its verified work domain and then
 bound to the browser flow. The callback checks the original request, the pinned signing authority
 and the current account link and membership before issuing a receipt.
 
-Migration `0011_federated_challenge_and_retention.sql` adds the optional connection and link reference to
-pending MFA challenges. Every second-factor response rechecks the exact link and current authority
-before issuing a session. It also adds an expiry index for scanning assertion markers globally.
+Migration 0009 adds the optional connection and link reference to pending MFA challenges and
+indexes assertion expiry for global cleanup. Every second-factor response rechecks the exact link
+and current authority before issuing a session.
 
 The social provider port exchanges codes after the original provider, state and browser binding
 have been claimed. Google, Microsoft and GitLab use fixed HTTPS authority endpoints and verify the
@@ -144,16 +144,16 @@ The deletion, avatar expiry, federation expiry and authentication counter queues
 and authentication counter sweeps have no payload.
 Every UTC minute, the federation sweep handles up to four transactions of at most 250 expired
 flows and 250 eligible assertion markers each, skipping rows locked by other transactions.
+
 The `account.authentication-counter-sweep` removes counters that have been inactive for at least
-24 hours, including addresses without an account. It preserves active password lockouts and
-skips rows locked by requests. Each UTC minute it runs up to four transactions of at most
-500 rows per counter table. It starts only when `AUTHENTICATION_COUNTER_RETENTION_ENABLED=true`.
-Enable the sweep after every running replica uses the counter lock that tolerates deleted rows.
-Before rolling back to a release with the old counter lock, disable the sweep on all replicas
-and wait for the workers to stop.
-Migration 0013 uses short lock and statement deadlines. If the tables are too large for a
-transactional build, provision the same indexes with `CREATE INDEX CONCURRENTLY` outside the
-Drizzle migration transaction, verify that the indexes are valid and retry the migration.
+24 hours, including addresses without an account. It preserves active password lockouts and skips
+rows locked by requests. Each UTC minute it runs up to four transactions of at most 500 rows per
+counter table. It starts only when `AUTHENTICATION_COUNTER_RETENTION_ENABLED=true`.
+Enable the sweep after every replica uses the counter lock that tolerates deleted rows. Before
+rolling back to a release with the old counter lock, disable the sweep on all replicas and wait for
+its workers to stop.
+Migration 0008 bounds lock and statement waits. For large tables, provision the same indexes
+concurrently before the migration and verify each index is valid and matches its declared shape.
 
 ## API
 

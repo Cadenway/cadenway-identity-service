@@ -114,7 +114,7 @@ const businessTables = [
 const allTables = [...platformTables, ...businessTables].sort();
 
 /** Migrations of `migrations/meta/_journal.json`. */
-const migrationCount = 14;
+const migrationCount = 10;
 
 /**
  * Runs `docker compose` on the throwaway project.
