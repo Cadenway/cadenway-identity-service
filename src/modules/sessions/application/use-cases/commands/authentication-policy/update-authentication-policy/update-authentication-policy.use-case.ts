@@ -3,6 +3,7 @@ import { AuthenticationPolicyRefusal } from '../../../../models/authentication-p
 import type { CheckedAuthentication } from '../../../../models/session/checked-authentication.model.js';
 import type { SessionsStore } from '../../../../models/session/sessions-store.model.js';
 import type { OrganizationMembers } from '../../../../ports/outbound/memberships/authentication-policy/organization-members.port.js';
+import type { ActiveMemberships } from '../../../../ports/outbound/memberships/session/active-memberships.port.js';
 import type { Clock } from '../../../../ports/outbound/time/session/clock.port.js';
 import type { SessionsUnitOfWork } from '../../../../ports/outbound/transactions/session/sessions-unit-of-work.port.js';
 import type { AuthenticationPolicyView } from '../../../../projections/authentication-policy/authentication-policy-view.projection.js';
@@ -21,7 +22,7 @@ import type { UpdateAuthenticationPolicyInput } from './update-authentication-po
  * (`PATCH /internal/v1/organization/authentication-policy`, decision 8 of P2c), in its tenant
  * transaction. The checks run in the order of the contract:
  *
- * 1. the role of the actor in the copy of the memberships (`organization.not-found`,
+ * 1. the current role of the actor in Organization (`organization.not-found`,
  * `organization.role-forbidden`);
  * 2. `If-Match` against the locked policy (`request.version-mismatch`);
  * 3. a policy that would require two-step verification for the role of the actor, who has none
@@ -68,6 +69,9 @@ export class UpdateAuthenticationPolicy {
    * @readonly
    */
   private readonly clock: Clock;
+
+  /** The authoritative membership reader, called outside the tenant transaction. */
+  private readonly authority: Pick<ActiveMemberships, 'find'> | null;
   // #endregion
 
   // #region Constructor
@@ -82,10 +86,16 @@ export class UpdateAuthenticationPolicy {
    * @param {Clock} clock - The time of the change.
    * @constructor
    */
-  public constructor(unitOfWork: SessionsUnitOfWork, members: OrganizationMembers, clock: Clock) {
+  public constructor(
+    unitOfWork: SessionsUnitOfWork,
+    members: OrganizationMembers,
+    clock: Clock,
+    authority: Pick<ActiveMemberships, 'find'> | null,
+  ) {
     this.unitOfWork = unitOfWork;
     this.members = members;
     this.clock = clock;
+    this.authority = authority;
   }
   // #endregion
 
@@ -101,11 +111,15 @@ export class UpdateAuthenticationPolicy {
    * @throws {AuthenticationPolicyRefusal} For a refusal of the contract; nothing is written.
    */
   public async execute(input: UpdateAuthenticationPolicyInput): Promise<AuthenticationPolicyView> {
+    if (this.authority === null) {
+      throw new Error(
+        'Organization membership authority is required to update authentication policy.',
+      );
+    }
+    const membership = await this.authority.find(input.organizationId, input.actorUserId);
+    const role: 'owner' | 'admin' = assertPolicyEditor(membership?.role ?? null);
     const now: Date = this.clock.now();
     return this.unitOfWork.run(async (store: SessionsStore): Promise<AuthenticationPolicyView> => {
-      const role: 'owner' | 'admin' = assertPolicyEditor(
-        await this.members.roleOf(input.organizationId, input.actorUserId),
-      );
       const current: AuthenticationPolicy = await store.policies.lock(input.organizationId);
       if (
         input.expectedVersions !== null &&

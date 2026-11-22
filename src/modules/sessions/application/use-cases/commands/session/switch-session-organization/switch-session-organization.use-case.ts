@@ -17,14 +17,16 @@ import type { SwitchSessionOrganizationOutput } from './switch-session-organizat
  * @description
  * Makes an organization the current organization of a session of the actor, and the one its next
  * sessions start in (`PUT /internal/v1/sessions/{sessionId}/organization`, P2b plan, decision 2).
- * In one system transaction it locks the session, checks the active membership of the actor in the
- * copy of the memberships, then writes the session, the change event and the last choice of the
- * account.
+ * It verifies the current membership with Organization before starting the write transaction. In
+ * the transaction it locks the session, confirms the proof against the local copy, then writes the
+ * session, the change event and the last choice of the account.
  *
  * - A session of another user, an unknown id, or a session that ended since its introspection is
  *   refused alike (`session.not-found`, which the gateway answers `401 auth.session-expired`).
  * - An organization the actor does not belong to, or whose `member.joined.v1` has not reached this
  *   service yet, is refused (`organization.not-found`); the web application retries.
+ * - An unavailable live target or SAML source proof returns `503 organization.unavailable` and
+ *   preserves the current session and last choice.
  * - Choosing the membership the session already acts through leaves the session unchanged; the
  *   choice is still the last one of the account, where its next sessions start.
  * - Once the membership is found, an organization whose policy requires two-step verification for
@@ -68,6 +70,9 @@ export class SwitchSessionOrganization {
    * @readonly
    */
   private readonly clock: Clock;
+
+  /** The live authority used before the session transaction. */
+  private readonly authority: Pick<ActiveMemberships, 'find'> | null;
   // #endregion
 
   // #region Constructor
@@ -80,12 +85,19 @@ export class SwitchSessionOrganization {
    * @param {SessionsUnitOfWork} unitOfWork - The transaction of the choice.
    * @param {ActiveMemberships} memberships - The copy of the memberships.
    * @param {Clock} clock - The time of the choice.
+   * @param {Pick<ActiveMemberships, 'find'> | null} authority - The live membership reader.
    * @constructor
    */
-  public constructor(unitOfWork: SessionsUnitOfWork, memberships: ActiveMemberships, clock: Clock) {
+  public constructor(
+    unitOfWork: SessionsUnitOfWork,
+    memberships: ActiveMemberships,
+    clock: Clock,
+    authority: Pick<ActiveMemberships, 'find'> | null,
+  ) {
     this.unitOfWork = unitOfWork;
     this.memberships = memberships;
     this.clock = clock;
+    this.authority = authority;
   }
   // #endregion
 
@@ -107,17 +119,39 @@ export class SwitchSessionOrganization {
     input: SwitchSessionOrganizationInput,
   ): Promise<SwitchSessionOrganizationOutput> {
     const now: Date = this.clock.now();
+    if (this.authority === null) {
+      throw new Error('Organization membership authority is required to switch organizations.');
+    }
+    const selected = await this.unitOfWork.run((store) => store.sessions.findById(input.sessionId));
+    if (selected?.userId !== input.actorUserId || !selected.isActiveAt(now)) {
+      throw new SessionNotFound();
+    }
+    const source = selected.snapshot.samlMembership ?? null;
+    if (source !== null) {
+      const currentSource = await this.authority.find(source.organizationId, input.actorUserId);
+      if (currentSource?.memberId !== source.memberId) throw new SessionNotFound();
+    }
+    const proven = await this.authority.find(input.organizationId, input.actorUserId);
+    if (proven === null) throw new OrganizationNotFound();
     const outcome: SwitchSessionOrganizationOutput | 'closed' = await this.unitOfWork.run(
       async (store: SessionsStore): Promise<SwitchSessionOrganizationOutput | 'closed'> => {
+        const now = this.clock.now();
         const session: Session | null = await store.sessions.findForUpdate(input.sessionId);
         if (session?.userId !== input.actorUserId || !session.isActiveAt(now)) {
+          throw new SessionNotFound();
+        }
+        const currentSource = session.snapshot.samlMembership ?? null;
+        if (
+          currentSource?.organizationId !== source?.organizationId ||
+          currentSource?.memberId !== source?.memberId
+        ) {
           throw new SessionNotFound();
         }
         const membership: ActiveMembership | null = await this.memberships.find(
           input.organizationId,
           input.actorUserId,
         );
-        if (membership === null) {
+        if (membership?.memberId !== proven.memberId || membership.role !== proven.role) {
           throw new OrganizationNotFound();
         }
         const policy: AuthenticationPolicy = await store.policies.find(membership.organizationId);

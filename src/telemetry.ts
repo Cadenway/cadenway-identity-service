@@ -9,5 +9,5 @@ import { startTelemetry } from '@cadenway/nest-common/telemetry';
 // process.
 startTelemetry({
   service: 'identity-service',
-  sensitiveHttpPathPrefixes: ['/internal/v1/users/'],
+  sensitiveHttpPathPrefixes: ['/internal/v1/users/', '/internal/v1/auth/sign-in/federated/'],
 });

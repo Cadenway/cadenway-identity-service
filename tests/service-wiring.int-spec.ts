@@ -1,12 +1,12 @@
 import { execFileSync } from 'node:child_process';
 import { createHash, generateKeyPairSync, randomUUID } from 'node:crypto';
-import { createServer } from 'node:net';
 import { fileURLToPath } from 'node:url';
 
 import {
   GetNotificationRecipientInternalResponse,
   ReserveAvatarUploadInternalResponse,
 } from '@cadenway/contracts/validators/internal/identity-service';
+import type { SearchMembership } from '@cadenway/contracts/types/internal/organization-service';
 import {
   createApplication,
   InternalTokenSigner,
@@ -36,6 +36,8 @@ import { SessionNotFound } from '../src/modules/sessions/application/models/sess
 import { IssueRealtimeTicket } from '../src/modules/sessions/application/use-cases/commands/realtime-ticket/issue-realtime-ticket/issue-realtime-ticket.use-case.js';
 import { RedeemRealtimeTicket } from '../src/modules/sessions/application/use-cases/commands/realtime-ticket/redeem-realtime-ticket/redeem-realtime-ticket.use-case.js';
 import { SystemExpiredRealtimeTicketsUnitOfWork } from '../src/modules/sessions/infrastructure/persistence/drizzle/transactions/session/system-expired-realtime-tickets.unit-of-work.js';
+import { freePort } from './support/loopback-port.fixture.js';
+import { startOrganizationMembershipAuthority } from './support/organization-membership.fixture.js';
 
 // The service as main.ts assembles it, on a disposable PostgreSQL and NATS. `@cadenway/nest-testing`
 // does not export its container fixtures yet and a service never depends on `testcontainers` itself,
@@ -88,6 +90,8 @@ const businessTables = [
   'backup_codes',
   'code_requests',
   'email_changes',
+  'federated_account_links',
+  'federated_sign_in_flows',
   'memberships',
   'one_time_codes',
   'organization_choices',
@@ -95,6 +99,8 @@ const businessTables = [
   'password_reset_links',
   'password_reset_requests',
   'realtime_tickets',
+  'saml_account_links',
+  'saml_assertion_replays',
   'security_key_registrations',
   'security_keys',
   'sessions',
@@ -110,7 +116,7 @@ const businessTables = [
 const allTables = [...platformTables, ...businessTables].sort();
 
 /** Migrations of `migrations/meta/_journal.json`. */
-const migrationCount = 9;
+const migrationCount = 10;
 
 /**
  * Runs `docker compose` on the throwaway project.
@@ -145,28 +151,6 @@ function brokerAccepts(env: Readonly<Record<string, string>>, ...args: readonly 
   } catch {
     return false;
   }
-}
-
-/**
- * Finds a port of the loopback interface that nothing listens on.
- *
- * @returns A free port, released before it is returned.
- */
-async function freePort(): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const server = createServer();
-    server.once('error', reject);
-    server.listen(0, '127.0.0.1', () => {
-      const address = server.address();
-      server.close(() => {
-        if (address === null || typeof address === 'string') {
-          reject(new Error('The probe server has no TCP address.'));
-        } else {
-          resolve(String(address.port));
-        }
-      });
-    });
-  });
 }
 
 /**
@@ -258,10 +242,15 @@ class WiringProbeController {
 describe('identity-service wiring', () => {
   const gateway = keyPair();
   const notification = keyPair('test-notification-service');
+  const organization = keyPair('test-organization-service');
   let app: NestExpressApplication | undefined;
   let signer: InternalTokenSigner;
   let notificationSigner: InternalTokenSigner;
+  let organizationSigner: InternalTokenSigner;
   let migrator: pg.Pool;
+  let membershipAuthority:
+    Awaited<ReturnType<typeof startOrganizationMembershipAuthority>> | undefined;
+  const memberships = new Map<string, SearchMembership>();
 
   /**
    * The running application.
@@ -322,9 +311,20 @@ describe('identity-service wiring', () => {
       'NOTIFICATION_SERVICE_INTERNAL_TOKEN_PUBLIC_JWKS',
       JSON.stringify(notification.publicJwk),
     );
+    vi.stubEnv(
+      'ORGANIZATION_SERVICE_INTERNAL_TOKEN_PUBLIC_JWKS',
+      JSON.stringify(organization.publicJwk),
+    );
     vi.stubEnv('PASSWORD_PEPPER', 'integration-test-password-pepper-000000000000');
     vi.stubEnv('WEBAUTHN_RP_ID', 'app.cadenway.localhost');
+    vi.stubEnv('AUTHENTICATION_COUNTER_RETENTION_ENABLED', 'true');
     vi.stubEnv('WEBAUTHN_ORIGINS', 'http://app.cadenway.localhost');
+
+    membershipAuthority = await startOrganizationMembershipAuthority((organizationId, userId) =>
+      Promise.resolve(memberships.get(`${organizationId}:${userId}`) ?? null),
+    );
+    vi.stubEnv('ORGANIZATION_SERVICE_URL', membershipAuthority.origin);
+    vi.stubEnv('IDENTITY_SERVICE_INTERNAL_TOKEN_PRIVATE_JWK', membershipAuthority.privateJwk);
 
     @Module({
       imports: [AppModule],
@@ -357,6 +357,10 @@ describe('identity-service wiring', () => {
       issuer: 'notification-service',
       privateJwk: notification.privateJwk,
     });
+    organizationSigner = await InternalTokenSigner.create({
+      issuer: 'organization-service',
+      privateJwk: organization.privateJwk,
+    });
   });
 
   afterAll(async () => {
@@ -365,6 +369,7 @@ describe('identity-service wiring', () => {
       await app?.close();
       await migrator.end();
     } finally {
+      await membershipAuthority?.close();
       vi.unstubAllEnvs();
       compose('down', '--volumes', '--remove-orphans');
     }
@@ -425,6 +430,8 @@ describe('identity-service wiring', () => {
       'organization_choices',
       'outbox_events',
       'realtime_tickets',
+      'saml_account_links',
+      'saml_assertion_replays',
       'sessions',
     ]);
     expect(tables.rows).toEqual(
@@ -449,6 +456,11 @@ describe('identity-service wiring', () => {
       },
       { tablename: 'outbox_events', policyname: 'outbox_events_organization_isolation' },
       { tablename: 'realtime_tickets', policyname: 'realtime_tickets_organization_isolation' },
+      { tablename: 'saml_account_links', policyname: 'saml_account_links_organization_isolation' },
+      {
+        tablename: 'saml_assertion_replays',
+        policyname: 'saml_assertion_replays_organization_isolation',
+      },
       { tablename: 'sessions', policyname: 'sessions_organization_isolation' },
     ]);
   });
@@ -556,6 +568,23 @@ describe('identity-service wiring', () => {
       expect(original.body).toEqual(expected);
       expect(GetNotificationRecipientInternalResponse.parse(original.body)).toEqual(expected);
 
+      const organizationAuth = await organizationSigner.sign('identity-service', {
+        actor: { type: 'system', id: 'organization-service' },
+        organizationId: null,
+      });
+      const verifiedEmail = (id: string, token = organizationAuth) =>
+        request(service().getHttpServer())
+          .get(`/internal/v1/users/${id}/verified-email`)
+          .set('Authorization', `Bearer ${token}`)
+          .set('If-None-Match', '*');
+      const proof = await verifiedEmail(userId);
+      expect(proof.status).toBe(200);
+      expect(proof.headers['cache-control']).toBe('no-store');
+      expect(proof.body).toEqual({ email });
+      expect((await verifiedEmail(unverifiedId)).status).toBe(404);
+      expect((await verifiedEmail(scheduledId)).status).toBe(404);
+      expect((await verifiedEmail(userId, auth)).status).toBe(403);
+
       await system.run(({ client }) =>
         client.query(
           `update users set email = $2, language = 'en', time_zone = 'America/New_York',
@@ -564,6 +593,7 @@ describe('identity-service wiring', () => {
         ),
       );
       const current = await read(userId);
+      expect((await verifiedEmail(userId)).body).toEqual({ email: pendingEmail });
       expect(current.status).toBe(200);
       expect(current.body).toEqual({
         email: pendingEmail,
@@ -962,6 +992,7 @@ describe('identity-service wiring', () => {
           [sessionId, userId, organizationId, memberId, sessionHash],
         );
       });
+      memberships.set(`${organizationId}:${userId}`, { memberId, role: 'member', version: 1 });
       return { organizationId, userId, memberId, sessionId };
     }
 
@@ -1178,9 +1209,23 @@ describe('identity-service wiring', () => {
       'account.delete.dead-letter',
       'account.deletion-sweep',
       'account.deletion-sweep.dead-letter',
+      'account.federation-expiry',
+      'account.federation-expiry.dead-letter',
       'session.realtime-ticket-expiry',
       'session.realtime-ticket-expiry.dead-letter',
     ]);
+    const federationSchedule = await system.run((tx) =>
+      tx.client.query('select cron, timezone from pgboss.schedule where name = $1', [
+        'account.federation-expiry',
+      ]),
+    );
+    expect(federationSchedule.rows).toEqual([{ cron: '* * * * *', timezone: 'UTC' }]);
+    const authenticationSchedule = await system.run((tx) =>
+      tx.client.query('select cron, timezone from pgboss.schedule where name = $1', [
+        'account.authentication-counter-sweep',
+      ]),
+    );
+    expect(authenticationSchedule.rows).toEqual([{ cron: '* * * * *', timezone: 'UTC' }]);
     await expect(
       system.run((tx) => tx.client.query('create table pgboss.wiring_probe (id integer)')),
     ).rejects.toMatchObject({ code: '42501' });

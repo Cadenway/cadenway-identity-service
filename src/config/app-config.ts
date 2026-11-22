@@ -1,10 +1,21 @@
-import { baseConfigShape, internalTokenVerifierConfigShape } from '@cadenway/nest-common';
-import type { BaseConfig, InternalTokenVerifierConfig } from '@cadenway/nest-common';
+import {
+  baseConfigShape,
+  internalTokenSignerConfigShape,
+  internalTokenVerifierConfigShape,
+} from '@cadenway/nest-common';
+import type {
+  BaseConfig,
+  InternalTokenSignerConfig,
+  InternalTokenVerifierConfig,
+} from '@cadenway/nest-common';
 import { databaseConfigShape } from '@cadenway/nest-common/database';
 import type { DatabaseConfig } from '@cadenway/nest-common/database';
 import { messagingConfigShape } from '@cadenway/nest-messaging';
 import type { MessagingConfig } from '@cadenway/nest-messaging';
 import { z } from 'zod';
+
+import { samlSignInConfigShape, type SamlSignInConfig } from './saml-sign-in-config.js';
+import { socialSignInConfigShape, type SocialSignInConfig } from './social-sign-in-config.js';
 
 /**
  * Type AppConfig
@@ -24,7 +35,12 @@ import { z } from 'zod';
  *   them.
  * - `INTERNAL_TOKEN_AUDIENCE` and `INTERNAL_TOKEN_TRUSTED_ISSUERS`: the `aud` this service accepts
  *   and the public keys of the backends allowed to call it. Hosting can add verified Notification
- *   public keys through `NOTIFICATION_SERVICE_INTERNAL_TOKEN_PUBLIC_JWKS`.
+ *   public keys through `NOTIFICATION_SERVICE_INTERNAL_TOKEN_PUBLIC_JWKS` and
+ *   `ORGANIZATION_SERVICE_INTERNAL_TOKEN_PUBLIC_JWKS`.
+ * - `ORGANIZATION_SERVICE_URL` and `IDENTITY_SERVICE_INTERNAL_TOKEN_PRIVATE_JWK`: optional
+ *   Organization service origin and signing key, supplied together for proof-dependent routes.
+ *   The hosted Compose definition requires both. Local calls that require a proof fail closed when
+ *   they are absent.
  * - `PASSWORD_PEPPER`: `passwordPepperConfigShape`, the secret every key of the service derives
  *   from: the secret key of the password hashes, the key of the one-time code hashes, the key that
  *   seals the authenticator-app secrets and the key of the backup code hashes.
@@ -42,8 +58,12 @@ export type AppConfig = BaseConfig &
   MessagingConfig &
   InternalTokenVerifierConfig &
   PasswordPepperConfig &
-  WebAuthnConfig & {
+  WebAuthnConfig &
+  SocialSignInConfig &
+  SamlSignInConfig & {
     readonly AUTHENTICATION_COUNTER_RETENTION_ENABLED: boolean;
+    readonly ORGANIZATION_SERVICE_URL?: string;
+    readonly IDENTITY_SERVICE_INTERNAL_TOKEN_PRIVATE_JWK?: InternalTokenSignerConfig['INTERNAL_TOKEN_PRIVATE_JWK'];
   };
 
 /**
@@ -183,30 +203,43 @@ function originsMatchRelyingParty(config: Readonly<WebAuthnConfig>): boolean {
 }
 
 /** Validates the hosted public-key list with the same schema as the explicit issuer map. */
-const notificationPublicKeys = z
-  .string()
-  .trim()
-  .nullish()
-  .transform(
-    (value, context): InternalTokenVerifierConfig['INTERNAL_TOKEN_TRUSTED_ISSUERS'] | undefined => {
-      if (value == null || value === '' || value === 'null') {
-        return undefined;
-      }
-      try {
-        const keys: unknown = JSON.parse(`[${value}]`);
-        const issuers = internalTokenVerifierConfigShape.INTERNAL_TOKEN_TRUSTED_ISSUERS.safeParse(
-          JSON.stringify({ 'notification-service': keys }),
-        );
-        if (issuers.success) {
-          return issuers.data;
+function optionalPublicKeys(issuer: string) {
+  return z
+    .string()
+    .trim()
+    .nullish()
+    .transform(
+      (
+        value,
+        context,
+      ): InternalTokenVerifierConfig['INTERNAL_TOKEN_TRUSTED_ISSUERS'] | undefined => {
+        if (value == null || value === '' || value === 'null') {
+          return undefined;
         }
-      } catch {
-        // Never echo the raw JSON or unknown JWK properties in a configuration issue.
-      }
-      context.addIssue({ code: 'custom', message: 'Expected comma-separated public JWK objects.' });
-      return z.NEVER;
-    },
-  );
+        try {
+          const keys: unknown = JSON.parse(`[${value}]`);
+          const issuers = internalTokenVerifierConfigShape.INTERNAL_TOKEN_TRUSTED_ISSUERS.safeParse(
+            JSON.stringify({ [issuer]: keys }),
+          );
+          if (issuers.success) {
+            return issuers.data;
+          }
+        } catch {
+          // Never echo the raw JSON or unknown JWK properties in a configuration issue.
+        }
+        context.addIssue({
+          code: 'custom',
+          message: 'Expected comma-separated public JWK objects.',
+        });
+        return z.NEVER;
+      },
+    );
+}
+
+function isOrganizationOrigin(value: string): boolean {
+  const url = URL.parse(value);
+  return url?.origin === value && (url.protocol === 'http:' || url.protocol === 'https:');
+}
 
 /**
  * Constant appConfigSchema
@@ -225,25 +258,61 @@ export const appConfigSchema: z.ZodType<AppConfig> = z
     ...databaseConfigShape,
     ...messagingConfigShape,
     ...internalTokenVerifierConfigShape,
-    NOTIFICATION_SERVICE_INTERNAL_TOKEN_PUBLIC_JWKS: notificationPublicKeys,
+    NOTIFICATION_SERVICE_INTERNAL_TOKEN_PUBLIC_JWKS: optionalPublicKeys('notification-service'),
+    ORGANIZATION_SERVICE_INTERNAL_TOKEN_PUBLIC_JWKS: optionalPublicKeys('organization-service'),
+    ORGANIZATION_SERVICE_URL: z
+      .string()
+      .trim()
+      .max(512)
+      .refine(isOrganizationOrigin, { error: 'Expected an HTTP or HTTPS origin.' })
+      .optional(),
+    IDENTITY_SERVICE_INTERNAL_TOKEN_PRIVATE_JWK:
+      internalTokenSignerConfigShape.INTERNAL_TOKEN_PRIVATE_JWK.optional(),
     ...passwordPepperConfigShape,
     AUTHENTICATION_COUNTER_RETENTION_ENABLED: z
       .enum(['true', 'false'])
       .default('false')
       .transform((value) => value === 'true'),
     ...webAuthnConfigShape,
+    ...socialSignInConfigShape,
+    ...samlSignInConfigShape,
   })
   .refine(originsMatchRelyingParty, {
     path: ['WEBAUTHN_ORIGINS'],
     error: 'Expected origins on the relying party WEBAUTHN_RP_ID or one of its subdomains.',
   })
-  .transform(({ NOTIFICATION_SERVICE_INTERNAL_TOKEN_PUBLIC_JWKS, ...config }): AppConfig => ({
-    ...config,
-    INTERNAL_TOKEN_TRUSTED_ISSUERS: {
-      ...NOTIFICATION_SERVICE_INTERNAL_TOKEN_PUBLIC_JWKS,
-      ...config.INTERNAL_TOKEN_TRUSTED_ISSUERS,
+  .refine(
+    (config) =>
+      config.ORGANIZATION_SERVICE_URL === undefined ||
+      config.IDENTITY_SERVICE_INTERNAL_TOKEN_PRIVATE_JWK !== undefined,
+    {
+      path: ['IDENTITY_SERVICE_INTERNAL_TOKEN_PRIVATE_JWK'],
+      error: 'Required when ORGANIZATION_SERVICE_URL is configured.',
     },
-  }));
+  )
+  .refine(
+    (config) =>
+      config.IDENTITY_SERVICE_INTERNAL_TOKEN_PRIVATE_JWK === undefined ||
+      config.ORGANIZATION_SERVICE_URL !== undefined,
+    {
+      path: ['ORGANIZATION_SERVICE_URL'],
+      error: 'Required when the Identity signing key is configured.',
+    },
+  )
+  .transform(
+    ({
+      NOTIFICATION_SERVICE_INTERNAL_TOKEN_PUBLIC_JWKS: notificationKeys,
+      ORGANIZATION_SERVICE_INTERNAL_TOKEN_PUBLIC_JWKS: organizationKeys,
+      ...config
+    }): AppConfig => ({
+      ...config,
+      INTERNAL_TOKEN_TRUSTED_ISSUERS: {
+        ...notificationKeys,
+        ...organizationKeys,
+        ...config.INTERNAL_TOKEN_TRUSTED_ISSUERS,
+      },
+    }),
+  );
 
 /**
  * Interface MigrationConfig

@@ -3,5 +3,8 @@ export interface RedeemRealtimeTicketInput {
   // #region Properties
   /** Opaque credential, never persisted or logged. */
   readonly token: string;
+
+  /** Whether the gateway can keep checking the originating SAML membership. */
+  readonly verifiesSamlSource?: boolean;
   // #endregion
 }

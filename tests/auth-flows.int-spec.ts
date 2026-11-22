@@ -1,17 +1,27 @@
 import { execFileSync } from 'node:child_process';
-import { generateKeyPairSync } from 'node:crypto';
+import { createHash, generateKeyPairSync, randomBytes, randomUUID, sign } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { inflateRawSync } from 'node:zlib';
 
+import {
+  CompleteOAuthSignInInternalResponse,
+  CompleteSamlSignInInternalResponse,
+  FinishFederatedSignInInternalResponse,
+  InspectSignInChallengeInternalResponse,
+  StartFederatedSignInInternalResponse,
+} from '@cadenway/contracts/validators/internal/identity-service';
 import { createApplication, InternalTokenSigner, loadConfig } from '@cadenway/nest-common';
 import type {
   Ed25519PrivateJwk,
   Ed25519PublicJwk,
   InternalTokenClaims,
 } from '@cadenway/nest-common';
-import { SystemTransactionRunner } from '@cadenway/nest-common/database';
+import { assertNoActiveTransaction, SystemTransactionRunner } from '@cadenway/nest-common/database';
 import { JobProducer } from '@cadenway/nest-jobs/runtime';
 import { OutboxRelay, OutboxWriter } from '@cadenway/nest-messaging/outbox';
 import type { NestExpressApplication } from '@nestjs/platform-express';
+import { http, HttpResponse, passthrough } from 'msw';
+import { setupServer } from 'msw/node';
 import pg from 'pg';
 import request from 'supertest';
 import type { Response } from 'supertest';
@@ -19,10 +29,33 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { AppModule } from '../src/app.module.js';
 import { appConfigSchema } from '../src/config/app-config.js';
+import { configurePrivateHttpPolicies } from '../src/infrastructure/private-http-policies.js';
+import type { AuthenticatorAppSecrets } from '../src/modules/accounts/application/ports/outbound/security/two-step/authenticator-app-secrets.port.js';
+import type { BackupCodeSecrets } from '../src/modules/accounts/application/ports/outbound/security/two-step/backup-code-secrets.port.js';
+import type { AccountsUnitOfWork } from '../src/modules/accounts/application/ports/outbound/transactions/accounts/accounts-unit-of-work.port.js';
+import { UNIT_OF_WORK } from '../src/modules/accounts/composition/tokens/accounts/accounts-unit-of-work.token.js';
+import { AUTHENTICATOR_APP_SECRETS } from '../src/modules/accounts/composition/tokens/two-step/authenticator-app-secrets.token.js';
+import { BACKUP_CODE_SECRETS } from '../src/modules/accounts/composition/tokens/two-step/backup-code-secrets.token.js';
 import { User } from '../src/modules/accounts/domain/aggregates/account/user.aggregate.js';
+import { FederatedSignInFlow } from '../src/modules/accounts/domain/aggregates/federated-sign-in/federated-sign-in-flow.aggregate.js';
+import { TwoStepVerification } from '../src/modules/accounts/domain/aggregates/two-step/two-step-verification.aggregate.js';
 import { EmailAddress } from '../src/modules/accounts/domain/value-objects/email/email-address.value-object.js';
+import { digestFederatedCredential } from '../src/modules/accounts/infrastructure/adapters/federated-sign-in/versioned-social-flow-credentials.adapter.js';
+import { DrizzleFederatedAccountLinkRepository } from '../src/modules/accounts/infrastructure/persistence/drizzle/repositories/federated-sign-in/drizzle-federated-account-link.repository.js';
+import { DrizzleFederatedSignInFlowRepository } from '../src/modules/accounts/infrastructure/persistence/drizzle/repositories/federated-sign-in/drizzle-federated-sign-in-flow.repository.js';
 import { SystemAccountsUnitOfWork } from '../src/modules/accounts/infrastructure/persistence/drizzle/transactions/accounts/system-accounts.unit-of-work.js';
+import { SystemFederatedFinishUnitOfWork } from '../src/modules/accounts/infrastructure/persistence/drizzle/transactions/federated-sign-in/system-federated-finish.unit-of-work.js';
 import { OpenSession } from '../src/modules/sessions/public/session/open-session.js';
+import {
+  callbackUrl,
+  connection as samlFixtureConnection,
+  createTestIdp,
+  serviceProvider,
+  signedPost,
+  subject as samlSubject,
+} from './support/federated-saml.fixture.js';
+import { freePort } from './support/loopback-port.fixture.js';
+import { startOrganizationMembershipAuthority } from './support/organization-membership.fixture.js';
 
 // The seven authentication flows, the introspection, the revocation and the reading of a user,
 // through HTTP as the API gateway calls them, on the service as main.ts assembles it, against a
@@ -40,6 +73,7 @@ const composeFile: string = fileURLToPath(new URL('../compose.dev.yaml', import.
 
 /** Throwaway project name, distinct from the wiring test and from any developer stack. */
 const project = `cadenway-identity-service-auth-test-${String(process.pid)}`;
+let natsHostPort = '0';
 
 /** A pepper for the run only. */
 const pepper = 'integration-test-password-pepper-auth-flows-0000';
@@ -64,6 +98,14 @@ const secrets: string[] = [password, otherPassword, pepper];
 
 /** Every log line the application wrote. */
 const logLines: string[] = [];
+
+const federationBase = '/internal/v1/auth/sign-in/federated';
+const oidcConnection = { provider: 'google', issuer: 'https://accounts.google.com' } as const;
+const oidcClientId = 'atelier-nord-fixture-client';
+const gatewayOrigin = 'https://api.example.test';
+const oidcCallback = `${gatewayOrigin}/v1/auth/sign-in/federated/providers/google/callback`;
+const samlConnection = { ...samlFixtureConnection, organizationId: randomUUID() };
+const samlEntryPoint = 'https://idp.example.test/atelier-nord/sso';
 
 /** Matches any string, typed for an object literal. */
 const anyString: unknown = expect.any(String);
@@ -100,7 +142,7 @@ function compose(...args: readonly string[]): string {
     ['compose', '--project-name', project, '--file', composeFile, ...args],
     {
       encoding: 'utf8',
-      env: { ...process.env, DEV_POSTGRES_PORT: '0', DEV_NATS_PORT: '0' },
+      env: { ...process.env, DEV_POSTGRES_PORT: '0', DEV_NATS_PORT: natsHostPort },
       stdio: ['ignore', 'pipe', 'pipe'],
     },
   );
@@ -209,10 +251,18 @@ async function runMigrator(): Promise<void> {
 describe('identity-service authentication flows', () => {
   const apiGateway = keyPair('test-api-gateway');
   const realtimeGateway = keyPair('test-realtime-gateway');
+  const oidcKeys = generateKeyPairSync('rsa', { modulusLength: 2048 });
+  const oidcServer = setupServer(
+    http.all(/^http:\/\/127\.0\.0\.1:\d+\/internal\/v1\//u, () => passthrough()),
+  );
+  const samlIdp = createTestIdp();
   let app: NestExpressApplication;
   let gateway: InternalTokenSigner;
   let realtime: InternalTokenSigner;
   let migrator: pg.Pool;
+  let membershipAuthority:
+    Awaited<ReturnType<typeof startOrganizationMembershipAuthority>> | undefined;
+  const liveMemberships = new Map<string, { memberId: string; role: 'member'; version: number }>();
   let camilleId = '';
   let camilleToken = '';
   let camilleSessionId = '';
@@ -283,6 +333,96 @@ describe('identity-service authentication flows', () => {
     return app
       .get(SystemTransactionRunner)
       .run(async (tx) => (await tx.client.query(text, values)).rows as TRow[]);
+  }
+
+  /** Seeds a verified local account and its existing binding to the synthetic provider. */
+  async function linkedAccount(
+    identity: Parameters<DrizzleFederatedAccountLinkRepository['insert']>[1],
+  ): Promise<string> {
+    const runner = app.get<SystemTransactionRunner>(SystemTransactionRunner);
+    const accounts = app.get<AccountsUnitOfWork>(UNIT_OF_WORK);
+    const account = await accounts.run((store) =>
+      store.users.insert(
+        User.register(
+          EmailAddress.of(`linked-${randomUUID()}@example.test`),
+          'Camille Martin',
+          new Date(),
+        ),
+      ),
+    );
+    await runner.run(async (scope) => {
+      await scope.client.query('update users set email_verified_at = now() where id = $1', [
+        account.id,
+      ]);
+      const link = await new DrizzleFederatedAccountLinkRepository(scope).insert(
+        account.id,
+        identity,
+      );
+      if (link === null) throw new Error('The local federated account was not linked.');
+    });
+    return account.id;
+  }
+
+  /** Enrolls a fixture account with both an authenticator app and a usable backup code. */
+  async function enrollFederatedAccount(accountId: string): Promise<string> {
+    const accounts = app.get<AccountsUnitOfWork>(UNIT_OF_WORK);
+    const appSecrets = app.get<AuthenticatorAppSecrets>(AUTHENTICATOR_APP_SECRETS);
+    const backupSecrets = app.get<BackupCodeSecrets>(BACKUP_CODE_SECRETS);
+    const [code] = backupSecrets.generate();
+    if (code === undefined) throw new Error('Expected a backup code for the fixture.');
+    const codeHash = backupSecrets.hashOf(accountId, code);
+    if (codeHash === null) throw new Error('Expected a valid backup code for the fixture.');
+    const secret = appSecrets.generate();
+    secrets.push(secret, code);
+    await accounts.run(async (store) => {
+      await store.twoStep.insert(
+        TwoStepVerification.enable(
+          accountId,
+          appSecrets.seal(accountId, secret),
+          Math.floor(Date.now() / 30_000),
+          randomBytes(32).toString('base64url'),
+          new Date(),
+        ),
+      );
+      await store.backupCodes.replaceAll(accountId, [codeHash]);
+    });
+    return code;
+  }
+
+  /** Starts a browser-bound flow and decodes its contracted internal response. */
+  async function startFederated(body: object) {
+    const response = await post(`${federationBase}/start`, body);
+    expect(response.status).toBe(200);
+    expect(response.headers['cache-control']).toBe('private, no-store');
+    const started = StartFederatedSignInInternalResponse.parse(response.body as unknown);
+    secrets.push(started.browserBinding);
+    return { ...started, redirect: new URL(started.authorizationUrl) };
+  }
+
+  /** Counts durable sessions of the fixture account in the isolated database. */
+  async function federatedSessionCount(accountId: string): Promise<number | undefined> {
+    const [result] = await systemQuery<{ count: number }>(
+      'select count(*)::int as count from sessions where user_id = $1',
+      [accountId],
+    );
+    return result?.count;
+  }
+
+  /** Asserts that a linked provider reached the ordinary Identity session endpoint. */
+  async function finishFederated(receipt: string, accountId: string, persistent: boolean) {
+    expect(await federatedSessionCount(accountId)).toBe(0);
+    secrets.push(receipt);
+    const finished = issued(await post(`${federationBase}/finish`, { receipt, client }));
+    expect(finished.status).toBe(200);
+    expect(finished.headers['cache-control']).toBe('private, no-store');
+    const session = FinishFederatedSignInInternalResponse.parse(finished.body as unknown);
+    expect(session.user.id).toBe(accountId);
+    expect(session.session.persistent).toBe(persistent);
+    const replay = await post(`${federationBase}/finish`, { receipt, client });
+    expect(replay.status).toBe(422);
+    expect(replay.body).toMatchObject({ code: 'auth.federated-sign-in-refused' });
+    expect(await federatedSessionCount(accountId)).toBe(1);
+    return session;
   }
 
   /**
@@ -397,6 +537,7 @@ describe('identity-service authentication flows', () => {
   }
 
   beforeAll(async () => {
+    natsHostPort = await freePort();
     compose(
       'up',
       '--detach',
@@ -408,7 +549,6 @@ describe('identity-service authentication flows', () => {
       'nats-streams',
     );
     const postgresPort = hostPort('postgres', '5432');
-    const natsPort = hostPort('nats', '4222');
     const migratorUrl = `postgres://identity_migrator:identity_migrator@127.0.0.1:${postgresPort}/identity`;
 
     vi.stubEnv('MIGRATION_DATABASE_URL', migratorUrl);
@@ -422,7 +562,7 @@ describe('identity-service authentication flows', () => {
       'DATABASE_URL',
       `postgres://identity_app:identity_app@127.0.0.1:${postgresPort}/identity`,
     );
-    vi.stubEnv('NATS_URL', `nats://127.0.0.1:${natsPort}`);
+    vi.stubEnv('NATS_URL', `nats://127.0.0.1:${natsHostPort}`);
     vi.stubEnv('NATS_USER', 'identity');
     vi.stubEnv('NATS_PASSWORD', 'identity');
     vi.stubEnv('INTERNAL_TOKEN_AUDIENCE', 'identity-service');
@@ -436,24 +576,75 @@ describe('identity-service authentication flows', () => {
     vi.stubEnv('PASSWORD_PEPPER', pepper);
     vi.stubEnv('WEBAUTHN_RP_ID', 'app.cadenway.localhost');
     vi.stubEnv('WEBAUTHN_ORIGINS', 'http://app.cadenway.localhost');
+    const oidcClientSecret = randomBytes(32).toString('base64url');
+    const stateKey = randomBytes(32).toString('base64url');
+    secrets.push(oidcClientSecret, stateKey);
+    vi.stubEnv(
+      'SOCIAL_SIGN_IN_CONFIG',
+      JSON.stringify({
+        gatewayOrigin,
+        activeKeyVersion: 'k1',
+        stateKeys: { k1: stateKey },
+        providers: { google: { clientId: oidcClientId, clientSecret: oidcClientSecret } },
+      }),
+    );
+    vi.stubEnv(
+      'SAML_SIGN_IN_CONNECTIONS',
+      JSON.stringify([
+        {
+          organizationId: samlConnection.organizationId,
+          connectionId: samlConnection.connectionId,
+          issuer: samlConnection.issuer,
+          verifiedDomains: ['atelier.example.test'],
+          entryPoint: samlEntryPoint,
+          idpCertificate: samlIdp.certificate,
+          serviceProviderEntityId: serviceProvider,
+          assertionConsumerUrl: callbackUrl,
+        },
+      ]),
+    );
 
+    const authority = await startOrganizationMembershipAuthority((organizationId, userId) =>
+      Promise.resolve(liveMemberships.get(`${organizationId}/${userId}`) ?? null),
+    );
+    membershipAuthority = authority;
+    vi.stubEnv('ORGANIZATION_SERVICE_URL', membershipAuthority.origin);
+    vi.stubEnv('IDENTITY_SERVICE_INTERNAL_TOKEN_PRIVATE_JWK', membershipAuthority.privateJwk);
     const config = loadConfig(appConfigSchema);
-    app = await createApplication(AppModule, {
-      service: 'identity-service',
-      config,
-      provideConfig: true,
-      internalToken: {
-        verifier: {
-          audience: config.INTERNAL_TOKEN_AUDIENCE,
-          trustedIssuers: config.INTERNAL_TOKEN_TRUSTED_ISSUERS,
+    // The provider captures fetch as it is built. Delegate to MSW only during the OIDC case.
+    const nativeFetch = globalThis.fetch;
+    const fetchForFixture: typeof fetch = (...input) => {
+      if (input[0] === `${authority.origin}/internal/v1/search-membership`) {
+        return nativeFetch(...input);
+      }
+      const activeFetch = globalThis.fetch;
+      if (activeFetch === nativeFetch || activeFetch === fetchForFixture) {
+        return Promise.reject(new Error('Provider access requires the active local mock.'));
+      }
+      return activeFetch(...input);
+    };
+    vi.stubGlobal('fetch', fetchForFixture);
+    try {
+      app = await createApplication(AppModule, {
+        service: 'identity-service',
+        config,
+        provideConfig: true,
+        internalToken: {
+          verifier: {
+            audience: config.INTERNAL_TOKEN_AUDIENCE,
+            trustedIssuers: config.INTERNAL_TOKEN_TRUSTED_ISSUERS,
+          },
         },
-      },
-      logDestination: {
-        write: (line: string): void => {
-          logLines.push(line);
+        logDestination: {
+          write: (line: string): void => {
+            logLines.push(line);
+          },
         },
-      },
-    });
+      });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    configurePrivateHttpPolicies(app);
     await app.init();
     gateway = await InternalTokenSigner.create({
       issuer: 'api-gateway',
@@ -470,9 +661,197 @@ describe('identity-service authentication flows', () => {
       await app.close();
       await migrator.end();
     } finally {
+      await membershipAuthority?.close();
       vi.unstubAllEnvs();
       compose('down', '--volumes', '--remove-orphans');
     }
+  });
+
+  describe('federated sign-in HTTP flows', () => {
+    it('refuses a missing token, another service and a non-anonymous actor', async () => {
+      const path = `${federationBase}/start`;
+      const body = { provider: 'google' };
+      const missing = await request(app.getHttpServer()).post(path).send(body);
+      expect(missing.status).toBe(401);
+      expect(missing.body).toMatchObject({ code: 'auth.token-missing' });
+      const wrongActor = await post(path, body, system);
+      expect(wrongActor.status).toBe(403);
+      expect(wrongActor.body).toMatchObject({ code: 'auth.actor-not-allowed' });
+      const wrongService = await request(app.getHttpServer())
+        .post(path)
+        .set('Authorization', await bearer(anonymous, realtime))
+        .send(body);
+      expect(wrongService.status).toBe(403);
+      expect(wrongService.body).toMatchObject({ code: 'auth.issuer-not-allowed' });
+    });
+
+    it('checks OIDC state, PKCE, signature and link before issuing a one-use session', async () => {
+      const subject = 'atelier-nord-fixture-google-id';
+      const accountId = await linkedAccount({ ...oidcConnection, subject });
+      const { browserBinding, redirect } = await startFederated({
+        provider: 'google',
+        rememberMe: true,
+      });
+      expect(redirect.origin).toBe(oidcConnection.issuer);
+      expect(redirect.searchParams.get('redirect_uri')).toBe(oidcCallback);
+      expect(redirect.searchParams.get('code_challenge_method')).toBe('S256');
+      const state = redirect.searchParams.get('state');
+      const nonce = redirect.searchParams.get('nonce');
+      const challenge = redirect.searchParams.get('code_challenge');
+      if (state === null || nonce === null || challenge === null) {
+        throw new Error('Expected bound OIDC authorization parameters.');
+      }
+      const code = randomBytes(32).toString('base64url');
+      const providerToken = randomBytes(32).toString('base64url');
+      const callback = {
+        provider: 'google',
+        state,
+        browserBinding,
+        response: { outcome: 'authorized', code },
+      };
+      secrets.push(state, nonce, code, providerToken);
+      const claims = {
+        iss: oidcConnection.issuer,
+        sub: subject,
+        aud: oidcClientId,
+        iat: Math.floor(Date.now() / 1000),
+        exp: Math.floor(Date.now() / 1000) + 60,
+        nonce,
+      };
+      const kid = 'oidc-fixture';
+      const encode = (value: object) => Buffer.from(JSON.stringify(value)).toString('base64url');
+      const unsigned = `${encode({ alg: 'RS256', kid })}.${encode(claims)}`;
+      const signed = sign('RSA-SHA256', Buffer.from(unsigned), oidcKeys.privateKey).toString(
+        'base64url',
+      );
+      const idToken = `${unsigned}.${signed}`;
+      secrets.push(idToken);
+      const exchange = vi.fn(async ({ request }: { request: globalThis.Request }) => {
+        const fields = new URLSearchParams(await request.text());
+        const verifier = fields.get('code_verifier');
+        if (verifier === null) throw new Error('Expected a PKCE verifier.');
+        expect(fields.get('code')).toBe(code);
+        expect(fields.get('redirect_uri')).toBe(oidcCallback);
+        expect(createHash('sha256').update(verifier).digest('base64url')).toBe(challenge);
+        return HttpResponse.json({
+          token_type: 'Bearer',
+          access_token: providerToken,
+          id_token: idToken,
+        });
+      });
+      oidcServer.use(
+        http.post('https://oauth2.googleapis.com/token', exchange),
+        http.get('https://www.googleapis.com/oauth2/v3/certs', () =>
+          HttpResponse.json({
+            keys: [{ ...oidcKeys.publicKey.export({ format: 'jwk' }), kid, alg: 'RS256' }],
+          }),
+        ),
+      );
+      oidcServer.listen({ onUnhandledFrame: 'error' });
+      try {
+        const foreign = await post(`${federationBase}/oauth/callback`, {
+          ...callback,
+          browserBinding: randomBytes(32).toString('base64url'),
+        });
+        expect(foreign.status).toBe(422);
+        expect(exchange).not.toHaveBeenCalled();
+        const completed = await post(`${federationBase}/oauth/callback`, callback);
+        expect(completed.status).toBe(200);
+        const { receipt } = CompleteOAuthSignInInternalResponse.parse(completed.body as unknown);
+        expect((await post(`${federationBase}/oauth/callback`, callback)).status).toBe(422);
+        expect(exchange).toHaveBeenCalledOnce();
+        await finishFederated(receipt, accountId, true);
+      } finally {
+        oidcServer.close();
+      }
+    });
+
+    it('rechecks SAML membership at redemption and MFA and fences a session in another organization', async () => {
+      const accountId = await linkedAccount({ ...samlConnection, subject: samlSubject });
+      const memberId = randomUUID();
+      const otherOrganization = randomUUID();
+      const otherMemberId = randomUUID();
+      const sourceKey = `${samlConnection.organizationId}/${accountId}`;
+      liveMemberships.set(sourceKey, { memberId, role: 'member', version: 1 });
+      liveMemberships.set(`${otherOrganization}/${accountId}`, {
+        memberId: otherMemberId,
+        role: 'member',
+        version: 1,
+      });
+      await systemQuery(
+        `insert into memberships (id, organization_id, user_id, role, version)
+         values ($1, $2, $3, 'member', 1), ($4, $5, $3, 'member', 1)`,
+        [memberId, samlConnection.organizationId, accountId, otherMemberId, otherOrganization],
+      );
+      await systemQuery(
+        'insert into organization_choices (user_id, organization_id) values ($1, $2)',
+        [accountId, otherOrganization],
+      );
+
+      const proveSaml = async () => {
+        const { browserBinding, redirect } = await startFederated({
+          provider: 'saml',
+          email: 'camille@atelier.example.test',
+        });
+        expect(`${redirect.origin}${redirect.pathname}`).toBe(samlEntryPoint);
+        const relayState = redirect.searchParams.get('RelayState');
+        const samlRequest = redirect.searchParams.get('SAMLRequest');
+        if (relayState === null || samlRequest === null) throw new Error('Expected SAML state.');
+        const xml = inflateRawSync(Buffer.from(samlRequest, 'base64')).toString('utf8');
+        const requestId = /\bID="([^"]+)"/u.exec(xml)?.[1];
+        if (requestId === undefined) throw new Error('Expected a SAML AuthnRequest ID.');
+        const samlResponse = signedPost(samlIdp, {
+          request: requestId,
+          assertion: `_${randomUUID()}`,
+        });
+        secrets.push(relayState, samlResponse);
+        const callback = { browserBinding, relayState, samlResponse };
+        const foreign = await post(`${federationBase}/saml/callback`, {
+          ...callback,
+          browserBinding: randomBytes(32).toString('base64url'),
+        });
+        expect(foreign.status).toBe(422);
+        const completed = await post(`${federationBase}/saml/callback`, callback);
+        expect(completed.status).toBe(200);
+        expect((await post(`${federationBase}/saml/callback`, callback)).status).toBe(422);
+        return CompleteSamlSignInInternalResponse.parse(completed.body as unknown).receipt;
+      };
+
+      const session = await finishFederated(await proveSaml(), accountId, false);
+      const before = await post('/internal/v1/tokens/introspect', { token: session.token }, system);
+      expect(before.body).toMatchObject({ active: true, organizationId: otherOrganization });
+      const revokedReceipt = await proveSaml();
+      const backupCode = await enrollFederatedAccount(accountId);
+      const challengeReceipt = await proveSaml();
+      secrets.push(revokedReceipt, challengeReceipt);
+      const challenged = await post(`${federationBase}/finish`, {
+        receipt: challengeReceipt,
+        client,
+      });
+      expect(challenged.status).toBe(202);
+      const challenge = InspectSignInChallengeInternalResponse.parse(challenged.body as unknown);
+      secrets.push(challenge.token);
+      liveMemberships.delete(sourceKey);
+      expect(
+        await systemQuery('select removed_at from memberships where id = $1', [memberId]),
+      ).toEqual([{ removed_at: null }]);
+      const ended = await post('/internal/v1/tokens/introspect', { token: session.token }, system);
+      expect(ended.body).toEqual({ active: false });
+      const refusal = await post(`${federationBase}/finish`, { receipt: revokedReceipt, client });
+      expect(refusal.status).toBe(422);
+      expect(refusal.body).toMatchObject({ code: 'auth.federated-sign-in-refused' });
+      const mfa = await post('/internal/v1/auth/sign-in/challenge/backup-code', {
+        token: challenge.token,
+        code: backupCode,
+        client,
+      });
+      expect(mfa.status).toBe(422);
+      expect(mfa.body).toMatchObject({ code: 'auth.challenge-expired' });
+      expect(
+        await systemQuery('select used_at from backup_codes where user_id = $1', [accountId]),
+      ).toEqual([{ used_at: null }]);
+      expect(await federatedSessionCount(accountId)).toBe(1);
+    });
   });
 
   describe('the internal token of the routes', () => {
@@ -1600,6 +1979,126 @@ describe('identity-service authentication flows', () => {
   });
 
   describe('the unit of work', () => {
+    it('rolls back federated receipt and session together and redeems it once under concurrency', async () => {
+      const runner = app.get<SystemTransactionRunner>(SystemTransactionRunner);
+      const accounts = new SystemAccountsUnitOfWork(
+        runner,
+        app.get(OutboxWriter),
+        app.get(OutboxRelay),
+        app.get(JobProducer),
+      );
+      const openSession = app.get(OpenSession, { strict: false });
+      const connection = { provider: 'google', issuer: 'https://accounts.google.com' } as const;
+      const identity = { ...connection, subject: 'local-federated-receipt-subject' };
+      const now = new Date();
+      const stateHash = digestFederatedCredential('local-transaction-state');
+      const browserBindingHash = digestFederatedCredential('local-transaction-browser');
+      const receiptHash = digestFederatedCredential('local-transaction-receipt');
+      const flow = FederatedSignInFlow.issue(
+        { id: randomUUID(), connection, stateHash, browserBindingHash, persistent: true },
+        now,
+      );
+      const user = await accounts.run((store) =>
+        store.users.insert(
+          User.register(EmailAddress.of('sso-unit-of-work@example.test'), 'Camille Martin', now),
+        ),
+      );
+      await runner.run(async (scope) => {
+        await scope.client.query('update users set email_verified_at = now() where id = $1', [
+          user.id,
+        ]);
+        const flows = new DrizzleFederatedSignInFlowRepository(scope);
+        const link = await new DrizzleFederatedAccountLinkRepository(scope).insert(
+          user.id,
+          identity,
+        );
+        if (link === null) throw new Error('Expected a federation link.');
+        await flows.insert(flow);
+        const opened = await flows.findByStateHash(stateHash);
+        if (opened === null) throw new Error('Expected an open flow.');
+        expect(
+          await flows.save(
+            opened.flow.claim(
+              { provider: connection.provider, stateHash, browserBindingHash },
+              now,
+            ),
+            opened.version,
+          ),
+        ).toBe(true);
+        const claimed = await flows.findByStateHash(stateHash);
+        if (claimed === null) throw new Error('Expected a claimed flow.');
+        expect(
+          await flows.save(
+            claimed.flow.complete(
+              { connection, subject: identity.subject },
+              link,
+              receiptHash,
+              now,
+            ),
+            claimed.version,
+          ),
+        ).toBe(true);
+      });
+
+      const work = new SystemFederatedFinishUnitOfWork(runner, accounts, {
+        isAllowed: () => {
+          expect(() => {
+            assertNoActiveTransaction();
+          }).toThrow();
+          return Promise.resolve(true);
+        },
+        activeMembershipId: () => Promise.resolve(null),
+      });
+      const redeem = (rollback: boolean) =>
+        work.run(async (store) => {
+          const locked = await store.findByReceiptHash(receiptHash);
+          const phase = locked?.flow.snapshot.phase;
+          if (
+            locked === null ||
+            phase?.kind !== 'complete' ||
+            phase.continuation.redeemedAtMs !== null
+          ) {
+            return false;
+          }
+          const account = await store.users.lock(user.id);
+          const link = await store.findLink(identity);
+          const result = locked.flow.redeem(
+            receiptHash,
+            {
+              account: account === null ? null : { id: account.id, enabled: account.isVerified },
+              link,
+              activeMembership: null,
+              maySignIn: await store.isAllowed(user.id, connection),
+              twoStep: 'not-required',
+            },
+            now,
+          );
+          expect(result.decision.kind).toBe('session');
+          expect(await store.save(result.flow, locked.version)).toBe(true);
+          await openSession.execute({
+            userId: user.id,
+            persistent: true,
+            client,
+            newDeviceNotice: null,
+            authentication: null,
+          });
+          if (rollback) throw new Error('Rollback receipt and session.');
+          return true;
+        });
+
+      const countSessions = async (): Promise<number | undefined> => {
+        const [result] = await systemQuery<{ count: number }>(
+          'select count(*)::int as count from sessions where user_id = $1',
+          [user.id],
+        );
+        return result?.count;
+      };
+      await expect(redeem(true)).rejects.toThrow('Rollback receipt and session.');
+      await expect(countSessions()).resolves.toBe(0);
+      expect((await Promise.all([redeem(false), redeem(false)])).sort()).toEqual([false, true]);
+      await expect(countSessions()).resolves.toBe(1);
+    });
+
     it('rolls back the account, its event and the session it opened when the work fails', async () => {
       const unitOfWork = new SystemAccountsUnitOfWork(
         app.get(SystemTransactionRunner),

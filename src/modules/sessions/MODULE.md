@@ -119,6 +119,19 @@ another service, without a foreign key.
 the session version, the account, the selected organization and membership, and the issuance,
 expiry and redemption times. Deleting a session also deletes its tickets.
 
+Migration 0009 adds the source organization and exact membership
+generation of a SAML session. These nullable columns stay fixed when a user chooses another
+organization. Introspection and ticket redemption recheck the original membership even when the
+session acts elsewhere. Existing sessions do not have reliable sign-in provenance and keep null
+bindings until they expire. SAML receipts or challenges created before membership binding need a
+fresh sign-in. Roll out the expanded database before this binary and keep the membership authority
+configured whenever this binary serves SAML, scoped session changes, or ticket redemption.
+To retire older sessions immediately, revoke the existing sessions of accounts with SAML links,
+including revoked links. This also ends their sessions opened through other methods because
+pre-migration records cannot be classified reliably. Disable SAML before rolling back to a binary
+that ignores the source membership. A fresh sign-in also replaces any SAML MFA challenge the old
+binary cannot read.
+
 ## API
 
 From `openapi/internal/identity-service.yaml` of the installed `@cadenway/contracts`; issuer
@@ -126,7 +139,7 @@ From `openapi/internal/identity-service.yaml` of the installed `@cadenway/contra
 
 | Route                                                   | Actor    | Success                     | Refusals                                                        |
 | ------------------------------------------------------- | -------- | --------------------------- | --------------------------------------------------------------- |
-| `POST /internal/v1/tokens/introspect`                   | `system` | 200, `active` true or false | 400                                                             |
+| `POST /internal/v1/tokens/introspect`                   | `system` | 200, `active` true or false | 400, 503 if the configured membership authority is unavailable  |
 | `DELETE /internal/v1/sessions/{sessionId}`              | `user`   | 204                         | 400, 404 `session.not-found`                                    |
 | `PUT /internal/v1/sessions/{sessionId}/organization`    | `user`   | 200, organization and role  | 400, 404 `session.not-found`, 404 `organization.not-found`      |
 | `POST /internal/v1/sessions/{sessionId}/revoke-others`  | `user`   | 200, `revokedCount`         | 400, 404 `session.not-found`                                    |
@@ -186,9 +199,11 @@ passes in; never the token nor the `User-Agent`.
 ## Events consumed
 
 None directly. A `member.removed.v1` reaches the sessions through the copy of the memberships (the
-memberships module): the introspection answers no organization for a session whose membership was
-removed. The change of a role (`member.role-changed.v1`) reaches the policy decisions the same way:
-the role of the copy is the one each decision reads.
+memberships module). Organization selection requires a live proof that agrees with the copy.
+Introspection confirms the role and membership directly with Organization even if removal or role
+changes have yet to reach the copy. Bound SAML sessions also require proof of their source
+membership. An unavailable proof returns `503 organization.unavailable` and preserves the session
+and its local selection.
 
 The change of an authentication policy, the trust and the forgetting of a device emit nothing: the
 contract declares no event for them. `user.two-step-verification-changed.v1` belongs to the
@@ -205,11 +220,11 @@ accounts module.
   and answers `session.not-found`.
 - A malformed, unknown, expired, inactive or revoked token introspects as `active: false`; so
   does a personal API token, introspected by its own route.
-- A session acts on at most one organization, through a membership of its account in the copy of
-  the memberships. Choosing it needs that membership to be active (`organization.not-found`
-  otherwise, also for the few seconds before `member.joined.v1` arrives); choosing the current one
-  again answers 200 and leaves the session as it is; any other choice takes the next version of the
-  session; every choice becomes the last choice of the account.
+- A session acts on at most one organization. Choosing it requires the same active membership ID
+  and role in Organization's live proof and the local copy. A missing target membership or a
+  projection that has yet to catch up returns `organization.not-found`. Choosing the current
+  organization again answers 200 and leaves the session as it is. Any other choice takes the next
+  version of the session. Every successful choice becomes the last choice of the account.
 - The introspection answers the organization and the role of the membership the session chose
   while that very membership is active, `null` for both otherwise: a removal ends the organization
   of the member's sessions there for good, and a person invited again chooses it again. A session
@@ -267,7 +282,10 @@ organization locks the session, reads the copy of the memberships, and writes th
 last choice together with the outbox row when the session changes
 (`tests/organization-context.int-spec.ts` proves the rollback). The
 introspection writes the last activity only when it moved by a minute, without a lock: a concurrent
-later write wins; it reads the copy of the memberships in the same transaction.
+later write wins. With a live authority, the HTTP lookup happens between local transactions.
+The second transaction reloads the session, validates it, and applies the local MFA policy to the
+proven role. A concurrent change of selection withholds the organization for that response and
+the next introspection starts from the new selection.
 
 The operations of the accounts module (`CheckSessionAuthentication`, `AuthenticateSession`,
 `EndRecentAuthentication`, `RevokeUserSessions`, `CountOpenSessions`, `EraseUserSessions`) join the

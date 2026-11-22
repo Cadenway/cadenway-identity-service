@@ -20,8 +20,10 @@ import type { IntrospectTokenOutput } from './introspect-token.output.js';
  * token answers `active: false`, never an error. An active answer counts as activity, recorded at
  * most once a minute; calling twice has the effect of calling once.
  *
- * The answer carries the current organization of the session and the role of the account there,
- * from the copy of the memberships, read in the same system transaction: `null` for both when the
+ * The answer carries the current organization of the session and the role of the account there.
+ * A configured Organization authority is checked outside the transaction. A rollout without
+ * that authority reads the copy of the memberships in the system transaction. The answer is
+ * `null` for both when the
  * session has none, or when the membership it acts through is no longer active (a removal), as
  * `ActiveToken.organizationId` of the contract says. A session holds every scope (decision 7).
  *
@@ -75,6 +77,9 @@ export class IntrospectToken {
    * @readonly
    */
   private readonly clock: Clock;
+
+  /** The live authority, configured independently of the projection used for selection. */
+  private readonly authority: Pick<ActiveMemberships, 'find'> | null;
   // #endregion
 
   // #region Constructor
@@ -88,6 +93,7 @@ export class IntrospectToken {
    * @param {SessionTokens} tokens - Hashes the presented token.
    * @param {ActiveMemberships} memberships - The copy of the memberships.
    * @param {Clock} clock - The time of the request.
+   * @param {Pick<ActiveMemberships, 'find'> | null} authority - The live membership authority.
    * @constructor
    */
   public constructor(
@@ -95,11 +101,13 @@ export class IntrospectToken {
     tokens: SessionTokens,
     memberships: ActiveMemberships,
     clock: Clock,
+    authority: Pick<ActiveMemberships, 'find'> | null = null,
   ) {
     this.unitOfWork = unitOfWork;
     this.tokens = tokens;
     this.memberships = memberships;
     this.clock = clock;
+    this.authority = authority;
   }
   // #endregion
 
@@ -118,38 +126,99 @@ export class IntrospectToken {
     if (tokenHash === null) {
       return { active: false };
     }
-    const now: Date = this.clock.now();
-    return this.unitOfWork.run(async (store: SessionsStore): Promise<IntrospectTokenOutput> => {
-      const session: Session | null = await store.sessions.findByTokenHash(tokenHash);
-      if (!session?.isActiveAt(now)) {
+    const authority = this.authority;
+    if (authority === null) {
+      return this.unitOfWork.run(async (store): Promise<IntrospectTokenOutput> => {
+        const session = await store.sessions.findByTokenHash(tokenHash);
+        const now = this.clock.now();
+        if (!session?.isActiveAt(now)) {
+          return { active: false };
+        }
+        if (session.snapshot.samlMembership != null) {
+          return { active: false };
+        }
+        const membership =
+          session.organizationId === null
+            ? null
+            : await this.memberships.find(session.organizationId, session.userId);
+        return this.answer(store, session, now, membership);
+      });
+    }
+
+    const selected = await this.unitOfWork.run((store) =>
+      store.sessions.findByTokenHash(tokenHash),
+    );
+    if (!selected?.isActiveAt(this.clock.now())) {
+      return { active: false };
+    }
+    const membership =
+      selected.organizationId === null
+        ? null
+        : await authority.find(selected.organizationId, selected.userId);
+    const source = selected.snapshot.samlMembership ?? null;
+    if (source !== null) {
+      const sourceMembership =
+        source.organizationId === selected.organizationId
+          ? membership
+          : await authority.find(source.organizationId, selected.userId);
+      if (sourceMembership?.memberId !== source.memberId) {
         return { active: false };
       }
-      const active: Session = session.recordActivity(now);
-      if (active !== session) {
-        await store.sessions.recordActivity(active);
+    }
+
+    return this.unitOfWork.run(async (store): Promise<IntrospectTokenOutput> => {
+      const current = await store.sessions.findByTokenHash(tokenHash);
+      const now = this.clock.now();
+      if (!current?.isActiveAt(now) || current.id !== selected.id) {
+        return { active: false };
       }
-      const membership: ActiveMembership | null =
-        active.organizationId === null
-          ? null
-          : await this.memberships.find(active.organizationId, active.userId);
-      const acting: ActiveMembership | null =
-        membership !== null && active.isActingThrough(membership.memberId) ? membership : null;
-      const withheld: boolean =
-        acting !== null &&
-        (await isOrganizationWithheld(store, acting.organizationId, active.userId, acting.role));
-      const current: ActiveMembership | null = withheld ? null : acting;
-      return {
-        active: true,
-        tokenType: 'session',
-        sessionId: active.id,
-        userId: active.userId,
-        organizationId: current?.organizationId ?? null,
-        role: current?.role ?? null,
-        scopes: [...SESSION_SCOPES],
-        expiresAt: active.snapshot.expiresAt,
-        withheldOrganizationId: withheld && acting !== null ? acting.organizationId : null,
-      };
+      const currentSource = current.snapshot.samlMembership ?? null;
+      if (
+        currentSource?.organizationId !== source?.organizationId ||
+        currentSource?.memberId !== source?.memberId
+      ) {
+        return { active: false };
+      }
+      const sameSelection =
+        current.userId === selected.userId &&
+        current.organizationId === selected.organizationId &&
+        current.snapshot.memberId === selected.snapshot.memberId;
+      return this.answer(store, current, now, sameSelection ? membership : null);
     });
+  }
+
+  /** Records activity and applies the local authentication policy to the proven role. */
+  private async answer(
+    store: SessionsStore,
+    session: Session,
+    now: Date,
+    membership: ActiveMembership | null,
+  ): Promise<IntrospectTokenOutput> {
+    const active = session.recordActivity(now);
+    if (active !== session) {
+      await store.sessions.recordActivity(active);
+    }
+    const acting =
+      membership !== null &&
+      active.organizationId === membership.organizationId &&
+      active.isActingThrough(membership.memberId)
+        ? membership
+        : null;
+    const withheld =
+      acting !== null &&
+      (await isOrganizationWithheld(store, acting.organizationId, active.userId, acting.role));
+    const current = withheld ? null : acting;
+    return {
+      active: true,
+      tokenType: 'session',
+      sessionId: active.id,
+      userId: active.userId,
+      organizationId: current?.organizationId ?? null,
+      role: current?.role ?? null,
+      scopes: [...SESSION_SCOPES],
+      expiresAt: active.snapshot.expiresAt,
+      withheldOrganizationId: withheld ? acting.organizationId : null,
+    };
   }
   // #endregion
 }

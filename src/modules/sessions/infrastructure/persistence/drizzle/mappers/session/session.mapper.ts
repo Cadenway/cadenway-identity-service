@@ -34,6 +34,10 @@ export function toSession(row: SessionRow): Session {
     revokedAt: row.revokedAt,
     organizationId: row.organizationId,
     memberId: row.memberId,
+    samlMembership:
+      row.samlOrganizationId === null || row.samlMemberId === null
+        ? null
+        : { organizationId: row.samlOrganizationId, memberId: row.samlMemberId },
     version: row.version,
     signedInAt: row.signedInAt,
     authenticatedAt: row.authenticatedAt,

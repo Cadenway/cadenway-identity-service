@@ -16,3 +16,8 @@ allowBuilds:
 minimumReleaseAge: 0
 # Refuse a package version with weaker trust evidence than an earlier release.
 trustPolicy: no-downgrade
+overrides:
+  # Keep the legacy Drizzle loader and test archive helpers on fixed dependencies.
+  '@esbuild-kit/core-utils@3.3.2>esbuild': 0.28.2
+  'archiver-utils@5.0.2>glob': 14.0.6
+  'minimatch@>=9.0.0 <11.0.1': 11.0.9

@@ -1,7 +1,9 @@
 import type { User } from '../../../domain/aggregates/account/user.aggregate.js';
 import { SignInChallenge } from '../../../domain/aggregates/two-step/sign-in-challenge.aggregate.js';
 import type { TwoStepVerification } from '../../../domain/aggregates/two-step/two-step-verification.aggregate.js';
+import type { FederatedChallengeBinding } from '../../../domain/value-objects/federated-sign-in/federated-challenge-binding.value-object.js';
 import type { SessionClient } from '../../models/sessions/session-client.model.js';
+import type { SamlMembership } from '../../models/sessions/saml-membership.model.js';
 import type { IssuedChallengeToken } from '../../models/two-step/issued-challenge-token.model.js';
 import type { AccountsStore } from '../../models/transactions/accounts-store.model.js';
 import type { DeviceReader } from '../../ports/outbound/device/accounts/device-reader.port.js';
@@ -16,16 +18,16 @@ import { toSignInChallengeView } from './sign-in-challenge-view.service.js';
  * Function completeFirstFactor
  *
  * @description
- * What a right password or e-mail code of a verified account does, in the transaction of the
- * sign-in ("Two-step challenge" of the internal contract, decision 7 of P2c):
+ * Completes the first factor of a verified account in the sign-in transaction:
  *
- * - without two-step verification, the sign-in completes, its session opening a window of recent
- *   authentication by password;
+ * - without two-step verification, the sign-in completes with the recent-authentication method
+ *   of the first factor, if any;
  * - with it, on a device the account trusts (`trustedDeviceToken`), the sign-in completes without
  *   a challenge and opens no window;
  * - otherwise a new challenge of the account replaces the previous one, valid 10 minutes, keeping
  *   `rememberMe` for the session its answer opens; no session is opened, no deletion cancelled, no
- *   device counted. The token leaves once, in the `202`.
+ *   device counted. For federation, the challenge retains the authority to check again when the
+ *   second factor is answered. The token leaves once, in the `202`.
  *
  * A token unknown, expired, forgotten, of another account or malformed is ignored: the sign-in
  * answers its challenge, and tells nothing about the token.
@@ -50,6 +52,9 @@ export async function completeFirstFactor(
     readonly persistent: boolean;
     readonly client: SessionClient;
     readonly trustedDeviceToken: string | undefined;
+    readonly authentication?: 'password' | null;
+    readonly federatedBinding?: FederatedChallengeBinding;
+    readonly samlMembership?: SamlMembership | null;
   },
   now: Date,
 ): Promise<SignInOutcome> {
@@ -64,7 +69,9 @@ export async function completeFirstFactor(
         user,
         request.persistent,
         request.client,
-        'password',
+        request.authentication === undefined ? 'password' : request.authentication,
+        null,
+        request.samlMembership ?? null,
       ),
     };
   }
@@ -82,12 +89,20 @@ export async function completeFirstFactor(
         request.persistent,
         request.client,
         null,
+        null,
+        request.samlMembership ?? null,
       ),
     };
   }
   const issued: IssuedChallengeToken = ports.challengeTokens.issue();
   const challenge: SignInChallenge = await store.challenges.replace(
-    SignInChallenge.issue(user.id, issued.tokenHash, request.persistent, now),
+    SignInChallenge.issue(
+      user.id,
+      issued.tokenHash,
+      request.persistent,
+      now,
+      request.federatedBinding,
+    ),
   );
   return {
     kind: 'challenge',

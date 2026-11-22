@@ -14,6 +14,8 @@
 # INTERNAL_TOKEN_TRUSTED_ISSUERS lists who may call this service: the API gateway and the realtime
 # gateway (ticket redemption). The folded scalar gives the service one line of JSON. Stage the
 # optional Notification public keys in Identity before enabling the signed Notification caller.
+# Organization uses its own key for the verified-address lookup. Identity signs current
+# membership requests with its separate key; Organization must trust that issuer before rollout.
 #
 # MIGRATION_DATABASE_URL is deliberately absent: the GitOps agent of cadenway-ops hands the
 # migrator's URL to the one-off migration container only (docs/database.md there), so the running
@@ -33,6 +35,9 @@ services:
         {"api-gateway": [${API_GATEWAY_INTERNAL_TOKEN_PUBLIC_JWKS}],
         "realtime-gateway": [${REALTIME_GATEWAY_INTERNAL_TOKEN_PUBLIC_JWKS}]}
       NOTIFICATION_SERVICE_INTERNAL_TOKEN_PUBLIC_JWKS: ${NOTIFICATION_SERVICE_INTERNAL_TOKEN_PUBLIC_JWKS:-}
+      ORGANIZATION_SERVICE_INTERNAL_TOKEN_PUBLIC_JWKS: ${ORGANIZATION_SERVICE_INTERNAL_TOKEN_PUBLIC_JWKS:-}
+      ORGANIZATION_SERVICE_URL: ${ORGANIZATION_SERVICE_URL:?required for membership authorization}
+      IDENTITY_SERVICE_INTERNAL_TOKEN_PRIVATE_JWK: ${IDENTITY_SERVICE_INTERNAL_TOKEN_PRIVATE_JWK:?required for membership authorization}
       PASSWORD_PEPPER: ${IDENTITY_PASSWORD_PEPPER}
       AUTHENTICATION_COUNTER_RETENTION_ENABLED: ${IDENTITY_AUTHENTICATION_COUNTER_RETENTION_ENABLED:-false}
       WEBAUTHN_RP_ID: app.${DOMAIN}

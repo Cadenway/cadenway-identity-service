@@ -157,6 +157,26 @@ describe('Session', () => {
     expect(chosen.revoke(at(2 * HOUR)).snapshot.version).toBe(3);
   });
 
+  it('keeps the SAML membership separate from the context chosen by the account', () => {
+    const existing = opened(true);
+    const start = Session.start(
+      existing.userId,
+      true,
+      SIGNED_IN_AT,
+      null,
+      null,
+      ATELIER_NORD_MEMBERSHIP,
+    );
+    const session = Session.restore({ ...existing.snapshot, ...start });
+    const selected = { organizationId: 'studio-sud', memberId: 'studio-sud-member' };
+    const switched = session.chooseOrganization(selected, at(HOUR));
+
+    expect(switched.snapshot).toMatchObject({
+      ...selected,
+      samlMembership: ATELIER_NORD_MEMBERSHIP,
+    });
+  });
+
   it('acts on its organization only through the membership it chose', () => {
     const chosen: Session = opened(false).chooseOrganization(ATELIER_NORD_MEMBERSHIP, at(HOUR));
 

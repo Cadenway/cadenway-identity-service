@@ -2,6 +2,7 @@ import type { FactoryProvider } from '@nestjs/common';
 
 import type { Clock } from '../../../../application/ports/outbound/clock/accounts/clock.port.js';
 import type { DeviceReader } from '../../../../application/ports/outbound/device/accounts/device-reader.port.js';
+import type { FederatedMembershipAuthority } from '../../../../application/ports/outbound/identity/memberships/federated-membership-authority.port.js';
 import type { SessionOpener } from '../../../../application/ports/outbound/identity/sessions/session-opener.port.js';
 import type { TrustedDevices } from '../../../../application/ports/outbound/identity/sessions/trusted-devices.port.js';
 import type { BackupCodeSecrets } from '../../../../application/ports/outbound/security/two-step/backup-code-secrets.port.js';
@@ -12,6 +13,7 @@ import { UNIT_OF_WORK } from '../../../tokens/accounts/accounts-unit-of-work.tok
 import { CLOCK } from '../../../tokens/accounts/clock.token.js';
 import { DEVICE_READER } from '../../../tokens/accounts/device-reader.token.js';
 import { SESSION_OPENER } from '../../../tokens/accounts/session-opener.token.js';
+import { FEDERATED_MEMBERSHIP_AUTHORITY } from '../../../tokens/federated-sign-in/federated-membership-authority.token.js';
 import { BACKUP_CODE_SECRETS } from '../../../tokens/two-step/backup-code-secrets.token.js';
 import { CHALLENGE_TOKENS } from '../../../tokens/two-step/challenge-tokens.token.js';
 import { TRUSTED_DEVICES } from '../../../tokens/two-step/trusted-devices.token.js';
@@ -35,6 +37,7 @@ export const answerChallengeWithBackupCodeProvider: FactoryProvider<AnswerChalle
       DEVICE_READER,
       TRUSTED_DEVICES,
       CLOCK,
+      FEDERATED_MEMBERSHIP_AUTHORITY,
     ],
     useFactory: (
       unitOfWork: AccountsUnitOfWork,
@@ -44,6 +47,7 @@ export const answerChallengeWithBackupCodeProvider: FactoryProvider<AnswerChalle
       devices: DeviceReader,
       trustedDevices: TrustedDevices,
       clock: Clock,
+      memberships: FederatedMembershipAuthority | null,
     ): AnswerChallengeWithBackupCode =>
       new AnswerChallengeWithBackupCode(
         unitOfWork,
@@ -53,5 +57,6 @@ export const answerChallengeWithBackupCodeProvider: FactoryProvider<AnswerChalle
         devices,
         trustedDevices,
         clock,
+        memberships,
       ),
   };

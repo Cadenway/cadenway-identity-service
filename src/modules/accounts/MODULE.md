@@ -57,23 +57,26 @@ use case that calls it.
 
 ## Owned tables
 
-| Table                        | Key                                                   | Organization scoping                            |
-| ---------------------------- | ----------------------------------------------------- | ----------------------------------------------- |
-| `users`                      | `id`, unique `email`                                  | None: an account belongs to a person, no policy |
-| `avatar_uploads`             | `id`, unique owner and idempotency digest             | None: follows its account, no policy            |
-| `password_credentials`       | `user_id` (cascade)                                   | None: follows its account, no policy            |
-| `one_time_codes`             | `id`; one current per user and purpose                | None: follows its account, no policy            |
-| `password_reset_links`       | `id`, unique `token_hash`; one current                | None: follows its account (cascade), no policy  |
-| `email_changes`              | `user_id` (cascade)                                   | None: follows its account, no policy            |
-| `code_requests`              | `email`                                               | None: per address, account or not, no policy    |
-| `password_reset_requests`    | `email`                                               | None: per address, account or not, no policy    |
-| `sign_in_attempts`           | `email`                                               | None: per address, account or not, no policy    |
-| `two_step_verifications`     | `user_id` (cascade), unique `webauthn_user_handle`    | None: follows its account, no policy            |
-| `backup_codes`               | `id`, unique (`user_id`, `code_hash`) (cascade)       | None: follows its account, no policy            |
-| `security_keys`              | `id`, unique `credential_id` (cascade)                | None: follows its account, no policy            |
-| `authenticator_app_setups`   | `user_id` (cascade)                                   | None: follows its account, no policy            |
-| `security_key_registrations` | `user_id` (cascade)                                   | None: follows its account, no policy            |
-| `sign_in_challenges`         | `id`, unique `user_id`, unique `token_hash` (cascade) | None: follows its account, no policy            |
+| Table                        | Key                                                   | Organization scoping                             |
+| ---------------------------- | ----------------------------------------------------- | ------------------------------------------------ |
+| `users`                      | `id`, unique `email`                                  | None: an account belongs to a person, no policy  |
+| `avatar_uploads`             | `id`, unique owner and idempotency digest             | None: follows its account, no policy             |
+| `password_credentials`       | `user_id` (cascade)                                   | None: follows its account, no policy             |
+| `one_time_codes`             | `id`; one current per user and purpose                | None: follows its account, no policy             |
+| `password_reset_links`       | `id`, unique `token_hash`; one current                | None: follows its account (cascade), no policy   |
+| `email_changes`              | `user_id` (cascade)                                   | None: follows its account, no policy             |
+| `code_requests`              | `email`                                               | None: per address, account or not, no policy     |
+| `password_reset_requests`    | `email`                                               | None: per address, account or not, no policy     |
+| `sign_in_attempts`           | `email`                                               | None: per address, account or not, no policy     |
+| `two_step_verifications`     | `user_id` (cascade), unique `webauthn_user_handle`    | None: follows its account, no policy             |
+| `backup_codes`               | `id`, unique (`user_id`, `code_hash`) (cascade)       | None: follows its account, no policy             |
+| `security_keys`              | `id`, unique `credential_id` (cascade)                | None: follows its account, no policy             |
+| `authenticator_app_setups`   | `user_id` (cascade)                                   | None: follows its account, no policy             |
+| `security_key_registrations` | `user_id` (cascade)                                   | None: follows its account, no policy             |
+| `sign_in_challenges`         | `id`, unique `user_id`, unique `token_hash` (cascade) | None: follows its account, no policy             |
+| `federated_account_links`    | global OAuth/OIDC identity digest, account cascade    | None: follows its account, no policy             |
+| `federated_sign_in_flows`    | `id`, unique state and optional receipt digest        | None: follows a browser-bound sign-in, no policy |
+| `saml_account_links`         | unique organization, connection and identity digest   | Forced organization policy, account cascade      |
 
 Created by `migrations/0001_accounts_and_sessions.sql`; `users.sign_up_count` by
 `migrations/0002_sign_up_count.sql`, which backfills it from the version; `users.display_name`,
@@ -103,9 +106,44 @@ code by account and purpose, or its link by the hash of its token, and that a us
 account of its verified internal token. The application role `identity_app` reads and writes their
 rows and runs no DDL on them.
 
-The `account.deletion-sweep`, `account.delete` and `account.avatar-upload-expiry` queues live in
-the `pgboss` schema of `@cadenway/nest-jobs`, provisioned by `src/migrate.ts`. The avatar sweep
-has no payload.
+Migration 0009 creates the two global federated sign-in tables. The link
+pins a verified provider identity to a local account. The flow stores state, browser and callback
+receipt digests, a version and an indexed retention deadline. The repositories require a system
+transaction and lock the flow before advancing its version or redeeming a receipt. A failed
+transaction leaves the receipt available for its legitimate browser to retry.
+
+The same migration adds isolated SAML links. Identity uses the
+organization and connection of the claimed flow for each link lookup and recheck in its existing
+system transaction. The same issuer and subject can identify different accounts in separate
+connections. The new table has a forced organization policy and leaves the global social
+identities and their digests unchanged. The application rejects unscoped SAML links and receipts
+from the earlier schema, whose trusted connection cannot be recovered. A replacement trust
+connection gets a new ID even if it uses the same issuer. Rollback retains the table. Disable
+SAML before reverting to an image without scoped links.
+
+The SAML replay table records accepted assertion digests until the end of
+their validity window. It uses forced RLS and scopes each assertion to the configured organization
+and connection. A provisioned SAML connection is selected by its verified work domain and then
+bound to the browser flow. The callback checks the original request, the pinned signing authority
+and the current account link and membership before issuing a receipt.
+
+Migration 0009 adds the optional connection and link reference to pending MFA challenges and
+indexes assertion expiry for global cleanup. Every second-factor response rechecks the exact link
+and current authority before issuing a session.
+
+The social provider port exchanges codes after the original provider, state and browser binding
+have been claimed. Google, Microsoft and GitLab use fixed HTTPS authority endpoints and verify the
+ID token signature, issuer, audience, expiration, nonce and subject. Microsoft configuration uses a
+concrete issuer with its corresponding signing keys. GitHub uses an authenticated request to its
+fixed user endpoint. Both adapters use S256 and the exact configured callback, and return only the
+provider identity required to look up an existing link. The callback orchestration owns claiming
+state and calls the provider outside the database transaction.
+
+The deletion, avatar expiry, federation expiry and authentication counter queues live in the
+`pgboss` schema of `@cadenway/nest-jobs`, provisioned by `src/migrate.ts`. The avatar, federation
+and authentication counter sweeps have no payload.
+Every UTC minute, the federation sweep handles up to four transactions of at most 250 expired
+flows and 250 eligible assertion markers each, skipping rows locked by other transactions.
 
 The `account.authentication-counter-sweep` removes counters that have been inactive for at least
 24 hours, including addresses without an account. It preserves active password lockouts and skips
@@ -121,6 +159,12 @@ concurrently before the migration and verify each index is valid and matches its
 
 From `openapi/internal/identity-service.yaml` of the installed `@cadenway/contracts`. The account
 routes below accept `api-gateway`.
+
+Federated sign-in uses the anonymous Gateway actor with no organization claim. The four endpoints
+are `POST /internal/v1/auth/sign-in/federated/start`, `/oauth/callback`, `/saml/callback` and
+`/finish` under the same prefix. Start returns a browser binding and authorization URL. Callbacks
+return a one-use receipt. Finish rechecks the configured authority, account link and membership
+where applicable, then uses the ordinary session and two-step policies.
 
 | Route                                                           | Actor       | Success                      | Refusals                                                                                                                                                                                                            |
 | --------------------------------------------------------------- | ----------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -171,6 +215,10 @@ the verified current email address, language, IANA time zone and account version
 account row. A missing, unverified or scheduled-for-deletion account returns `404 user.not-found`.
 An account state the service cannot read returns `503 upstream.unavailable`. All responses carry
 `Cache-Control: no-store`. The read appends no event.
+
+Organization calls `GET /internal/v1/users/{userId}/verified-email` to resolve addressed
+invitations. Only its unscoped system token is accepted. This read applies the same account
+eligibility check and exposes just the current verified email, with the same cache and error policy.
 
 The avatar routes are under `/internal/v1/users/{userId}`. The API gateway reserves an upload
 with `POST /avatar/uploads`, reads its state with `GET /avatar/uploads/{uploadId}`, and sets or

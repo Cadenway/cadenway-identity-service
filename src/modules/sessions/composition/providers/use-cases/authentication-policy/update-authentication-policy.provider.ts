@@ -1,5 +1,6 @@
 import type { FactoryProvider } from '@nestjs/common';
 
+import { FindAuthoritativeMembership } from '../../../../../memberships/public/membership/find-authoritative-membership.js';
 import type { OrganizationMembers } from '../../../../application/ports/outbound/memberships/authentication-policy/organization-members.port.js';
 import type { Clock } from '../../../../application/ports/outbound/time/session/clock.port.js';
 import type { SessionsUnitOfWork } from '../../../../application/ports/outbound/transactions/session/sessions-unit-of-work.port.js';
@@ -18,10 +19,19 @@ import { TENANT_UNIT_OF_WORK } from '../../../tokens/session/tenant-unit-of-work
  */
 export const updateAuthenticationPolicyProvider: FactoryProvider<UpdateAuthenticationPolicy> = {
   provide: UpdateAuthenticationPolicy,
-  inject: [TENANT_UNIT_OF_WORK, ORGANIZATION_MEMBERS, CLOCK],
+  inject: [TENANT_UNIT_OF_WORK, ORGANIZATION_MEMBERS, CLOCK, FindAuthoritativeMembership],
   useFactory: (
     unitOfWork: SessionsUnitOfWork,
     members: OrganizationMembers,
     clock: Clock,
-  ): UpdateAuthenticationPolicy => new UpdateAuthenticationPolicy(unitOfWork, members, clock),
+    authority: FindAuthoritativeMembership | null,
+  ): UpdateAuthenticationPolicy =>
+    new UpdateAuthenticationPolicy(
+      unitOfWork,
+      members,
+      clock,
+      authority === null
+        ? null
+        : { find: (organizationId, userId) => authority.execute({ organizationId, userId }) },
+    ),
 };

@@ -6,6 +6,7 @@ import {
   SESSION_ORGANIZATION_CHANGED_V1,
   sessionOrganizationChangedV1Schema,
 } from '@cadenway/contracts/events/identity-service';
+import type { SearchMembership } from '@cadenway/contracts/types/internal/organization-service';
 import {
   createApplication,
   encodeCursor,
@@ -30,6 +31,7 @@ import { appConfigSchema } from '../src/config/app-config.js';
 import { FindActiveMembership } from '../src/modules/memberships/public/membership/find-active-membership.js';
 import { SystemSessionsUnitOfWork } from '../src/modules/sessions/infrastructure/persistence/drizzle/transactions/session/system-sessions.unit-of-work.js';
 import { OpenSession } from '../src/modules/sessions/public/session/open-session.js';
+import { startOrganizationMembershipAuthority } from './support/organization-membership.fixture.js';
 
 // The organization context of P2b on the service as main.ts assembles it, against a disposable
 // PostgreSQL and NATS started from compose.dev.yaml (see service-wiring.int-spec.ts): the copy of
@@ -218,6 +220,8 @@ describe('identity-service organization context', () => {
   let app: NestExpressApplication;
   let gateway: InternalTokenSigner;
   let migrator: pg.Pool;
+  let membershipAuthority:
+    Awaited<ReturnType<typeof startOrganizationMembershipAuthority>> | undefined;
   const early: { inesJoined: string } = { inesJoined: '' };
 
   /** The claims of the introspections: the gateway acting as itself. */
@@ -465,6 +469,18 @@ describe('identity-service organization context', () => {
     vi.stubEnv('WEBAUTHN_RP_ID', 'app.cadenway.localhost');
     vi.stubEnv('WEBAUTHN_ORIGINS', 'http://app.cadenway.localhost');
 
+    membershipAuthority = await startOrganizationMembershipAuthority(
+      async (organizationId, userId) => {
+        const [membership] = await systemQuery<SearchMembership>(
+          `select id as "memberId", role, version from memberships
+          where organization_id = $1 and user_id = $2 and removed_at is null`,
+          [organizationId, userId],
+        );
+        return membership ?? null;
+      },
+    );
+    vi.stubEnv('ORGANIZATION_SERVICE_URL', membershipAuthority.origin);
+    vi.stubEnv('IDENTITY_SERVICE_INTERNAL_TOKEN_PRIVATE_JWK', membershipAuthority.privateJwk);
     const config = loadConfig(appConfigSchema);
     app = await createApplication(AppModule, {
       service: 'identity-service',
@@ -494,6 +510,7 @@ describe('identity-service organization context', () => {
       await app.close();
       await migrator.end();
     } finally {
+      await membershipAuthority?.close();
       vi.unstubAllEnvs();
       compose('down', '--volumes', '--remove-orphans');
     }

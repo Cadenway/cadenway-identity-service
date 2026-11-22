@@ -1008,6 +1008,7 @@ export class InMemoryAccounts implements AccountsUnitOfWork {
       securityKeys,
       pendingTwoStep,
       challenges,
+      mayFinishFederatedChallenge: () => Promise.resolve(false),
     };
   }
   // #endregion

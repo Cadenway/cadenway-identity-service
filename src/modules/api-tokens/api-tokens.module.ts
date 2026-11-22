@@ -5,6 +5,7 @@ import type { FactoryProvider } from '@nestjs/common';
 import { SystemClock } from '../../infrastructure/system-clock.js';
 import { MembershipsModule } from '../memberships/memberships.module.js';
 import { FindActiveMembership } from '../memberships/public/membership/find-active-membership.js';
+import { FindAuthoritativeMembership } from '../memberships/public/membership/find-authoritative-membership.js';
 import { CheckOrganizationAccess } from '../sessions/public/authentication-policy/check-organization-access.js';
 import type { CheckOrganizationAccessOutput } from '../sessions/public/authentication-policy/check-organization-access.js';
 import { SessionsModule } from '../sessions/sessions.module.js';
@@ -179,15 +180,32 @@ const providers: FactoryProvider[] = [
   },
   {
     provide: IntrospectApiToken,
-    inject: [SYSTEM_UNIT_OF_WORK, SECRETS, ACTIVE_MEMBERSHIPS, CLOCK, ORGANIZATION_ACCESS],
+    inject: [
+      SYSTEM_UNIT_OF_WORK,
+      SECRETS,
+      ACTIVE_MEMBERSHIPS,
+      CLOCK,
+      ORGANIZATION_ACCESS,
+      FindAuthoritativeMembership,
+    ],
     useFactory: (
       unitOfWork: ApiTokensUnitOfWork,
       secrets: ApiTokenSecrets,
       memberships: ActiveMemberships,
       clock: Clock,
       access: OrganizationAccess,
+      authority: FindAuthoritativeMembership | null,
     ): IntrospectApiToken =>
-      new IntrospectApiToken(unitOfWork, secrets, memberships, clock, access),
+      new IntrospectApiToken(
+        unitOfWork,
+        secrets,
+        memberships,
+        clock,
+        access,
+        authority === null
+          ? null
+          : { find: (organizationId, userId) => authority.execute({ organizationId, userId }) },
+      ),
   },
 ];
 

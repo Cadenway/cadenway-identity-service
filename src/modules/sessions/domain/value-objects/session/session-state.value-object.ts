@@ -1,3 +1,5 @@
+import type { SessionMembership } from './session-membership.value-object.js';
+
 /**
  * Interface SessionState
  *
@@ -93,6 +95,9 @@ export interface SessionState {
    * @readonly
    */
   readonly memberId: string | null;
+
+  /** Membership that vouched for a SAML sign-in, independent of the current organization. */
+  readonly samlMembership?: SessionMembership | null;
 
   /**
    * Property version

@@ -6,6 +6,7 @@ import { RealtimeOrganizationNotSelected } from '../../../../models/realtime-tic
 import { RealtimeTicketNotFound } from '../../../../models/realtime-ticket/realtime-ticket-not-found.model.js';
 import { OrganizationMfaRequired } from '../../../../models/session/organization-mfa-required.model.js';
 import { SessionNotFound } from '../../../../models/session/session-not-found.model.js';
+import type { ActiveMembership } from '../../../../models/session/active-membership.model.js';
 import type { RealtimeTicketAccessPort } from '../../../../ports/outbound/memberships/realtime-ticket/realtime-ticket-access.port.js';
 import type { RealtimeTicketUnitOfWork } from '../../../../ports/outbound/transactions/realtime-ticket/realtime-ticket-unit-of-work.port.js';
 import { RedeemRealtimeTicket } from '../redeem-realtime-ticket/redeem-realtime-ticket.use-case.js';
@@ -69,11 +70,13 @@ function fixture() {
     hashOf: vi.fn((presented: string) => (presented === token ? tokenHash : null)),
   };
   const clock = { now: vi.fn(() => now) };
+  const authority = { find: vi.fn(() => Promise.resolve<ActiveMembership | null>(membership)) };
   return {
     access,
+    authority,
     clock,
     issue: new IssueRealtimeTicket(work, access, tokens, clock),
-    redeem: new RedeemRealtimeTicket(work, access, tokens, clock),
+    redeem: new RedeemRealtimeTicket(work, access, tokens, clock, authority),
     order,
     tickets,
     tokens,
@@ -137,6 +140,85 @@ describe('realtime ticket commands', () => {
       }),
     ).rejects.toThrow(OrganizationMfaRequired);
     expect(f.tickets.insert).not.toHaveBeenCalled();
+  });
+
+  it('refuses a removed member before consuming a ticket even while the projection is active', async () => {
+    const f = fixture();
+    await f.issue.execute({
+      actorUserId: userId,
+      organizationId: membership.organizationId,
+      sessionId,
+    });
+    f.authority.find.mockResolvedValue(null);
+
+    await expect(f.redeem.execute({ token })).rejects.toThrow(RealtimeTicketNotFound);
+    expect(f.tickets.consume).not.toHaveBeenCalled();
+  });
+
+  it('refuses a ticket when the authoritative role differs from the projected policy role', async () => {
+    const f = fixture();
+    await f.issue.execute({
+      actorUserId: userId,
+      organizationId: membership.organizationId,
+      sessionId,
+    });
+    f.authority.find.mockResolvedValue({ ...membership, role: 'member' });
+
+    await expect(f.redeem.execute({ token })).rejects.toThrow(RealtimeTicketNotFound);
+    expect(f.tickets.consume).not.toHaveBeenCalled();
+  });
+
+  it('refuses a ticket after removal from the SAML organization that opened the session', async () => {
+    const f = fixture();
+    f.setSession(
+      Session.restore({
+        ...Session.start(userId, false, now, membership),
+        id: sessionId,
+        revokedAt: null,
+        inactivityTimeoutMinutes: Session.DEFAULT_INACTIVITY_TIMEOUT_MINUTES,
+        samlMembership: { organizationId: 'source-organization', memberId: 'source-member' },
+      }),
+    );
+    await f.issue.execute({
+      actorUserId: userId,
+      organizationId: membership.organizationId,
+      sessionId,
+    });
+    f.authority.find.mockResolvedValueOnce(membership).mockResolvedValueOnce(null);
+
+    await expect(f.redeem.execute({ token, verifiesSamlSource: true })).rejects.toThrow(
+      RealtimeTicketNotFound,
+    );
+    expect(f.tickets.consume).not.toHaveBeenCalled();
+  });
+
+  it('includes the proven SAML source when a ticket is redeemed', async () => {
+    const f = fixture();
+    f.setSession(
+      Session.restore({
+        ...Session.start(userId, false, now, membership),
+        id: sessionId,
+        revokedAt: null,
+        inactivityTimeoutMinutes: Session.DEFAULT_INACTIVITY_TIMEOUT_MINUTES,
+        samlMembership: { organizationId: 'source-organization', memberId: 'source-member' },
+      }),
+    );
+    await f.issue.execute({
+      actorUserId: userId,
+      organizationId: membership.organizationId,
+      sessionId,
+    });
+    f.authority.find.mockResolvedValueOnce(membership).mockResolvedValueOnce({
+      organizationId: 'source-organization',
+      memberId: 'source-member',
+      role: 'member',
+    });
+
+    await expect(f.redeem.execute({ token })).rejects.toThrow(RealtimeTicketNotFound);
+    expect(f.tickets.consume).not.toHaveBeenCalled();
+    await expect(f.redeem.execute({ token, verifiesSamlSource: true })).resolves.toMatchObject({
+      samlSourceMembership: { organizationId: 'source-organization', memberId: 'source-member' },
+    });
   });
 
   it('rechecks the clock after locks and refuses a ticket expired while waiting', async () => {

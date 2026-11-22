@@ -1,3 +1,5 @@
+import type { FederatedChallengeBinding } from '../../value-objects/federated-sign-in/federated-challenge-binding.value-object.js';
+
 /**
  * Interface SignInChallengeIssue
  *
@@ -49,5 +51,8 @@ export interface SignInChallengeIssue {
    * @readonly
    */
   readonly expiresAt: Date;
+
+  /** The first-factor authority to check again before a federated challenge can succeed. */
+  readonly federatedBinding: FederatedChallengeBinding | null;
   // #endregion
 }

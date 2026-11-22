@@ -9,5 +9,8 @@ export interface RedeemRealtimeTicketOutput {
   readonly memberId: string;
   readonly role: 'owner' | 'admin' | 'member' | 'guest';
   readonly sessionExpiresAt: Date;
+
+  /** Originating SAML membership whose revocation ends this session. */
+  readonly samlSourceMembership?: { readonly organizationId: string; readonly memberId: string };
   // #endregion
 }

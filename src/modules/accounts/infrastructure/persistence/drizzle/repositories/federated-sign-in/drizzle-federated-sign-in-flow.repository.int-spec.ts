@@ -1,0 +1,556 @@
+import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
+
+import { runWithOrganizationContext } from '@cadenway/nest-common';
+import { SystemTransactionRunner, TenantTransactionRunner } from '@cadenway/nest-common/database';
+import { inArray } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/node-postgres';
+import { migrate } from 'drizzle-orm/node-postgres/migrator';
+import pg from 'pg';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+
+import { FederatedSignInFlow } from '../../../../../domain/aggregates/federated-sign-in/federated-sign-in-flow.aggregate.js';
+import { SignInChallenge } from '../../../../../domain/aggregates/two-step/sign-in-challenge.aggregate.js';
+import { federatedSignInFlows } from '../../schemas/federated-sign-in/federated-sign-in-flow.schema.js';
+import { samlAccountLinks } from '../../schemas/federated-sign-in/saml-account-link.schema.js';
+import { samlAssertionReplays } from '../../schemas/federated-sign-in/saml-assertion-replay.schema.js';
+import { SystemExpiredFederationUnitOfWork } from '../../transactions/federated-sign-in/system-expired-federation.unit-of-work.js';
+import { SystemSocialFlowUnitOfWork } from '../../transactions/federated-sign-in/system-social-flow.unit-of-work.js';
+import { DrizzleSignInChallengeRepository } from '../two-step/drizzle-sign-in-challenge.repository.js';
+import { DrizzleFederatedAccountLinkRepository } from './drizzle-federated-account-link.repository.js';
+import { DrizzleFederatedSignInFlowRepository } from './drizzle-federated-sign-in-flow.repository.js';
+import { DrizzleSamlAssertionReplayGuard } from './drizzle-saml-assertion-replay-guard.repository.js';
+
+const composeFile = fileURLToPath(
+  new URL('../../../../../../../../compose.dev.yaml', import.meta.url),
+);
+const migrations = fileURLToPath(new URL('../../../../../../../../migrations', import.meta.url));
+const project = `identity-federated-persistence-${String(process.pid)}`;
+const organizationId = '01938f6e-6d1a-7c3e-9a51-2f0c4b8d7e10';
+const anotherOrganizationId = '01938f6e-0000-7000-8000-000000000072';
+const userId = '01938f6e-8a42-7d5b-b2c9-5e1f3a6d9c24';
+const anotherUserId = '01938f6e-0000-7000-8000-000000000073';
+const flowId = '01938f6e-0000-7000-8000-000000000071';
+const stateHash = 'a'.repeat(64);
+const browserBindingHash = 'b'.repeat(64);
+const receiptHash = 'c'.repeat(64);
+const connection = { provider: 'google', issuer: 'https://issuer.example' } as const;
+const identity = { ...connection, subject: 'subject-1' } as const;
+const saml = {
+  provider: 'saml',
+  issuer: 'https://sso.example.test',
+  subject: 'stable-subject',
+  organizationId,
+  connectionId: 'directory',
+} as const;
+const issuedAt = new Date('2026-11-21T12:00:00Z');
+const checkedAt = new Date('2026-11-21T12:01:00Z');
+
+function compose(...args: string[]): string {
+  return execFileSync(
+    'docker',
+    ['compose', '--project-name', project, '--file', composeFile, ...args],
+    {
+      encoding: 'utf8',
+      env: { ...process.env, DEV_POSTGRES_PORT: '0', DEV_NATS_PORT: '0' },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    },
+  );
+}
+
+describe('federated sign-in persistence', () => {
+  let pool: pg.Pool | undefined;
+  let runner: SystemTransactionRunner;
+  let tenantRunner: TenantTransactionRunner;
+
+  beforeAll(async () => {
+    compose('up', '--detach', '--wait', '--wait-timeout', '120', '--pull', 'never', 'postgres');
+    const port = compose('port', 'postgres', '5432').trim().split(':').at(-1);
+    if (port === undefined) throw new Error('PostgreSQL has no test port.');
+    const migrator = new pg.Pool({
+      connectionString: `postgres://identity_migrator:identity_migrator@127.0.0.1:${port}/identity`,
+    });
+    try {
+      await migrate(drizzle({ client: migrator }), { migrationsFolder: migrations });
+    } finally {
+      await migrator.end();
+    }
+    pool = new pg.Pool({
+      connectionString: `postgres://identity_app:identity_app@127.0.0.1:${port}/identity`,
+    });
+    runner = new SystemTransactionRunner(pool);
+    tenantRunner = new TenantTransactionRunner(pool);
+    await runner.run(({ client }) =>
+      client.query(
+        `insert into users (id, email, name)
+          values ($1, 'camille@example.test', 'Camille'), ($2, 'ines@example.test', 'Inès')`,
+        [userId, anotherUserId],
+      ),
+    );
+  });
+
+  afterAll(async () => {
+    try {
+      await pool?.end();
+    } finally {
+      compose('down', '--volumes', '--remove-orphans');
+    }
+  });
+
+  it('uniquely binds a verified identity and leaves a revoked link bound to its account', async () => {
+    const first = await runner.run((scope) =>
+      new DrizzleFederatedAccountLinkRepository(scope).insert(userId, identity),
+    );
+    expect(first).not.toBeNull();
+    if (first === null) throw new Error('Expected an account link.');
+    await expect(
+      runner.run((scope) =>
+        new DrizzleFederatedAccountLinkRepository(scope).insert(userId, identity),
+      ),
+    ).resolves.toBeNull();
+    await runner.run(async (scope) => {
+      const links = new DrizzleFederatedAccountLinkRepository(scope);
+      expect(await links.findByIdentity(identity)).toEqual(first);
+      expect(await links.findByIdentity({ ...identity, subject: 'SUBJECT-1' })).toBeNull();
+      expect(await links.findById(userId, first.id, connection)).toEqual(first);
+      expect(await links.revoke(userId, first.id, connection)).toBe(true);
+    });
+    await expect(
+      runner.run((scope) =>
+        new DrizzleFederatedAccountLinkRepository(scope).insert(userId, identity),
+      ),
+    ).resolves.toBeNull();
+  });
+
+  it('isolates SAML links by organization and connection and ignores legacy unscoped links', async () => {
+    const legacyId = '01938f6e-0000-7000-8000-000000000074';
+    const digest = createHash('sha256')
+      .update(JSON.stringify([saml.provider, saml.issuer, saml.subject]), 'utf8')
+      .digest('hex');
+    const otherOrganization = { ...saml, organizationId: anotherOrganizationId };
+    const otherConnection = { ...saml, connectionId: 'another-directory' };
+
+    await runner.run(async (scope) => {
+      await scope.client.query(
+        `insert into federated_account_links (id, user_id, provider, issuer, subject, identity_hash, status)
+          values ($1, $2, 'saml', $3, $4, $5, 'active')`,
+        [legacyId, anotherUserId, saml.issuer, saml.subject, digest],
+      );
+      const links = new DrizzleFederatedAccountLinkRepository(scope);
+      expect(await links.findByIdentity(saml)).toBeNull();
+      expect(await links.findById(anotherUserId, legacyId, saml)).toBeNull();
+
+      const original = await links.insert(userId, saml);
+      const otherTenant = await links.insert(anotherUserId, otherOrganization);
+      const otherIdp = await links.insert(anotherUserId, otherConnection);
+      if (original === null || otherTenant === null || otherIdp === null) {
+        throw new Error('Expected independently scoped account links.');
+      }
+      expect(await links.findByIdentity(saml)).toEqual(original);
+      expect(await links.findByIdentity(otherOrganization)).toEqual(otherTenant);
+      expect(await links.findByIdentity(otherConnection)).toEqual(otherIdp);
+      expect(await links.findById(userId, original.id, otherOrganization)).toBeNull();
+      expect(await links.findById(userId, original.id, otherConnection)).toBeNull();
+      expect(await links.insert(anotherUserId, saml)).toBeNull();
+      expect(await links.revoke(userId, original.id, otherConnection)).toBe(false);
+      expect(await links.revoke(userId, original.id, saml)).toBe(true);
+      expect(await links.insert(anotherUserId, saml)).toBeNull();
+    });
+
+    await runWithOrganizationContext(
+      { organizationId, actor: { type: 'user', id: userId }, role: null, scopes: [] },
+      () =>
+        tenantRunner.run(async (scope) => {
+          const visible = await scope.db
+            .select({ organizationId: samlAccountLinks.organizationId })
+            .from(samlAccountLinks);
+          expect(visible).toEqual([{ organizationId }, { organizationId }]);
+          expect(() => new DrizzleFederatedAccountLinkRepository(scope)).toThrow(
+            'Federated account links require a system transaction.',
+          );
+        }),
+    );
+  });
+
+  it('claims each assertion once across connections to PostgreSQL and isolates other tenants', async () => {
+    const first = new DrizzleSamlAssertionReplayGuard(runner);
+    const second = new DrizzleSamlAssertionReplayGuard(runner);
+    const expiry = new Date(Date.now() + 120_000);
+    const key = JSON.stringify(['assertion', saml.issuer, '_same-test-assertion']);
+    const results = await Promise.all([
+      first.claim(saml, key, expiry),
+      second.claim(saml, key, expiry),
+    ]);
+    expect(results.sort()).toEqual([false, true]);
+    const otherOrganization = { ...saml, organizationId: anotherOrganizationId };
+    await expect(second.claim(otherOrganization, key, expiry)).resolves.toBe(true);
+    await expect(
+      second.claim({ ...saml, connectionId: 'another-directory' }, key, expiry),
+    ).resolves.toBe(true);
+
+    await runWithOrganizationContext(
+      { organizationId, actor: { type: 'user', id: userId }, role: null, scopes: [] },
+      () =>
+        tenantRunner.run(async ({ db }) => {
+          expect(
+            await db
+              .select({ organizationId: samlAssertionReplays.organizationId })
+              .from(samlAssertionReplays),
+          ).toEqual([{ organizationId }, { organizationId }]);
+        }),
+    );
+  });
+
+  it('claims once, rolls back an interrupted completion and consumes an authorization refusal', async () => {
+    const currentIdentity = { ...identity, subject: 'subject-2' };
+    const link = await runner.run((scope) =>
+      new DrizzleFederatedAccountLinkRepository(scope).insert(userId, currentIdentity),
+    );
+    if (link === null) throw new Error('Expected an account link.');
+    const flow = FederatedSignInFlow.issue(
+      { id: flowId, connection, stateHash, browserBindingHash, persistent: true },
+      issuedAt,
+    );
+    await runner.run((scope) => new DrizzleFederatedSignInFlowRepository(scope).insert(flow));
+    await runner.run(async (scope) => {
+      expect(
+        () =>
+          new DrizzleFederatedSignInFlowRepository({
+            ...scope,
+            kind: 'tenant',
+            organizationId,
+          }),
+      ).toThrow('requires a system transaction');
+      const stored = await new DrizzleFederatedSignInFlowRepository(scope).findByStateHash(
+        stateHash,
+      );
+      if (stored === null) throw new Error('Missing flow.');
+      expect(() =>
+        stored.flow.claim(
+          {
+            provider: 'google',
+            stateHash,
+            browserBindingHash: 'd'.repeat(64),
+          },
+          checkedAt,
+        ),
+      ).toThrow();
+      expect(() =>
+        stored.flow.claim(
+          {
+            provider: 'google',
+            stateHash,
+            browserBindingHash,
+          },
+          new Date('2026-11-21T12:10:00Z'),
+        ),
+      ).toThrow();
+    });
+    const claim = () =>
+      runner.run(async (scope) => {
+        const flows = new DrizzleFederatedSignInFlowRepository(scope);
+        const stored = await flows.findByStateHash(stateHash);
+        if (stored?.flow.snapshot.phase.kind !== 'open') return false;
+        return flows.save(
+          stored.flow.claim({ provider: 'google', stateHash, browserBindingHash }, checkedAt),
+          stored.version,
+        );
+      });
+    expect((await Promise.all([claim(), claim()])).sort()).toEqual([false, true]);
+    const complete = async (fail: boolean): Promise<void> =>
+      runner.run(async (scope) => {
+        const flows = new DrizzleFederatedSignInFlowRepository(scope);
+        const stored = await flows.findByStateHash(stateHash);
+        if (stored === null) throw new Error('Missing claim.');
+        const completed = stored.flow.complete(
+          { connection, subject: currentIdentity.subject },
+          link,
+          receiptHash,
+          checkedAt,
+        );
+        expect(await flows.save(completed, stored.version)).toBe(true);
+        if (fail) throw new Error('Rollback test.');
+      });
+    await expect(complete(true)).rejects.toThrow('Rollback test.');
+    await runner.run(async (scope) => {
+      const flows = new DrizzleFederatedSignInFlowRepository(scope);
+      expect(await flows.findByReceiptHash(receiptHash)).toBeNull();
+    });
+    await complete(false);
+    await runner.run(async (scope) => {
+      const flows = new DrizzleFederatedSignInFlowRepository(scope);
+      const stored = await flows.findByReceiptHash(receiptHash);
+      if (stored === null) throw new Error('Missing receipt.');
+      const result = stored.flow.redeem(
+        receiptHash,
+        {
+          account: { id: userId, enabled: true },
+          link,
+          activeMembership: null,
+          maySignIn: false,
+          twoStep: 'not-required',
+        },
+        checkedAt,
+      );
+      expect(result.decision).toEqual({ kind: 'refused' });
+      expect(await flows.save(result.flow, stored.version)).toBe(true);
+      expect(await flows.save(result.flow, stored.version)).toBe(false);
+    });
+  });
+
+  it('round trips a bound challenge and clears its authority on ordinary sign-in replacement', async () => {
+    const federation = {
+      connection: saml,
+      linkId: '01938f6e-0000-7000-8000-000000000079',
+    } as const;
+    const binding = {
+      linkId: federation.linkId,
+      memberId: '01938f6e-0000-7000-8000-000000000078',
+      connection: {
+        provider: federation.connection.provider,
+        issuer: federation.connection.issuer,
+        organizationId: federation.connection.organizationId,
+        connectionId: federation.connection.connectionId,
+      },
+    };
+    const boundHash = '8'.repeat(64);
+    const ordinaryHash = '9'.repeat(64);
+    await runner.run(async ({ db }) => {
+      const repository = new DrizzleSignInChallengeRepository(db);
+      await repository.replace(
+        SignInChallenge.issue(anotherUserId, boundHash, true, issuedAt, binding),
+      );
+    });
+    await runner.run(async ({ db }) => {
+      const repository = new DrizzleSignInChallengeRepository(db);
+      const stored = await repository.findByTokenHash(boundHash, true);
+      expect(stored?.snapshot.federatedBinding).toEqual(binding);
+      if (stored === null) throw new Error('Expected a federated challenge.');
+      await repository.saveAssertion(stored.withAssertion('challenge', checkedAt));
+      const withOptions = await repository.findByTokenHash(boundHash, true);
+      expect(withOptions?.snapshot.federatedBinding).toEqual(binding);
+      const ordinary = await repository.replace(
+        SignInChallenge.issue(anotherUserId, ordinaryHash, false, checkedAt),
+      );
+      expect(ordinary.snapshot.federatedBinding).toBeNull();
+      await expect(repository.findByTokenHash(boundHash, true)).resolves.toBeNull();
+    });
+  });
+
+  it('commits a social claim before returning and rejects an enclosing transaction', async () => {
+    const social = new SystemSocialFlowUnitOfWork(runner, () => Promise.resolve(true));
+    const hash = 'e'.repeat(64);
+    const socialIdentity = { ...identity, subject: 'unit-of-work-subject' };
+    const link = await runner.run((scope) =>
+      new DrizzleFederatedAccountLinkRepository(scope).insert(userId, socialIdentity),
+    );
+    expect(link).not.toBeNull();
+    expect(await social.run((store) => store.findLink(socialIdentity))).toEqual(link);
+    expect(
+      await social.run((store) => store.findLink({ ...socialIdentity, subject: 'different' })),
+    ).toBeNull();
+    await social.run(async (store) => {
+      const allocatedId = await store.nextFlowId();
+      expect(allocatedId).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+      );
+      await store.insert(
+        FederatedSignInFlow.issue(
+          {
+            id: allocatedId,
+            connection,
+            stateHash: hash,
+            browserBindingHash,
+            persistent: false,
+          },
+          issuedAt,
+        ),
+      );
+    });
+    await social.run(async (store) => {
+      const record = await store.findByStateHash(hash);
+      if (record === null) throw new Error('Missing flow.');
+      const claimed = record.flow.claim(
+        { provider: 'google', stateHash: hash, browserBindingHash },
+        checkedAt,
+      );
+      expect(await store.save(claimed, record.version)).toBe(true);
+    });
+    await runner.run(async (scope) => {
+      const record = await new DrizzleFederatedSignInFlowRepository(scope).findByStateHash(hash);
+      expect(record?.flow.snapshot.phase.kind).toBe('claimed');
+      await expect(social.run(() => Promise.resolve(undefined))).rejects.toThrow();
+    });
+    const rolledBackHash = 'f'.repeat(64);
+    await expect(
+      social.run(async (store) => {
+        await store.insert(
+          FederatedSignInFlow.issue(
+            {
+              id: await store.nextFlowId(),
+              connection,
+              stateHash: rolledBackHash,
+              browserBindingHash,
+              persistent: false,
+            },
+            issuedAt,
+          ),
+        );
+        throw new Error('Rollback social flow.');
+      }),
+    ).rejects.toThrow('Rollback social flow.');
+    await runner.run(async (scope) => {
+      const record = await new DrizzleFederatedSignInFlowRepository(scope).findByStateHash(
+        rolledBackHash,
+      );
+      expect(record).toBeNull();
+    });
+  });
+
+  it('requires a verified locked account and an approving transaction-bound policy', async () => {
+    let called = 0;
+    const social = new SystemSocialFlowUnitOfWork(runner, (scope, candidate, authority) => {
+      expect(scope.kind).toBe('system');
+      expect(candidate).toBe(userId);
+      expect(authority).toEqual(connection);
+      called += 1;
+      return Promise.resolve(false);
+    });
+    expect(await social.run((store) => store.isEligible(userId, connection))).toBe(false);
+    expect(called).toBe(0);
+    await runner.run((scope) =>
+      scope.client.query('update users set email_verified_at = now() where id = $1', [userId]),
+    );
+    expect(await social.run((store) => store.isEligible(userId, connection))).toBe(false);
+    expect(called).toBe(1);
+    const allowed = new SystemSocialFlowUnitOfWork(runner, () => Promise.resolve(true));
+    expect(await allowed.run((store) => store.isEligible(userId, connection))).toBe(true);
+    expect(await allowed.run((store) => store.isEligible(anotherUserId, connection))).toBe(false);
+    const unavailable = new SystemSocialFlowUnitOfWork(runner, () =>
+      Promise.reject(new Error('Policy unavailable.')),
+    );
+    await expect(unavailable.run((store) => store.isEligible(userId, connection))).rejects.toThrow(
+      'Policy unavailable.',
+    );
+  });
+
+  it('sweeps only expired federation rows in bounded batches and skips locked rows', async () => {
+    const expired = [0, 1, 2].map((index) => ({
+      flowId: `01938f6e-0000-7000-8000-00000000013${String(index)}`,
+      markerId: `01938f6e-0000-7000-8000-00000000014${String(index)}`,
+      hash: createHash('sha256')
+        .update(`expiry fixture ${String(index)}`)
+        .digest('hex'),
+      issuedAt: new Date(index * 1_000),
+    }));
+    const liveFlowId = '01938f6e-0000-7000-8000-000000000150';
+    const liveStateHash = createHash('sha256').update('live federation flow fixture').digest('hex');
+    const guard = new DrizzleSamlAssertionReplayGuard(runner);
+    const retainedConnection = { ...saml, connectionId: 'retention-margin-test' };
+    const retainedKey = 'assertion recently expired at the provider';
+    const retainedKeyHash = createHash('sha256').update(retainedKey).digest('hex');
+    const assertionExpiry = new Date(Date.now() - 1_000);
+    expect(await guard.claim(retainedConnection, retainedKey, assertionExpiry)).toBe(true);
+    await runner.run(async (scope) => {
+      const flows = new DrizzleFederatedSignInFlowRepository(scope);
+      for (const fixture of expired) {
+        await flows.insert(
+          FederatedSignInFlow.issue(
+            {
+              id: fixture.flowId,
+              connection,
+              stateHash: fixture.hash,
+              browserBindingHash,
+              persistent: false,
+            },
+            fixture.issuedAt,
+          ),
+        );
+      }
+      await flows.insert(
+        FederatedSignInFlow.issue(
+          {
+            id: liveFlowId,
+            connection,
+            stateHash: liveStateHash,
+            browserBindingHash,
+            persistent: false,
+          },
+          new Date(),
+        ),
+      );
+      await scope.db.insert(samlAssertionReplays).values(
+        expired.map((fixture, index) => ({
+          id: fixture.markerId,
+          organizationId: index === 1 ? anotherOrganizationId : organizationId,
+          connectionId: 'old-directory',
+          keyHash: fixture.hash,
+          expiresAt: fixture.issuedAt,
+        })),
+      );
+    });
+
+    const [oldest, next, last] = expired;
+    if (oldest === undefined || next === undefined || last === undefined) {
+      throw new Error('Federation expiry needs three ordered fixtures.');
+    }
+    const flowIds = [oldest.flowId, next.flowId, last.flowId, liveFlowId];
+    const markerHashes = [oldest.hash, next.hash, last.hash, retainedKeyHash];
+    let markLocked = (): void => {
+      throw new Error('The lock barrier is not initialized.');
+    };
+    let releaseLock = (): void => {
+      throw new Error('The release barrier is not initialized.');
+    };
+    const locked = new Promise<void>((resolve) => {
+      markLocked = resolve;
+    });
+    const release = new Promise<void>((resolve) => {
+      releaseLock = resolve;
+    });
+    const holding = runner.run(async ({ client }) => {
+      await client.query('select id from federated_sign_in_flows where id = $1 for update', [
+        oldest.flowId,
+      ]);
+      await client.query('select id from saml_assertion_replays where id = $1 for update', [
+        oldest.markerId,
+      ]);
+      markLocked();
+      await release;
+    });
+    const work = new SystemExpiredFederationUnitOfWork(runner);
+    const retained = () =>
+      runner.run(async ({ db }) => {
+        const flows = await db
+          .select({ id: federatedSignInFlows.id })
+          .from(federatedSignInFlows)
+          .where(inArray(federatedSignInFlows.id, flowIds))
+          .orderBy(federatedSignInFlows.id);
+        const markers = await db
+          .select({ hash: samlAssertionReplays.keyHash })
+          .from(samlAssertionReplays)
+          .where(inArray(samlAssertionReplays.keyHash, markerHashes))
+          .orderBy(samlAssertionReplays.keyHash);
+        return { flows: flows.map(({ id }) => id), markers: markers.map(({ hash }) => hash) };
+      });
+
+    try {
+      await Promise.race([locked, holding]);
+      await expect(work.deleteBatch(1)).resolves.toEqual({ flows: 1, assertions: 1 });
+      expect(await retained()).toEqual({
+        flows: [oldest.flowId, last.flowId, liveFlowId],
+        markers: [oldest.hash, last.hash, retainedKeyHash].sort(),
+      });
+    } finally {
+      releaseLock();
+      await holding;
+    }
+
+    await work.deleteBatch(100);
+    expect(await retained()).toEqual({ flows: [liveFlowId], markers: [retainedKeyHash] });
+    await expect(guard.claim(retainedConnection, retainedKey, assertionExpiry)).resolves.toBe(
+      false,
+    );
+  });
+});

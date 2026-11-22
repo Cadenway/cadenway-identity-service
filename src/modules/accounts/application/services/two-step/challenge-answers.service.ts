@@ -5,6 +5,9 @@ import type { TwoStepVerification } from '../../../domain/aggregates/two-step/tw
 import type { Refusal } from '../../models/authentication/refusal.model.js';
 import type { SessionClient } from '../../models/sessions/session-client.model.js';
 import type { TrustedDeviceGrant } from '../../models/sessions/trusted-device-grant.model.js';
+import type { ChallengeAuthority } from '../../models/two-step/challenge-authority.model.js';
+import type { FederatedMembershipAuthority } from '../../ports/outbound/identity/memberships/federated-membership-authority.port.js';
+import type { AccountsUnitOfWork } from '../../ports/outbound/transactions/accounts/accounts-unit-of-work.port.js';
 import type { AccountsStore } from '../../models/transactions/accounts-store.model.js';
 import type { DeviceReader } from '../../ports/outbound/device/accounts/device-reader.port.js';
 import type { SessionOpener } from '../../ports/outbound/identity/sessions/session-opener.port.js';
@@ -12,6 +15,31 @@ import type { TrustedDevices } from '../../ports/outbound/identity/sessions/trus
 import type { ChallengeTokens } from '../../ports/outbound/security/two-step/challenge-tokens.port.js';
 import type { SessionIssuedView } from '../../projections/authentication/session-issued-view.projection.js';
 import { completeSignIn } from '../authentication/sign-in-completion.service.js';
+
+/** Resolves a SAML challenge's current membership outside its answer transaction. */
+export async function authorizeChallenge(
+  work: AccountsUnitOfWork,
+  tokens: ChallengeTokens,
+  token: string,
+  now: Date,
+  authority: FederatedMembershipAuthority | null,
+): Promise<ChallengeAuthority | null> {
+  const hash = tokens.hashOf(token);
+  if (hash === null) return null;
+  const challenge = await work.run((store) => store.challenges.findByTokenHash(hash, false));
+  if (!challenge?.isUsableAt(now)) return null;
+  const binding = challenge.snapshot.federatedBinding;
+  if (binding?.connection.provider !== 'saml') {
+    return { challengeId: challenge.id, userId: challenge.userId, samlMembership: null };
+  }
+  if (authority === null) {
+    throw new Error('Organization membership authority is required for SAML sign-in.');
+  }
+  const membership = await authority.find(binding.connection.organizationId, challenge.userId);
+  return membership === null || membership.memberId !== binding.memberId
+    ? null
+    : { challengeId: challenge.id, userId: challenge.userId, samlMembership: membership };
+}
 
 /**
  * Function lockChallenge
@@ -21,7 +49,8 @@ import { completeSignIn } from '../authentication/sign-in-completion.service.js'
  * two-step verification of the account, the lock order of every flow that writes them (the account
  * before its two-step rows). A token that is malformed, unknown, answered, replaced or expired, a
  * challenge whose account is gone or has no two-step verification any more, answer
- * `auth.challenge-expired`, checked first, so it counts no attempt.
+ * `auth.challenge-expired`, checked first, so it counts no attempt. A federated challenge also
+ * requires the original link and connection to remain authorized in the answer transaction.
  *
  * @param {AccountsStore} store - The repositories of the transaction.
  * @param {ChallengeTokens} tokens - Hashes the token.
@@ -34,6 +63,7 @@ export async function lockChallenge(
   tokens: ChallengeTokens,
   token: string,
   now: Date,
+  authority?: ChallengeAuthority,
 ): Promise<
   | {
       readonly user: User;
@@ -53,6 +83,19 @@ export async function lockChallenge(
   const verification: TwoStepVerification | null =
     user === null ? null : await store.twoStep.lock(user.id);
   if (user === null || challenge?.isUsableAt(now) !== true || verification === null) {
+    return { reason: 'challenge-expired' };
+  }
+  const binding = challenge.snapshot.federatedBinding;
+  if (
+    binding !== null &&
+    (!user.isVerified ||
+      !(await store.mayFinishFederatedChallenge(
+        user.id,
+        binding,
+        authority?.samlMembership?.memberId,
+      )))
+  ) {
+    await store.challenges.deleteOfUser(user.id);
     return { reason: 'challenge-expired' };
   }
   return { user, challenge, verification };
@@ -131,6 +174,7 @@ export async function finishChallenge(
   challenge: SignInChallenge,
   verification: TwoStepVerification,
   answer: { readonly trustDevice: boolean; readonly client: SessionClient },
+  authority: ChallengeAuthority,
 ): Promise<SessionIssuedView> {
   await store.challenges.deleteOfUser(user.id);
   await store.twoStep.update(verification);
@@ -146,5 +190,6 @@ export async function finishChallenge(
     answer.client,
     'two-step',
     trusted,
+    authority.samlMembership,
   );
 }

@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { boolean, pgTable, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { boolean, jsonb, pgTable, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 
 import users from '../accounts/user.schema.js';
 
@@ -23,6 +23,7 @@ export default pgTable(
     tokenHash: text('token_hash').notNull(),
     persistent: boolean('persistent').notNull(),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    federatedBinding: jsonb('federated_binding'),
     assertionChallenge: text('assertion_challenge'),
     assertionExpiresAt: timestamp('assertion_expires_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

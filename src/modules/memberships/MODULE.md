@@ -25,15 +25,16 @@ the sessions.
 
 ## Public entry points
 
-| Entry point                                   | Consumers                      |
-| --------------------------------------------- | ------------------------------ |
-| `memberships.module`                          | sessions, api-tokens, accounts |
-| `public/membership/find-active-membership`    | sessions, api-tokens           |
-| `public/membership/lock-active-membership`    | sessions                       |
-| `public/membership/find-owned-organizations`  | accounts                       |
-| `public/membership/find-user-memberships`     | sessions                       |
-| `public/membership/find-organization-member`  | sessions                       |
-| `public/membership/list-organization-members` | sessions                       |
+| Entry point                                       | Consumers                      |
+| ------------------------------------------------- | ------------------------------ |
+| `memberships.module`                              | sessions, api-tokens, accounts |
+| `public/membership/find-active-membership`        | sessions, api-tokens           |
+| `public/membership/find-authoritative-membership` | accounts, sessions, api-tokens |
+| `public/membership/lock-active-membership`        | accounts, sessions             |
+| `public/membership/find-owned-organizations`      | accounts                       |
+| `public/membership/find-user-memberships`         | sessions                       |
+| `public/membership/find-organization-member`      | sessions                       |
+| `public/membership/list-organization-members`     | sessions                       |
 
 `MembershipsModule` exports the `FindActiveMembership`, `LockActiveMembership`, `FindOwnedOrganizations`,
 `FindUserMemberships`, `FindOrganizationMember` and `ListOrganizationMembers` providers, each with
@@ -42,6 +43,17 @@ its input and output types. `FindActiveMembership`, `FindOwnedOrganizations` and
 called from a tenant transaction (the kit refuses to open a system transaction inside a tenant one).
 `FindOrganizationMember` and `ListOrganizationMembers` run in the tenant transaction of their
 caller, the routes of the authentication policy, and join it.
+
+`FindAuthoritativeMembership` proves the current membership against Organization for credential
+introspection, SAML sign-in, realtime redemption, organization choice and authentication policy
+writes. It runs outside the caller's transaction. When
+`ORGANIZATION_SERVICE_URL` and `IDENTITY_SERVICE_INTERNAL_TOKEN_PRIVATE_JWK` are configured,
+the adapter calls `GET /internal/v1/search-membership` at the trusted origin. The Identity token
+names the verified account and organization with no delegated role or scopes. A confirmed
+`organization.not-found` means that the membership is absent. An unavailable or invalid response
+fails with `503 organization.unavailable`, as do proof-dependent decisions when both settings are
+missing in a local process. The projection cannot grant access when the authoritative lookup is
+unavailable. Organization must first trust the Identity issuer for that operation.
 
 ## Owned tables
 
@@ -95,7 +107,8 @@ None.
   the removed member's sessions keep the organization and its API tokens keep working. The schedule
   therefore outlasts any outage of the database shorter than a day, and the margin over 24 hours
   covers deliveries lost to a crashed replica, which the broker redelivers after the 30 s
-  acknowledgement wait and which count as deliveries. The three consumers share the schedule: a
+  acknowledgement wait and which count as deliveries. Introspection backed by the current
+  authority does not rely on those deliveries to revoke access. The three consumers share the schedule: a
   role change that lowers a role is a security projection as much as a removal, and a join given
   up would leave a member without access until an operator steps in.
   `memberEventsRedeliveryProvider` binds it to `MEMBER_EVENTS_REDELIVERY`; the kit sets
@@ -104,8 +117,9 @@ None.
   half the seven-day retention of `EVENTS`.
 - A long schedule has limits the kit does not check. A waiting message is among the oldest of
   `EVENTS`, which drops its oldest messages first past its byte cap (1 GiB in cadenway-ops): a
-  removal dropped while it waits is lost without a dead letter and without an alert, and the
-  removed member keeps access until the copy is rebuilt. That window grows from minutes to about a
+  removal dropped while it waits is lost without a dead letter and without an alert, and
+  checks using only the projection can still see the removed member until the copy is rebuilt.
+  That window grows from minutes to about a
   day with this schedule; cadenway-ops has no alert on it yet (an alert on the size of `EVENTS`
   near its cap, or on the age of its first message, would close it). Each waiting message also
   counts towards the 1000 unacknowledged messages of its consumer (`max_ack_pending`): past that,

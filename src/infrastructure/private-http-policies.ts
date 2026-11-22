@@ -2,12 +2,16 @@ import { ProblemException, toProblem } from '@cadenway/nest-common';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import type { NextFunction, Request, Response } from 'express';
 
-const recipientPath = /^\/internal\/v1\/users\/[^/]+\/notification-recipient\/?$/iu;
+const accountAuthorityPath =
+  /^\/internal\/v1\/users\/[^/]+\/(?:notification-recipient|verified-email)\/?$/iu;
+const federationPath =
+  /^\/internal\/v1\/auth\/sign-in\/federated\/(?:start|finish|(?:oauth|saml)\/callback)\/?$/iu;
 
-/** Whether Express can dispatch the request to the recipient GET handler. */
-function isRecipientRequest(request: Request): boolean {
+/** Whether Express can dispatch the request to a private account authority. */
+function isAccountAuthorityRequest(request: Request): boolean {
   return (
-    (request.method === 'GET' || request.method === 'HEAD') && recipientPath.test(request.path)
+    (request.method === 'GET' || request.method === 'HEAD') &&
+    accountAuthorityPath.test(request.path)
   );
 }
 
@@ -16,6 +20,7 @@ export function configurePrivateHttpPolicies(app: Pick<NestExpressApplication, '
   app.use(
     [
       '/internal/v1/realtime/tickets',
+      federationPath,
       /^\/internal\/v1\/users\/[^/]+\/avatar(?:-reference|\/uploads(?:\/[^/]+)?)?\/?$/iu,
     ],
     (error: unknown, _request: Request, response: Response, next: NextFunction): void => {
@@ -25,7 +30,10 @@ export function configurePrivateHttpPolicies(app: Pick<NestExpressApplication, '
   );
 
   app.use((request: Request, response: Response, next: NextFunction): void => {
-    if (isRecipientRequest(request)) {
+    if (federationPath.test(request.path)) {
+      response.setHeader('Cache-Control', 'private, no-store');
+    }
+    if (isAccountAuthorityRequest(request)) {
       response.setHeader('Cache-Control', 'no-store');
       try {
         decodeURI(request.path);
@@ -38,7 +46,7 @@ export function configurePrivateHttpPolicies(app: Pick<NestExpressApplication, '
   });
 
   app.use((error: unknown, request: Request, response: Response, next: NextFunction): void => {
-    if (isRecipientRequest(request)) {
+    if (isAccountAuthorityRequest(request)) {
       response.setHeader('Cache-Control', 'no-store');
       // The route has one client-input problem, with no parser diagnostics in its response.
       if (toProblem(error).status === 400) {

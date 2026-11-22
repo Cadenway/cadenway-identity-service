@@ -90,7 +90,7 @@ describe('realtime ticket HTTP adapters', () => {
       execute,
     } as unknown as RedeemRealtimeTicket);
     const result = await runWithOrganizationContext(system, () => controller.execute({ token }));
-    expect(execute).toHaveBeenCalledExactlyOnceWith({ token });
+    expect(execute).toHaveBeenCalledExactlyOnceWith({ token, verifiesSamlSource: false });
     expect(RedeemRealtimeTicketInternalResponse.parse(result)).toEqual(result);
     expect(result).not.toHaveProperty('internalField');
     expect(result.sessionExpiresAt).toBe('2026-11-20T20:00:00.000Z');

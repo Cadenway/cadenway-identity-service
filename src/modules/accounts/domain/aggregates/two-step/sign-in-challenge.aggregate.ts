@@ -1,4 +1,5 @@
 import { InvalidTwoStepStateError } from '../../errors/two-step/invalid-two-step-state.error.js';
+import type { FederatedChallengeBinding } from '../../value-objects/federated-sign-in/federated-challenge-binding.value-object.js';
 import type { SignInChallengeIssue } from './sign-in-challenge-issue.aggregate.js';
 import type { SignInChallengeState } from './sign-in-challenge-state.aggregate.js';
 
@@ -133,6 +134,7 @@ export class SignInChallenge {
    * @param {string} tokenHash - The SHA-256 of its token.
    * @param {boolean} persistent - The `rememberMe` of the sign-in.
    * @param {Date} now - The instant of the sign-in.
+   * @param {FederatedChallengeBinding | null} federatedBinding - The federated first-factor authority.
    * @returns {SignInChallengeIssue} The challenge to store.
    */
   public static issue(
@@ -140,12 +142,14 @@ export class SignInChallenge {
     tokenHash: string,
     persistent: boolean,
     now: Date,
+    federatedBinding: FederatedChallengeBinding | null = null,
   ): SignInChallengeIssue {
     return {
       userId,
       tokenHash,
       persistent,
       expiresAt: new Date(now.getTime() + SignInChallenge.LIFETIME_MS),
+      federatedBinding,
     };
   }
 

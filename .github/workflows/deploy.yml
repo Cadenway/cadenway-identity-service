@@ -59,7 +59,10 @@ jobs:
           }
           service=${REPOSITORY#cadenway-}
           variable=$(tr '[:lower:]-' '[:upper:]_' <<<"$service")_VERSION
+          # Resolve required membership interpolation for the definition check with fixture values.
           env GHCR_OWNER=owner DOMAIN=domain.invalid ENVIRONMENT=env PUBLIC_SCHEME=https \
+            ORGANIZATION_SERVICE_URL=http://organization-service:3011 \
+            IDENTITY_SERVICE_INTERNAL_TOKEN_PRIVATE_JWK=compose-validation-only \
             "$variable=$VERSION" docker compose -p check -f service/deploy/compose.yaml \
             config --format json >definition.json
           jq -e --arg service "$service" --arg image "ghcr.io/owner/$REPOSITORY:$VERSION" '

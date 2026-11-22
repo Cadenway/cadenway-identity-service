@@ -20,6 +20,7 @@ import { passwordHasherProvider } from './composition/providers/adapters/account
 import { resetLinkSecretsProvider } from './composition/providers/adapters/accounts/reset-link-secrets.provider.js';
 import { sessionOpenerProvider } from './composition/providers/adapters/accounts/session-opener.provider.js';
 import { avatarProviders } from './composition/providers/adapters/avatar/avatar.provider.js';
+import { federationExpirySweepHandlerProvider } from './composition/providers/adapters/federated-sign-in/federation-expiry-sweep-handler.provider.js';
 import { authenticatorAppSecretsProvider } from './composition/providers/adapters/two-step/authenticator-app-secrets.provider.js';
 import { backupCodeSecretsProvider } from './composition/providers/adapters/two-step/backup-code-secrets.provider.js';
 import { challengeTokensProvider } from './composition/providers/adapters/two-step/challenge-tokens.provider.js';
@@ -48,6 +49,9 @@ import { signInWithPasswordProvider } from './composition/providers/use-cases/ac
 import { signUpProvider } from './composition/providers/use-cases/accounts/sign-up.provider.js';
 import { updateUserProfileProvider } from './composition/providers/use-cases/accounts/update-user-profile.provider.js';
 import { verifySignUpProvider } from './composition/providers/use-cases/accounts/verify-sign-up.provider.js';
+import { federatedSignInProviders } from './composition/providers/use-cases/federated-sign-in/federated-sign-in.provider.js';
+import { finishFederatedSignInProvider } from './composition/providers/use-cases/federated-sign-in/finish-federated-sign-in.provider.js';
+import { purgeExpiredFederationProvider } from './composition/providers/use-cases/federated-sign-in/purge-expired-federation.provider.js';
 import { addSecurityKeyProvider } from './composition/providers/use-cases/two-step/add-security-key.provider.js';
 import { answerChallengeWithAuthenticatorAppProvider } from './composition/providers/use-cases/two-step/answer-challenge-with-authenticator-app.provider.js';
 import { answerChallengeWithBackupCodeProvider } from './composition/providers/use-cases/two-step/answer-challenge-with-backup-code.provider.js';
@@ -63,8 +67,10 @@ import { startAuthenticatorAppSetupProvider } from './composition/providers/use-
 import { startSecurityKeyRegistrationProvider } from './composition/providers/use-cases/two-step/start-security-key-registration.provider.js';
 import { AccountSecurityController } from './presentation/http/controllers/accounts/account-security.controller.js';
 import { NotificationRecipientController } from './presentation/http/controllers/accounts/notification-recipient.controller.js';
+import { VerifiedEmailController } from './presentation/http/controllers/accounts/verified-email.controller.js';
 import { UsersController } from './presentation/http/controllers/accounts/users.controller.js';
 import { AuthController } from './presentation/http/controllers/authentication/auth.controller.js';
+import { FederatedSignInController } from './presentation/http/controllers/authentication/federated-sign-in.controller.js';
 import { ReauthenticationController } from './presentation/http/controllers/authentication/reauthentication.controller.js';
 import { SignInChallengeController } from './presentation/http/controllers/authentication/sign-in-challenge.controller.js';
 import { AvatarsController } from './presentation/http/controllers/avatar/avatars.controller.js';
@@ -92,11 +98,13 @@ import { TwoStepVerificationController } from './presentation/http/controllers/t
   imports: [SessionsModule, ApiTokensModule, MembershipsModule],
   controllers: [
     AuthController,
+    FederatedSignInController,
     SignInChallengeController,
     PasswordResetController,
     ReauthenticationController,
     UsersController,
     NotificationRecipientController,
+    VerifiedEmailController,
     AvatarsController,
     AccountSecurityController,
     TwoStepVerificationController,
@@ -128,6 +136,10 @@ import { TwoStepVerificationController } from './presentation/http/controllers/t
     resendSignUpCodeProvider,
     verifySignUpProvider,
     signInWithPasswordProvider,
+    ...federatedSignInProviders,
+    finishFederatedSignInProvider,
+    purgeExpiredFederationProvider,
+    federationExpirySweepHandlerProvider,
     requestSignInCodeProvider,
     signInWithCodeProvider,
     getUserProvider,

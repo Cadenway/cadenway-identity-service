@@ -34,7 +34,7 @@ describe('SwitchSessionOrganization', () => {
     store = new InMemorySessions();
     memberships = new FakeActiveMemberships();
     clock = new FixedClock('2026-11-08T13:07:00Z');
-    switchOrganization = new SwitchSessionOrganization(store, memberships, clock);
+    switchOrganization = new SwitchSessionOrganization(store, memberships, clock, memberships);
     opened = await new OpenSession(
       store,
       new FakeSessionTokens(),
@@ -71,6 +71,32 @@ describe('SwitchSessionOrganization', () => {
     });
     expect(store.choices.get(CAMILLE_ID)).toBe(ATELIER_NORD);
     expect(store.organizationChanges.map((session) => session.snapshot.version)).toEqual([2]);
+  });
+
+  it('refuses to switch a SAML session after the originating membership is removed', async () => {
+    const samlSession = await new OpenSession(
+      store,
+      new FakeSessionTokens(),
+      new FakeDeviceReader(),
+      memberships,
+      clock,
+    ).execute({
+      userId: CAMILLE_ID,
+      persistent: false,
+      client: { ipAddress: '86.247.12.30', userAgent: null },
+      authentication: null,
+      newDeviceNotice: null,
+      samlMembership: { organizationId: OTHER_ORGANIZATION, memberId: NEXT_MEMBER_ID },
+    });
+
+    await expect(
+      switchOrganization.execute({
+        actorUserId: CAMILLE_ID,
+        sessionId: samlSession.id,
+        organizationId: ATELIER_NORD,
+      }),
+    ).rejects.toBeInstanceOf(SessionNotFound);
+    expect(store.sessions.get(samlSession.id)?.state.organizationId).toBeNull();
   });
 
   it('leaves the session unchanged for its current organization, which stays the last choice', async () => {
