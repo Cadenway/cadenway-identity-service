@@ -20,8 +20,13 @@ class VerifiedEmailPath extends zodDto(GetVerifiedEmailInternalParams) {}
 @Controller('internal/v1/users/:userId/verified-email')
 @InternalAccess({ issuers: ['organization-service'], actors: ['system'], organization: 'optional' })
 export class VerifiedEmailController {
+  // #region Constructor
+  /** Binds the lookup for the account's current verified email. */
   public constructor(private readonly verifiedAccounts: GetNotificationRecipient) {}
+  // #endregion
 
+  // #region Methods
+  /** Returns only the verified email to Organization's unscoped system actor. */
   @Get()
   public async read(
     @Param() { userId }: VerifiedEmailPath,
@@ -57,4 +62,5 @@ export class VerifiedEmailController {
     }
     return response.data;
   }
+  // #endregion
 }
