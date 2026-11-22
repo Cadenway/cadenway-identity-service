@@ -279,9 +279,10 @@ None.
   recent authentication of the session of the request (a password one, none for an account with
   two-step verification, whose proof stays), ends the recent authentication of the others, and
   drops a pending change of address (decision 3 of P2c).
-- A reset link works once, for 30 minutes, from any browser; a newer link of the account and a
-  change of address void it. A request answers the same way whether or not a verified account uses
-  the address; requests of an address are throttled apart from the codes: 45 seconds and 5 an hour
+- A reset link works once, for 30 minutes, from any browser. A newer link of the account, a
+  change of address or an authenticated password change voids it. A request answers the same way
+  whether or not a verified account uses the address. Requests of an address are throttled apart
+  from the codes: 45 seconds and 5 an hour
   (`auth.reset-throttled`). Reading a link does not use it. A reset checks the link first, then the
   new password, which leaves the link usable; it never signs in, closes every session unless
   `closeOtherSessions` is `false` (and ends their recent authentication otherwise), ends the lockout

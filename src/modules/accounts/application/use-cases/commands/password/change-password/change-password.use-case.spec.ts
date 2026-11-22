@@ -8,12 +8,14 @@ import {
   FakeCompromisedPasswords,
   FakeDeviceReader,
   FakePasswordHasher,
+  FakeResetLinkSecrets,
   FixedClock,
   InMemoryAccounts,
 } from '../../../../models/accounts/accounts.fixture.js';
 import type { RecordedEvent } from '../../../../models/accounts/accounts.fixture.js';
 import { FakeTrustedDevices } from '../../../../models/two-step/two-step.fixture.js';
 import type { AccountView } from '../../../../projections/accounts/account-view.projection.js';
+import { RequestPasswordReset } from '../../password-reset/request-password-reset/request-password-reset.use-case.js';
 import type { ChangePasswordInput } from './change-password.input.js';
 import { ChangePassword } from './change-password.use-case.js';
 
@@ -133,6 +135,31 @@ describe('ChangePassword', () => {
       }),
     ).rejects.toMatchObject({ refusal: { reason: 'session-not-found' } });
     expect(accounts.state.events).toEqual([]);
+  });
+
+  it('replaces only the current reset link of the account whose password changed', async () => {
+    const anotherAccount = accounts.seedUser('ines@ateliernord.fr', true, 'hashed:different-pass');
+    const reset = new RequestPasswordReset(
+      accounts,
+      new FakeResetLinkSecrets(),
+      new FakeDeviceReader(),
+      clock,
+    );
+    await reset.execute({ email: camille.email.value, client: CLIENT });
+    await reset.execute({ email: anotherAccount.email.value, client: CLIENT });
+
+    await change.execute(input);
+
+    expect(accounts.state.resetLinks).toMatchObject([
+      { userId: camille.id, replacedAt: clock.now() },
+      { userId: anotherAccount.id, replacedAt: null },
+    ]);
+    clock.advance(60_000);
+    await reset.execute({ email: camille.email.value, client: CLIENT });
+    expect(accounts.state.resetLinks.at(-1)).toMatchObject({
+      userId: camille.id,
+      replacedAt: null,
+    });
   });
 
   it('keeps a password reset during the check of the current one, counting the attempt', async () => {
