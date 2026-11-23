@@ -39,8 +39,22 @@ describe('EnqueueDueAccountDeletions', () => {
     await sweep.execute();
     clock.advance(10 * 60_000);
 
-    await expect(sweep.execute()).resolves.toEqual({ claimed: 1, enqueued: 0 });
+    await expect(sweep.execute()).resolves.toEqual({ claimed: 0, enqueued: 0 });
     expect(accounts.state.deletionJobs).toHaveLength(1);
+  });
+
+  it('reaches the next due account when the previous batch is still pending', async () => {
+    const attemptId = '019a6c30-7a8b-7c9d-8e0f-1a2b3c4d8e91';
+    accounts.state.deletionAttempts.set(camille.id, attemptId);
+    for (let index = 0; index < 100; index += 1) {
+      accounts.seedUser(`queued-${String(index)}@ateliernord.fr`, true, 'hashed:x', DELETE_AT);
+    }
+    await expect(sweep.execute()).resolves.toEqual({ claimed: 100, enqueued: 100 });
+    clock.advance(10 * 60_000);
+    await expect(sweep.execute()).resolves.toEqual({ claimed: 1, enqueued: 1 });
+    clock.advance(60 * 60_000);
+    await expect(sweep.execute()).resolves.toEqual({ claimed: 100, enqueued: 100 });
+    expect(accounts.state.deletionAttempts.get(camille.id)).toBe(attemptId);
   });
 
   it('checks a kept deletion again an hour after its check, as a new occurrence', async () => {

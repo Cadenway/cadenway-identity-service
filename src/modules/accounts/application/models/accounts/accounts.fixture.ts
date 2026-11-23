@@ -237,6 +237,9 @@ interface AccountsState {
    */
   readonly deletionChecks: Map<string, Date>;
 
+  /** Stable deletion attempts, committed independently of the remote reservation. */
+  readonly deletionAttempts: Map<string, string>;
+
   /**
    * Property twoStep
    *
@@ -332,6 +335,7 @@ function copyState(state: AccountsState): AccountsState {
     emailChanges: new Map(state.emailChanges),
     deletionJobs: [...state.deletionJobs],
     deletionChecks: new Map(state.deletionChecks),
+    deletionAttempts: new Map(state.deletionAttempts),
     twoStep: new Map(state.twoStep),
     backupCodes: [...state.backupCodes],
     securityKeys: [...state.securityKeys],
@@ -383,6 +387,7 @@ export class InMemoryAccounts implements AccountsUnitOfWork {
     emailChanges: new Map(),
     deletionJobs: [],
     deletionChecks: new Map(),
+    deletionAttempts: new Map(),
     twoStep: new Map(),
     backupCodes: [],
     securityKeys: [],
@@ -534,21 +539,51 @@ export class InMemoryAccounts implements AccountsUnitOfWork {
               const checked: Date | undefined = draft.deletionChecks.get(user.id);
               return checked === undefined || checked.getTime() <= checkedBefore.getTime();
             })
-            .slice(0, limit)
             .map((user: User) => ({
               userId: user.id,
               dueSince: draft.deletionChecks.get(user.id) ?? user.deleteAt ?? now,
-            })),
+            }))
+            .sort(
+              (left, right) =>
+                left.dueSince.getTime() - right.dueSince.getTime() ||
+                left.userId.localeCompare(right.userId),
+            )
+            .slice(0, limit),
         ),
-      markDeletionChecked: (userId: string, now: Date): Promise<void> => {
-        draft.deletionChecks.set(userId, now);
+      markDeletionsDispatched: (userIds: readonly string[], now: Date): Promise<void> => {
+        for (const userId of userIds) draft.deletionChecks.set(userId, now);
         return Promise.resolve();
       },
-      delete: (user: User): Promise<void> => {
+      findDeletionAttempt: (userId: string): Promise<string | null> =>
+        Promise.resolve(draft.deletionAttempts.get(userId) ?? null),
+      claimDeletion: (userId: string): Promise<string> => {
+        this.ids += 1;
+        const attemptId = fakeId(this.ids);
+        draft.deletionAttempts.set(userId, attemptId);
+        return Promise.resolve(attemptId);
+      },
+      keepDeletion: (userId: string, attemptId: string, now: Date): Promise<void> => {
+        if (draft.deletionAttempts.get(userId) === attemptId) {
+          draft.deletionAttempts.delete(userId);
+          draft.deletionChecks.set(userId, now);
+        }
+        return Promise.resolve();
+      },
+      delete: (user: User, confirmedAttemptId?: string): Promise<void> => {
         if (draft.users.get(user.id)?.version !== user.version) {
           return Promise.reject(new Error('The account changed since it was loaded.'));
         }
+        if (
+          user.deleteAt !== null &&
+          (confirmedAttemptId === undefined ||
+            draft.deletionAttempts.get(user.id) !== confirmedAttemptId)
+        ) {
+          return Promise.reject(
+            new Error('A scheduled account deletion requires its confirmed attempt.'),
+          );
+        }
         draft.users.delete(user.id);
+        draft.deletionAttempts.delete(user.id);
         draft.credentials.delete(user.id);
         draft.emailChanges.delete(user.id);
         return Promise.resolve();

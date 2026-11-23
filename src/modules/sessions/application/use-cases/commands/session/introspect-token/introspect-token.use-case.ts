@@ -151,19 +151,18 @@ export class IntrospectToken {
     if (!selected?.isActiveAt(this.clock.now())) {
       return { active: false };
     }
-    const membership =
+    const selectedMembership =
       selected.organizationId === null
-        ? null
-        : await authority.find(selected.organizationId, selected.userId);
+        ? Promise.resolve(null)
+        : authority.find(selected.organizationId, selected.userId);
     const source = selected.snapshot.samlMembership ?? null;
-    if (source !== null) {
-      const sourceMembership =
-        source.organizationId === selected.organizationId
-          ? membership
-          : await authority.find(source.organizationId, selected.userId);
-      if (sourceMembership?.memberId !== source.memberId) {
-        return { active: false };
-      }
+    const sourceMembership =
+      source === null || source.organizationId === selected.organizationId
+        ? selectedMembership
+        : authority.find(source.organizationId, selected.userId);
+    const [membership, provenSource] = await Promise.all([selectedMembership, sourceMembership]);
+    if (source !== null && provenSource?.memberId !== source.memberId) {
+      return { active: false };
     }
 
     return this.unitOfWork.run(async (store): Promise<IntrospectTokenOutput> => {

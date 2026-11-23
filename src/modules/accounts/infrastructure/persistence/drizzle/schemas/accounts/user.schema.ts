@@ -23,7 +23,7 @@ import {
  * `password_changed_at` is when the password was last set (migration 0004, backfilled from the
  * credential); `delete_at` the end of a scheduled deletion, `null` without one, and
  * `deletion_checked_at` the last check that kept a due deletion because the account owned an
- * organization.
+ * organization. `deletion_attempt_id` is assigned once when a due deletion is claimed.
  */
 export default pgTable(
   'users',
@@ -47,6 +47,7 @@ export default pgTable(
       .defaultNow(),
     deleteAt: timestamp('delete_at', { withTimezone: true }),
     deletionCheckedAt: timestamp('deletion_checked_at', { withTimezone: true }),
+    deletionAttemptId: uuid('deletion_attempt_id'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -58,5 +59,9 @@ export default pgTable(
     check('users_version_check', sql`${table.version} >= 1`),
     check('users_sign_up_count_check', sql`${table.signUpCount} >= 1`),
     check('users_avatar_generation_check', sql`${table.avatarGeneration} >= 0`),
+    check(
+      'users_deletion_attempt_requires_schedule',
+      sql`${table.deletionAttemptId} is null or ${table.deleteAt} is not null`,
+    ),
   ],
 );

@@ -4,12 +4,12 @@ import type { AccountApiTokens } from '../../../../application/ports/outbound/id
 import type { AccountSessions } from '../../../../application/ports/outbound/identity/sessions/account-sessions.port.js';
 import type { AccountsUnitOfWork } from '../../../../application/ports/outbound/transactions/accounts/accounts-unit-of-work.port.js';
 import type { Clock } from '../../../../application/ports/outbound/clock/accounts/clock.port.js';
-import type { OwnedOrganizations } from '../../../../application/ports/outbound/memberships/accounts/owned-organizations.port.js';
+import type { AccountDeletionAuthority } from '../../../../application/ports/outbound/memberships/accounts/account-deletion-authority.port.js';
 import { CompleteAccountDeletion } from '../../../../application/use-cases/commands/deletion/complete-account-deletion/complete-account-deletion.use-case.js';
 import { ACCOUNT_API_TOKENS } from '../../../tokens/accounts/account-api-tokens.token.js';
 import { ACCOUNT_SESSIONS } from '../../../tokens/accounts/account-sessions.token.js';
 import { CLOCK } from '../../../tokens/accounts/clock.token.js';
-import { OWNED_ORGANIZATIONS } from '../../../tokens/accounts/owned-organizations.token.js';
+import { ACCOUNT_DELETION_AUTHORITY } from '../../../tokens/accounts/account-deletion-authority.token.js';
 import { UNIT_OF_WORK } from '../../../tokens/accounts/accounts-unit-of-work.token.js';
 
 /**
@@ -22,13 +22,13 @@ import { UNIT_OF_WORK } from '../../../tokens/accounts/accounts-unit-of-work.tok
  */
 export const completeAccountDeletionProvider: FactoryProvider<CompleteAccountDeletion> = {
   provide: CompleteAccountDeletion,
-  inject: [UNIT_OF_WORK, ACCOUNT_SESSIONS, ACCOUNT_API_TOKENS, OWNED_ORGANIZATIONS, CLOCK],
+  inject: [UNIT_OF_WORK, ACCOUNT_SESSIONS, ACCOUNT_API_TOKENS, ACCOUNT_DELETION_AUTHORITY, CLOCK],
   useFactory: (
     unitOfWork: AccountsUnitOfWork,
     sessions: AccountSessions,
     apiTokens: AccountApiTokens,
-    ownedOrganizations: OwnedOrganizations,
+    authority: AccountDeletionAuthority,
     clock: Clock,
   ): CompleteAccountDeletion =>
-    new CompleteAccountDeletion(unitOfWork, sessions, apiTokens, ownedOrganizations, clock),
+    new CompleteAccountDeletion(unitOfWork, sessions, apiTokens, authority, clock),
 };

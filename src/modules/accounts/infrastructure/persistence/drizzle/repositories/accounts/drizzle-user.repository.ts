@@ -1,5 +1,5 @@
 import type { TransactionDatabase } from '@cadenway/nest-common/database';
-import { and, asc, eq, isNull, lte, or, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, lte, or, sql } from 'drizzle-orm';
 
 import type { DueAccountDeletion } from '../../../../../application/models/deletion/due-account-deletion.model.js';
 import type { UserRepository } from '../../../../../application/ports/outbound/persistence/accounts/user-repository.port.js';
@@ -204,7 +204,7 @@ export class DrizzleUserRepository implements UserRepository {
             or(isNull(users.deletionCheckedAt), lte(users.deletionCheckedAt, checkedBefore)),
           ),
         )
-        .orderBy(asc(users.deleteAt), asc(users.id))
+        .orderBy(sql`coalesce(${users.deletionCheckedAt}, ${users.deleteAt})`, asc(users.id))
         .limit(limit)
         .for('update', { skipLocked: true });
     return rows.flatMap(
@@ -215,21 +215,41 @@ export class DrizzleUserRepository implements UserRepository {
     );
   }
 
-  /**
-   * Method markDeletionChecked
-   *
-   * @description
-   * Records the check that kept a due deletion.
-   *
-   * @param {string} userId - The account.
-   * @param {Date} now - When it was checked.
-   * @returns {Promise<void>} Resolves once written.
-   */
-  public async markDeletionChecked(userId: string, now: Date): Promise<void> {
+  /** Advances the scheduling fence of the locked sweep batch atomically with its jobs. */
+  public async markDeletionsDispatched(userIds: readonly string[], now: Date): Promise<void> {
     await this.db
       .update(users)
-      .set({ deletionCheckedAt: now, updatedAt: sql`now()` })
+      .set({ deletionCheckedAt: now })
+      .where(inArray(users.id, [...userIds]));
+  }
+
+  /** Reads the claim of the account locked by the caller. */
+  public async findDeletionAttempt(userId: string): Promise<string | null> {
+    const [row] = await this.db
+      .select({ attemptId: users.deletionAttemptId })
+      .from(users)
       .where(eq(users.id, userId));
+    return row?.attemptId ?? null;
+  }
+
+  /** Creates a stable database-generated attempt while the caller holds the user lock. */
+  public async claimDeletion(userId: string): Promise<string> {
+    const [row] = await this.db
+      .update(users)
+      .set({ deletionAttemptId: sql`uuidv7()` })
+      .where(and(eq(users.id, userId), isNull(users.deletionAttemptId)))
+      .returning({ attemptId: users.deletionAttemptId });
+    const attemptId = row?.attemptId;
+    if (attemptId == null) throw new Error('The locked account could not be claimed.');
+    return attemptId;
+  }
+
+  /** Releases only this attempt after an explicit ownership refusal. */
+  public async keepDeletion(userId: string, attemptId: string, now: Date): Promise<void> {
+    await this.db
+      .update(users)
+      .set({ deletionAttemptId: null, deletionCheckedAt: now, updatedAt: sql`now()` })
+      .where(and(eq(users.id, userId), eq(users.deletionAttemptId, attemptId)));
   }
 
   /**
@@ -240,13 +260,28 @@ export class DrizzleUserRepository implements UserRepository {
    * pending change of address are deleted by their foreign keys (`on delete cascade`).
    *
    * @param {User} user - The locked account.
+   * @param {string} confirmedAttemptId - The Organization-confirmed claim for a scheduled account.
    * @returns {Promise<void>} Resolves once deleted.
    * @throws {Error} When the stored version moved meanwhile.
    */
-  public async delete(user: User): Promise<void> {
+  public async delete(user: User, confirmedAttemptId?: string): Promise<void> {
+    if (confirmedAttemptId !== undefined) {
+      // The scheduled-delete trigger also fences older workers during a rolling upgrade.
+      await this.db.execute(
+        sql`select set_config('app.account_deletion_attempt_id', ${confirmedAttemptId}, true)`,
+      );
+    }
     const deleted: { id: string }[] = await this.db
       .delete(users)
-      .where(and(eq(users.id, user.id), eq(users.version, user.version)))
+      .where(
+        and(
+          eq(users.id, user.id),
+          eq(users.version, user.version),
+          confirmedAttemptId === undefined
+            ? undefined
+            : eq(users.deletionAttemptId, confirmedAttemptId),
+        ),
+      )
       .returning({ id: users.id });
     if (deleted.length !== 1) {
       throw new Error('The account changed since it was loaded.');

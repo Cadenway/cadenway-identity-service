@@ -202,8 +202,9 @@ None directly. A `member.removed.v1` reaches the sessions through the copy of th
 memberships module). Organization selection requires a live proof that agrees with the copy.
 Introspection confirms the role and membership directly with Organization even if removal or role
 changes have yet to reach the copy. Bound SAML sessions also require proof of their source
-membership. An unavailable proof returns `503 organization.unavailable` and preserves the session
-and its local selection.
+membership. When the source and current organizations differ, both authority reads start
+together outside the transaction. An unavailable proof returns `503 organization.unavailable`
+and preserves the session and its local selection.
 
 The change of an authentication policy, the trust and the forgetting of a device emit nothing: the
 contract declares no event for them. `user.two-step-verification-changed.v1` belongs to the

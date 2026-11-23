@@ -104,18 +104,26 @@ describe('IntrospectToken', () => {
       newDeviceNotice: null,
       samlMembership: { organizationId: ANOTHER_ORGANIZATION, memberId: 'original-member' },
     });
+    let resolveSelected: (proof: ActiveMembership) => void = () => undefined;
+    const selected = new Promise<ActiveMembership>((resolve) => {
+      resolveSelected = resolve;
+    });
     const authority = {
       find: vi.fn((organizationId: string) =>
-        Promise.resolve(
-          organizationId === ATELIER_NORD
-            ? { organizationId, memberId: MEMBER_ID, role: 'admin' as const }
-            : null,
-        ),
+        organizationId === ATELIER_NORD ? selected : Promise.resolve(null),
       ),
     };
     const current = new IntrospectToken(store, tokens, memberships, clock, authority);
-
-    await expect(current.execute({ token: samlSession.token })).resolves.toEqual({ active: false });
+    const result = current.execute({ token: samlSession.token });
+    try {
+      await vi.waitFor(() => {
+        expect(authority.find).toHaveBeenCalledWith(ATELIER_NORD, CAMILLE_ID);
+        expect(authority.find).toHaveBeenCalledWith(ANOTHER_ORGANIZATION, CAMILLE_ID);
+      });
+    } finally {
+      resolveSelected({ organizationId: ATELIER_NORD, memberId: MEMBER_ID, role: 'admin' });
+    }
+    await expect(result).resolves.toEqual({ active: false });
   });
 
   it('answers the current organization and the role of the account there', async () => {

@@ -216,6 +216,8 @@ describe('identity-service account security', () => {
   const apiGateway = keyPair('test-api-gateway');
   const hasher = new Argon2PasswordHasher(pepper);
   const membershipProofs = new Map<string, SearchMembership | Error>();
+  const authoritativeOwners = new Map<string, readonly string[]>();
+  const reserveAtOrganization = vi.fn((userId: string) => authoritativeOwners.get(userId) ?? []);
   const findMembershipProof = vi.fn((organizationId: string, userId: string) => {
     const proof = membershipProofs.get(`${organizationId}/${userId}`);
     return proof instanceof Error ? Promise.reject(proof) : Promise.resolve(proof ?? null);
@@ -521,7 +523,10 @@ describe('identity-service account security', () => {
     vi.stubEnv('PASSWORD_PEPPER', pepper);
     vi.stubEnv('WEBAUTHN_RP_ID', 'app.cadenway.localhost');
     vi.stubEnv('WEBAUTHN_ORIGINS', 'http://app.cadenway.localhost');
-    organizationAuthority = await startOrganizationMembershipAuthority(findMembershipProof);
+    organizationAuthority = await startOrganizationMembershipAuthority(
+      findMembershipProof,
+      reserveAtOrganization,
+    );
     vi.stubEnv('ORGANIZATION_SERVICE_URL', organizationAuthority.origin);
     vi.stubEnv('IDENTITY_SERVICE_INTERNAL_TOKEN_PRIVATE_JWK', organizationAuthority.privateJwk);
 
@@ -1791,11 +1796,16 @@ describe('identity-service account security', () => {
         ).toBe(202);
       }
       const organization = randomUUID();
-      const ownerMembership = await seedMembership(kept.userId, 'owner', organization);
+      // Identity's event-fed copy has not seen this ownership.
+      authoritativeOwners.set(kept.userId, [organization]);
       await migrator.query(
         `update users set delete_at = now() - interval '1 minute' where id = any($1::uuid[])`,
         [[kept.userId, deleted.userId]],
       );
+      // A previous worker's SQL cannot bypass the authority during cutover or rollback.
+      await expect(
+        systemQuery('delete from users where id = $1 returning id', [kept.userId]),
+      ).rejects.toMatchObject({ code: '23514' });
 
       await app.get(EnqueueDueAccountDeletions, { strict: false }).execute();
       await vi.waitFor(
@@ -1808,9 +1818,11 @@ describe('identity-service account security', () => {
       await vi.waitFor(
         async () => {
           const rows = await migrator.query<{ checked: boolean }>(
-            'select deletion_checked_at is not null as checked from users where id = $1',
+            `select deletion_checked_at is not null and deletion_attempt_id is null as checked
+             from users where id = $1`,
             [kept.userId],
           );
+          expect(reserveAtOrganization).toHaveBeenCalledWith(kept.userId, expect.any(String));
           expect(rows.rows).toEqual([{ checked: true }]);
         },
         { timeout: 30_000, interval: 250 },
@@ -1848,9 +1860,7 @@ describe('identity-service account security', () => {
         (await events('user.deleted.v1')).some((payload) => payload.userId === kept.userId),
       ).toBe(false);
 
-      await systemQuery('update memberships set removed_at = now() where id = $1', [
-        ownerMembership,
-      ]);
+      authoritativeOwners.delete(kept.userId);
       await migrator.query(
         `update users set deletion_checked_at = now() - interval '61 minutes' where id = $1`,
         [kept.userId],
