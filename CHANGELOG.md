@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.4.0](https://github.com/Cadenway/cadenway-identity-service/compare/v0.3.0...v0.4.0) (2026-11-23)
+
+
+### Features
+
+* **accounts:** add the security of the account ([#31](https://github.com/Cadenway/cadenway-identity-service/issues/31)) ([79be172](https://github.com/Cadenway/cadenway-identity-service/commit/79be1726f470459d6b8aff796531c319094abdbc))
+* **accounts:** add two-step verification and the organization authentication policy ([#32](https://github.com/Cadenway/cadenway-identity-service/issues/32)) ([88d63f4](https://github.com/Cadenway/cadenway-identity-service/commit/88d63f4d40c50398c27d8bb8d3fb0c7a09011f26))
+* add the organization context, personal api tokens and the profile update ([#27](https://github.com/Cadenway/cadenway-identity-service/issues/27)) ([d980968](https://github.com/Cadenway/cadenway-identity-service/commit/d980968e7db9a01cf4d3835847070ef9b9259bed))
+* **identity:** bind federated sign-in to current membership ([#37](https://github.com/Cadenway/cadenway-identity-service/issues/37)) ([26d4d02](https://github.com/Cadenway/cadenway-identity-service/commit/26d4d02f8b32cf97e25e9245196992e70bda2485))
+* **identity:** issue and redeem single-use realtime tickets ([#34](https://github.com/Cadenway/cadenway-identity-service/issues/34)) ([e169b60](https://github.com/Cadenway/cadenway-identity-service/commit/e169b60586bf0d223c2e52a98e95aa577422cc05))
+* **identity:** reserve and manage account avatars ([#35](https://github.com/Cadenway/cadenway-identity-service/issues/35)) ([312877a](https://github.com/Cadenway/cadenway-identity-service/commit/312877a9339e33c709ae313eb5f1b066ecb47f21))
+* **identity:** resolve current verified activity email recipients ([#36](https://github.com/Cadenway/cadenway-identity-service/issues/36)) ([8fb38fe](https://github.com/Cadenway/cadenway-identity-service/commit/8fb38fe34018fddbe5140c3b1162c03b36a2c12d))
+
+
+### Bug Fixes
+
+* **accounts:** confirm durable account deletion before erasure ([#40](https://github.com/Cadenway/cadenway-identity-service/issues/40)) ([b864af8](https://github.com/Cadenway/cadenway-identity-service/commit/b864af8ba17c12400d2e544c4f6743e2aa051b67))
+* **identity:** retire inactive authentication counters ([#39](https://github.com/Cadenway/cadenway-identity-service/issues/39)) ([10fb5fd](https://github.com/Cadenway/cadenway-identity-service/commit/10fb5fdd6ab538c512798630867b3154f56faeaa))
+* **identity:** revoke reset links after a password change ([#38](https://github.com/Cadenway/cadenway-identity-service/issues/38)) ([0b9f265](https://github.com/Cadenway/cadenway-identity-service/commit/0b9f265aac34c8c9c3f9a01816837c1918b0fbb6))
+* **memberships:** keep retrying member events for a day and adopt the kit contract codes ([#29](https://github.com/Cadenway/cadenway-identity-service/issues/29)) ([c0b685d](https://github.com/Cadenway/cadenway-identity-service/commit/c0b685d4e5f335d9984357bdf7d0cf125128dbc2))
+
 ## [0.3.0](https://github.com/Cadenway/cadenway-identity-service/compare/v0.2.0...v0.3.0) (2026-11-16)
 
 
