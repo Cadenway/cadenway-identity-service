@@ -78,6 +78,13 @@
       "when": 1795423389237,
       "tag": "0010_account_deletion_attempt",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1795423978386,
+      "tag": "0011_outbox_leases",
+      "breakpoints": true
     }
   ]
 }
