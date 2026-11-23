@@ -16,10 +16,8 @@ const maximumProblemBytes = 64 * 1024;
 
 async function isOwnerRefusal(response: Response): Promise<boolean> {
   const mediaType = response.headers.get('content-type')?.split(';', 1)[0]?.trim();
-  if (mediaType?.toLowerCase() !== 'application/problem+json' || response.body === null) {
-    void response.body?.cancel().catch(() => undefined);
+  if (mediaType?.toLowerCase() !== 'application/problem+json' || response.body === null)
     return false;
-  }
   const reader = response.body.getReader();
   const decoder = new TextDecoder('utf-8', { fatal: true });
   let bytes = 0;
@@ -34,7 +32,18 @@ async function isOwnerRefusal(response: Response): Promise<boolean> {
     }
     return ownerRefusal.safeParse(JSON.parse(body + decoder.decode())).success;
   } finally {
-    void reader.cancel().catch(() => undefined);
+    reader.releaseLock();
+  }
+}
+
+async function isEmptyConfirmation(response: Response): Promise<boolean> {
+  const length = response.headers.get('content-length');
+  if (length !== null && length !== '0') return false;
+  if (response.body === null) return true;
+  const reader = response.body.getReader();
+  try {
+    return (await reader.read()).done;
+  } finally {
     reader.releaseLock();
   }
 }
@@ -75,11 +84,26 @@ export class OrganizationDeletionAuthority implements AccountDeletionAuthority {
         cache: 'no-store',
         signal: AbortSignal.timeout(1_000),
       });
-      if (response.status === 409) {
-        if (await isOwnerRefusal(response)) return 'owner';
-      } else {
+      try {
+        const directives = response.headers
+          .get('cache-control')
+          ?.toLowerCase()
+          .split(',')
+          .map((value) => value.trim());
+        if (
+          directives?.length === 2 &&
+          directives.includes('private') &&
+          directives.includes('no-store')
+        ) {
+          if (response.status === 409 && (await isOwnerRefusal(response))) return 'owner';
+          if (
+            (response.status === 201 || response.status === 204) &&
+            (await isEmptyConfirmation(response))
+          )
+            return 'reserved';
+        }
+      } finally {
         void response.body?.cancel().catch(() => undefined);
-        if (response.status === 201 || response.status === 204) return 'reserved';
       }
     } catch {
       // Send only a fixed error to the retry worker.

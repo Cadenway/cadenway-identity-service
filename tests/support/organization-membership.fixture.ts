@@ -32,6 +32,7 @@ export async function startOrganizationMembershipAuthority(
             request.url ?? '',
           )
         : null;
+    if (match !== null) response.setHeader('Cache-Control', 'private, no-store');
     if (token?.startsWith('Bearer ') !== true) {
       response.writeHead(400).end();
       return;
