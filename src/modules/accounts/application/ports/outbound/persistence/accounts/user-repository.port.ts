@@ -85,17 +85,17 @@ export interface UserRepository {
    */
   findDueDeletions(now: Date, checkedBefore: Date, limit: number): Promise<DueAccountDeletion[]>;
 
-  /**
-   * Method markDeletionChecked
-   *
-   * @description
-   * Records that a due deletion was checked and kept, so that the sweep claims it again later.
-   *
-   * @param {string} userId - The account.
-   * @param {Date} now - When it was checked.
-   * @returns {Promise<void>} Resolves once written.
-   */
-  markDeletionChecked(userId: string, now: Date): Promise<void>;
+  /** Defers accounts whose jobs were dispatched or already existed in this sweep. */
+  markDeletionsDispatched(userIds: readonly string[], now: Date): Promise<void>;
+
+  /** Reads the stable claim for the account locked by the caller. */
+  findDeletionAttempt(userId: string): Promise<string | null>;
+
+  /** Assigns a UUIDv7 claim to a locked due account without a claim. */
+  claimDeletion(userId: string): Promise<string>;
+
+  /** Releases a claim definitively refused by Organization and records the check. */
+  keepDeletion(userId: string, attemptId: string, now: Date): Promise<void>;
 
   /**
    * Method delete
@@ -105,9 +105,10 @@ export interface UserRepository {
    * pending change of address go with it.
    *
    * @param {User} user - The locked account.
+   * @param {string} confirmedAttemptId - The Organization-confirmed claim for a scheduled account.
    * @returns {Promise<void>} Resolves once deleted.
    * @throws {Error} When the stored version moved meanwhile: a defect, since the row is locked.
    */
-  delete(user: User): Promise<void>;
+  delete(user: User, confirmedAttemptId?: string): Promise<void>;
   // #endregion
 }

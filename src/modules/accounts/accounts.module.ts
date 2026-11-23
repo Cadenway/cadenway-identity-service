@@ -12,6 +12,7 @@ import { accountsUnitOfWorkProvider } from './composition/providers/adapters/acc
 import { authenticationCounterSweepProvider } from './composition/providers/adapters/accounts/authentication-counter-sweep.provider.js';
 import { clockProvider } from './composition/providers/adapters/accounts/clock.provider.js';
 import { completeAccountDeletionHandlerProvider } from './composition/providers/adapters/accounts/complete-account-deletion-handler.provider.js';
+import { accountDeletionAuthorityProvider } from './composition/providers/adapters/accounts/account-deletion-authority.provider.js';
 import { compromisedPasswordsProvider } from './composition/providers/adapters/accounts/compromised-passwords.provider.js';
 import { deviceReaderProvider } from './composition/providers/adapters/accounts/device-reader.provider.js';
 import { oneTimeCodeSecretsProvider } from './composition/providers/adapters/accounts/one-time-code-secrets.provider.js';
@@ -122,6 +123,7 @@ import { TwoStepVerificationController } from './presentation/http/controllers/t
     accountSessionsProvider,
     accountApiTokensProvider,
     ownedOrganizationsProvider,
+    accountDeletionAuthorityProvider,
     clockProvider,
     authenticatorAppSecretsProvider,
     backupCodeSecretsProvider,

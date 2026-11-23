@@ -349,10 +349,21 @@ None.
   first (`account.organization-owner`), then to a session without a recent authentication. It is
   scheduled 30 days ahead with the next version; every session (the one of the request included) and
   every personal API token are revoked at once, and a pending change of address is dropped. A
-  sign-in by password or by code cancels it, with the next version (`deletionCancelled`); nothing
-  else does. At `deleteAt` the durable job checks the copy of the memberships again: an owner then is
-  kept, still scheduled, and checked again an hour later until it owns none or signs in; otherwise
-  the account is erased (decision 9).
+  sign-in before the job claims the deletion cancels it, with the next version
+  (`deletionCancelled`). At `deleteAt` the job stores a stable UUIDv7 attempt under the account row
+  lock. It requests a reservation from Organization outside the SQL transaction, with the
+  unscoped Identity system actor. A sign-in waits for that lock and cannot cancel a claimed
+  attempt. A definitive owner refusal releases the claim, keeps the account scheduled and checks
+  it again an hour later. An uncertain response or a rollback preserves the attempt for replay.
+  Only confirmation of the same attempt permits erasure and its outbox write in one transaction.
+  Apply Identity migration `0010` and upgrade all Organization membership writers before enabling
+  the new Identity workers. The migration's delete trigger leaves scheduled accounts intact when
+  a previous worker lacks a confirmed attempt, including after a rollback. Retain the migration
+  and rollback images for both services that honor the claims and reservations once work can
+  be reserved. Pause account-deletion workers and drain in-flight attempts before restoring
+  either database. Reconcile outstanding claims against Organization before resuming the workers.
+  Replays use the same attempt and must revalidate with Organization. Keep deletion paused if
+  a restore leaves conflicting evidence between the services.
 - Erased with the account: the row of `users` (name, address, profile, preferences), its password,
   codes, reset links, pending change of address and two-step verification (app, backup codes, keys,
   pending setup and registration, challenge) by their foreign keys, its sessions with their address
@@ -490,15 +501,14 @@ the sessions, api-tokens and memberships modules join the transaction of the use
   together.
 - Completion of the deletion: the sweep (`EnqueueDueAccountDeletions`, job `account.deletion-sweep`,
   every 10 minutes in UTC) claims the due accounts with `for update skip locked` and enqueues one
-  `account.delete` job per account through the connection of its transaction, with the occurrence key
-  `<userId>:<instant it became due or was last checked>`; each job (`CompleteAccountDeletion`) locks
-  the rows of the address, then the account, checks again that its deletion is due and the
-  ownership, and erases the account, appending `user.deleted.v1`, in one transaction
-  (`tests/account-security.int-spec.ts` proves the rollback when that event cannot be written, and
-  that a redelivered job does nothing). The sweep claims the 100 oldest due accounts that are not
-  checked in the last hour: an account whose job is pending or dead-lettered is claimed again, its
-  key deduplicated while pg-boss keeps the job, so 100 dead-lettered accounts would hold back the
-  later ones until their jobs are purged (a day).
+  `account.delete` job per account through the connection of its transaction. The occurrence key
+  combines the account and its original due or last check time. The sweep advances the last
+  check time for its batch in the same transaction, including already-enqueued occurrences.
+  This gives later due accounts a turn even during an authority outage. A new sweep after an
+  hour can redrive unfinished work with a new job occurrence and the same durable attempt ID.
+  The job reserves that attempt outside SQL, then locks the address rows and the account,
+  rechecks the attempt, erases the account and appends `user.deleted.v1` atomically. The
+  account-security integration test covers rollback, a stale ownership copy and replay.
 
 ## Decisions
 

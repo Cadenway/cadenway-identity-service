@@ -71,6 +71,13 @@
       "when": 1795375265964,
       "tag": "0009_federated_sign_in_and_saml_membership",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1795423389237,
+      "tag": "0010_account_deletion_attempt",
+      "breakpoints": true
     }
   ]
 }

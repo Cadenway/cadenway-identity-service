@@ -171,6 +171,9 @@ export class SignInWithCode {
         if (refusal !== null) {
           return refusal;
         }
+        if (user.deleteAt !== null && (await store.users.findDeletionAttempt(user.id)) !== null) {
+          return { reason: 'code-invalid' };
+        }
         return completeFirstFactor(
           store,
           {

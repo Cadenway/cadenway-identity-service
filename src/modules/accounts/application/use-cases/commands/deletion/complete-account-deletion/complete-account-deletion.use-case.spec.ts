@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { User } from '../../../../../domain/aggregates/account/user.aggregate.js';
 import { CodeRequestThrottle } from '../../../../../domain/policies/one-time-codes/code-request-throttle.policy.js';
@@ -7,10 +7,10 @@ import { PasswordLockout } from '../../../../../domain/policies/password/passwor
 import {
   FakeAccountApiTokens,
   FakeAccountSessions,
-  FakeOwnedOrganizations,
   FixedClock,
   InMemoryAccounts,
 } from '../../../../models/accounts/accounts.fixture.js';
+import type { AccountDeletionAuthority } from '../../../../ports/outbound/memberships/accounts/account-deletion-authority.port.js';
 import { CompleteAccountDeletion } from './complete-account-deletion.use-case.js';
 
 /**
@@ -28,7 +28,7 @@ describe('CompleteAccountDeletion', () => {
   let clock: FixedClock;
   let sessions: FakeAccountSessions;
   let apiTokens: FakeAccountApiTokens;
-  let owned: FakeOwnedOrganizations;
+  const reserve = vi.fn<AccountDeletionAuthority['reserve']>();
   let complete: CompleteAccountDeletion;
   let camille: User;
 
@@ -37,8 +37,8 @@ describe('CompleteAccountDeletion', () => {
     clock = new FixedClock('2026-12-09T15:40:00Z');
     sessions = new FakeAccountSessions(clock);
     apiTokens = new FakeAccountApiTokens();
-    owned = new FakeOwnedOrganizations();
-    complete = new CompleteAccountDeletion(accounts, sessions, apiTokens, owned, clock);
+    reserve.mockReset().mockResolvedValue('reserved');
+    complete = new CompleteAccountDeletion(accounts, sessions, apiTokens, { reserve }, clock);
     camille = accounts.seedUser('camille.martin@ateliernord.fr', true, 'hashed:x', DELETE_AT);
   });
 
@@ -74,13 +74,49 @@ describe('CompleteAccountDeletion', () => {
   });
 
   it('keeps an account that owns an organization at deleteAt, and records the check', async () => {
-    owned.owned.set(camille.id, ['019a5f3c-8d2e-7c4a-9b1f-3e5d7a9c1b2f']);
+    reserve.mockResolvedValue('owner');
 
     await expect(complete.execute({ userId: camille.id })).resolves.toEqual({ outcome: 'kept' });
 
     expect(accounts.state.users.get(camille.id)?.deleteAt).toEqual(DELETE_AT);
     expect(accounts.state.deletionChecks.get(camille.id)).toEqual(clock.now());
+    expect(accounts.state.deletionAttempts.has(camille.id)).toBe(false);
     expect(sessions.erased).toEqual([]);
+    expect(accounts.state.events).toEqual([]);
+  });
+
+  it('keeps the durable attempt on an uncertain response and retries it after commit', async () => {
+    reserve.mockRejectedValueOnce(new Error('Authority unavailable.'));
+    await expect(complete.execute({ userId: camille.id })).rejects.toThrow(
+      'Authority unavailable.',
+    );
+    const attemptId = accounts.state.deletionAttempts.get(camille.id);
+    expect(attemptId).toEqual(expect.any(String));
+    expect(accounts.state.users.has(camille.id)).toBe(true);
+    expect(accounts.state.events).toEqual([]);
+
+    await expect(complete.execute({ userId: camille.id })).resolves.toEqual({ outcome: 'deleted' });
+    expect(reserve.mock.calls).toEqual([
+      [camille.id, attemptId],
+      [camille.id, attemptId],
+    ]);
+    expect(accounts.state.events).toHaveLength(1);
+  });
+
+  it('honors the current ownership when an earlier reservation cannot be replayed after recovery', async () => {
+    reserve
+      .mockRejectedValueOnce(new Error('Confirmation missing.'))
+      .mockResolvedValueOnce('owner');
+    await expect(complete.execute({ userId: camille.id })).rejects.toThrow('Confirmation missing.');
+    const attemptId = accounts.state.deletionAttempts.get(camille.id);
+
+    await expect(complete.execute({ userId: camille.id })).resolves.toEqual({ outcome: 'kept' });
+    expect(reserve.mock.calls).toEqual([
+      [camille.id, attemptId],
+      [camille.id, attemptId],
+    ]);
+    expect(accounts.state.users.has(camille.id)).toBe(true);
+    expect(accounts.state.deletionAttempts.has(camille.id)).toBe(false);
     expect(accounts.state.events).toEqual([]);
   });
 
@@ -89,7 +125,7 @@ describe('CompleteAccountDeletion', () => {
       accounts,
       sessions,
       apiTokens,
-      owned,
+      { reserve },
       new FixedClock('2026-12-09T15:29:00Z'),
     );
     await expect(early.execute({ userId: camille.id })).resolves.toEqual({ outcome: 'not-due' });

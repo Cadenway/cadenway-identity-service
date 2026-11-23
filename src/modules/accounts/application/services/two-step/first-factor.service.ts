@@ -2,6 +2,8 @@ import type { User } from '../../../domain/aggregates/account/user.aggregate.js'
 import { SignInChallenge } from '../../../domain/aggregates/two-step/sign-in-challenge.aggregate.js';
 import type { TwoStepVerification } from '../../../domain/aggregates/two-step/two-step-verification.aggregate.js';
 import type { FederatedChallengeBinding } from '../../../domain/value-objects/federated-sign-in/federated-challenge-binding.value-object.js';
+import { AccountRefusal } from '../../models/authentication/account-refusal.model.js';
+import { FederatedFinishRefusal } from '../../models/authentication/federated-finish-refusal.model.js';
 import type { SessionClient } from '../../models/sessions/session-client.model.js';
 import type { SamlMembership } from '../../models/sessions/saml-membership.model.js';
 import type { IssuedChallengeToken } from '../../models/two-step/issued-challenge-token.model.js';
@@ -58,6 +60,10 @@ export async function completeFirstFactor(
   },
   now: Date,
 ): Promise<SignInOutcome> {
+  if (user.deleteAt !== null && (await store.users.findDeletionAttempt(user.id)) !== null) {
+    if (request.federatedBinding !== undefined) throw new FederatedFinishRefusal();
+    throw new AccountRefusal({ reason: 'invalid-credentials', remainingAttempts: 0 });
+  }
   const verification: TwoStepVerification | null = await store.twoStep.find(user.id);
   if (verification === null) {
     return {

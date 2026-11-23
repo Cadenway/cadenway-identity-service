@@ -95,6 +95,19 @@ describe('SignInWithPassword', () => {
     ]);
   });
 
+  it('cannot cancel a deletion after its stable attempt was claimed', async () => {
+    const scheduled = camille.scheduleDeletion(clock.now());
+    accounts.state.users.set(camille.id, scheduled);
+    accounts.state.deletionAttempts.set(camille.id, '019a6c30-7a8b-7c9d-8e0f-1a2b3c4d8e91');
+
+    await expect(signIn.execute(SIGN_IN)).rejects.toMatchObject({
+      refusal: { reason: 'invalid-credentials' },
+    });
+    expect(sessions.opened).toEqual([]);
+    expect(accounts.state.users.get(camille.id)?.deleteAt).toEqual(scheduled.deleteAt);
+    expect(accounts.state.events).toEqual([]);
+  });
+
   it('counts down the attempts, then locks for 15 minutes even the right password', async () => {
     const remaining: unknown[] = [];
     for (let attempt: number = 0; attempt < 4; attempt += 1) {

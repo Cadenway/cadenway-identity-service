@@ -107,6 +107,12 @@ export class EnqueueDueAccountDeletions {
             enqueued += 1;
           }
         }
+        if (due.length > 0) {
+          await store.users.markDeletionsDispatched(
+            due.map(({ userId }) => userId),
+            now,
+          );
+        }
         return { claimed: due.length, enqueued };
       },
     );

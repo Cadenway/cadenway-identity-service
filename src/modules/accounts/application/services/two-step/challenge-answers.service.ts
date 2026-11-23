@@ -85,6 +85,9 @@ export async function lockChallenge(
   if (user === null || challenge?.isUsableAt(now) !== true || verification === null) {
     return { reason: 'challenge-expired' };
   }
+  if (user.deleteAt !== null && (await store.users.findDeletionAttempt(user.id)) !== null) {
+    return { reason: 'challenge-expired' };
+  }
   const binding = challenge.snapshot.federatedBinding;
   if (
     binding !== null &&
